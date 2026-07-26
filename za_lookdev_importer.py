@@ -2,7 +2,7 @@
 bl_info = {
     "name": "Z-A Exporter - Lookdev",
     "author": "Z-A Exporter",
-    "version": (1, 0, 0),
+    "version": (1, 1, 2),
     "blender": (3, 6, 0),
     "location": "View3D > Sidebar > Z-A Exporter",
     "description": "Live FBX lookdev transfer from Maya with Principled material rebuilding.",
@@ -29,6 +29,7 @@ LIVELINK_PROTOCOL = "za_lookdev_livelink"
 LIVELINK_VERSION = 1
 MAX_MESSAGE_BYTES = 32 * 1024 * 1024
 ROOT_COLLECTION_NAME = "Z-A Lookdev Import"
+BUILD_VERSION = "1.1.2"
 
 _server = None
 _server_thread = None
@@ -67,8 +68,10 @@ def import_lookdev_package(package_folder, package_data=None, import_scale=1.0):
         if not mesh_record:
             warnings.append('No Maya mesh record matched "{0}".'.format(obj.name))
             obj.data.materials.clear()
+            _remove_object_namespace(obj)
             continue
         used_record_ids.add(id(mesh_record))
+        _rename_mesh_from_record(obj, mesh_record)
         assignment = _assign_mesh_materials(
             obj,
             mesh_record,
@@ -76,6 +79,18 @@ def import_lookdev_package(package_folder, package_data=None, import_scale=1.0):
             warnings,
         )
         assignments.append(assignment)
+
+    namespace_prefixes = _package_namespace_prefixes(package_data)
+    for obj in imported_objects:
+        _remove_object_namespace(obj, namespace_prefixes)
+
+    # The scene was cleared before the FBX import, so scanning the active scene
+    # is the most reliable way to include every imported mesh object.
+    scene_meshes = [
+        obj for obj in bpy.context.scene.objects
+        if obj.type == "MESH"
+    ]
+    subdivision_count = _add_subdivision_modifiers(scene_meshes, warnings)
 
     for material in list(bpy.data.materials):
         if material in before_materials:
@@ -93,9 +108,88 @@ def import_lookdev_package(package_folder, package_data=None, import_scale=1.0):
         "object_count": len(imported_objects),
         "mesh_count": len(imported_meshes),
         "material_count": len(material_cache),
+        "subdivision_count": subdivision_count,
         "assignments": assignments,
         "warnings": warnings,
     }
+
+
+def _add_subdivision_modifiers(mesh_objects, warnings=None):
+    modifier_name = "Z-A Subdivision"
+    modified_count = 0
+    warnings = warnings if warnings is not None else []
+
+    for obj in mesh_objects:
+        if obj.type != "MESH":
+            continue
+
+        try:
+            modifier = obj.modifiers.get(modifier_name)
+            if modifier is not None and modifier.type != "SUBSURF":
+                obj.modifiers.remove(modifier)
+                modifier = None
+            if modifier is None:
+                modifier = obj.modifiers.new(name=modifier_name, type="SUBSURF")
+
+            modifier.subdivision_type = "CATMULL_CLARK"
+            modifier.levels = 2
+            modifier.render_levels = 2
+            modifier.boundary_smooth = "PRESERVE_CORNERS"
+            modifier.use_limit_surface = True
+            modifier.quality = 3
+            modifier.uv_smooth = "PRESERVE_BOUNDARIES"
+            modifier.use_creases = True
+            modifier.use_custom_normals = False
+            modifier.show_viewport = True
+            modifier.show_render = True
+
+            if (
+                modifier.type != "SUBSURF"
+                or modifier.levels != 2
+                or modifier.render_levels != 2
+                or modifier.boundary_smooth != "PRESERVE_CORNERS"
+                or not modifier.use_limit_surface
+                or modifier.quality != 3
+                or modifier.uv_smooth != "PRESERVE_BOUNDARIES"
+                or not modifier.use_creases
+                or modifier.use_custom_normals
+            ):
+                raise RuntimeError("modifier settings could not be verified")
+            modified_count += 1
+        except Exception as exc:
+            warnings.append(
+                'Subdivision could not be added to "{0}": {1}'.format(
+                    obj.name,
+                    exc,
+                )
+            )
+
+    return modified_count
+
+
+def _rename_mesh_from_record(obj, mesh_record):
+    clean_name = (
+        mesh_record.get("mesh")
+        or _namespace_free_name(mesh_record.get("mesh_full_name"))
+        or _namespace_free_name(obj.name)
+    )
+    if clean_name:
+        obj.name = clean_name
+        if obj.data:
+            obj.data.name = clean_name
+
+
+def _remove_object_namespace(obj, namespace_prefixes=None):
+    clean_name = _namespace_free_import_name(obj.name, namespace_prefixes)
+    if clean_name:
+        obj.name = clean_name
+    if obj.data:
+        clean_data_name = _namespace_free_import_name(
+            obj.data.name,
+            namespace_prefixes,
+        )
+        if clean_data_name:
+            obj.data.name = clean_data_name
 
 
 def _assign_mesh_materials(obj, mesh_record, material_cache, warnings):
@@ -133,7 +227,12 @@ def _build_principled_material(material_record, warnings):
         or material_record.get("material")
         or "Material"
     )
-    material_name = _unique_material_name("ZA_" + _safe_name(maya_name))
+    display_name = (
+        material_record.get("material")
+        or _namespace_free_name(maya_name)
+        or "Material"
+    )
+    material_name = _unique_material_name("ZA_" + _safe_name(display_name))
     material = bpy.data.materials.new(material_name)
     material["za_generated"] = True
     material["za_maya_material"] = maya_name
@@ -540,6 +639,41 @@ def _safe_name(value):
     return value.strip("_") or "Material"
 
 
+def _namespace_free_name(value):
+    value = str(value or "")
+    value = value.split("|")[-1].split("/")[-1].split("\\")[-1]
+    return value.rsplit(":", 1)[-1].strip()
+
+
+def _package_namespace_prefixes(package_data):
+    prefixes = set()
+    for record in package_data.get("meshes") or []:
+        for field in ("mesh_full_name", "mesh_path", "shape", "shape_path"):
+            value = str(record.get(field) or "")
+            tail = value.split("|")[-1].split("/")[-1].split("\\")[-1]
+            if ":" in tail:
+                prefixes.add(tail.rsplit(":", 1)[0])
+    return sorted(prefixes, key=len, reverse=True)
+
+
+def _namespace_free_import_name(value, namespace_prefixes=None):
+    value = str(value or "")
+    tail = value.split("|")[-1].split("/")[-1].split("\\")[-1]
+    if ":" in tail:
+        return tail.rsplit(":", 1)[-1].strip()
+
+    for prefix in namespace_prefixes or []:
+        candidates = (
+            prefix + "_",
+            prefix.replace(":", "_") + "_",
+            prefix.replace(":", "__") + "__",
+        )
+        for candidate in candidates:
+            if tail.startswith(candidate):
+                return tail[len(candidate):].strip()
+    return tail.strip()
+
+
 def _normalize_name(value):
     return _strip_duplicate(str(value or "")).strip().lower()
 
@@ -588,16 +722,34 @@ def _start_listener(host, port):
 
 def _stop_listener():
     global _server, _server_thread, _stop_event, _status
-    if _stop_event:
-        _stop_event.set()
-    if _server:
+    server = _server
+    server_thread = _server_thread
+    stop_event = _stop_event
+
+    if stop_event:
+        stop_event.set()
+    if server:
         try:
-            _server.close()
+            server.close()
         except Exception:
             pass
     _server = None
     _server_thread = None
     _stop_event = None
+
+    try:
+        if bpy.app.timers.is_registered(_process_messages):
+            bpy.app.timers.unregister(_process_messages)
+    except Exception:
+        pass
+
+    if (
+        server_thread
+        and server_thread.is_alive()
+        and server_thread is not threading.current_thread()
+    ):
+        server_thread.join(timeout=1.0)
+
     _status = "Listener is stopped."
 
 
@@ -648,9 +800,13 @@ def _process_messages():
             package_data=payload.get("package_json"),
             import_scale=scene.za_import_scale,
         )
-        _status = "Imported {0} mesh(es), {1} material(s).".format(
+        _status = (
+            "Imported {0} mesh(es), {1} material(s), "
+            "{2} subdivision modifier(s)."
+        ).format(
             result["mesh_count"],
             result["material_count"],
+            result["subdivision_count"],
         )
         for warning in result.get("warnings") or []:
             print("Z-A Lookdev warning: {0}".format(warning))
@@ -710,6 +866,7 @@ class ZA_PT_lookdev(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         scene = context.scene
+        layout.label(text="Build {0}".format(BUILD_VERSION), icon="FILE_REFRESH")
         layout.prop(scene, "za_import_scale", text="FBX Scale")
         layout.prop(scene, "za_livelink_host", text="Host")
         layout.prop(scene, "za_livelink_port", text="Port")

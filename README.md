@@ -150,19 +150,35 @@ workspace/console üzerinden çalıştırabilirsin:
 
 ```python
 import sys
-import importlib
 
-tool_path = r"D:\GitHub_Repository\mayatools\ZA_Exporter"
-if tool_path not in sys.path:
-    sys.path.append(tool_path)
+importer_path = r"D:\GitHub_Repository\mayatools\ZA_Exporter\za_lookdev_importer.py"
 
-import za_lookdev_importer as za
-try:
-    za.unregister()
-except Exception:
-    pass
-importlib.reload(za)
-za.register()
+old_module = sys.modules.pop("za_lookdev_importer", None)
+if old_module is not None:
+    try:
+        old_module.unregister()
+    except Exception:
+        pass
+
+old_runtime = globals().get("_ZA_LOOKDEV_RUNTIME")
+if old_runtime:
+    try:
+        old_runtime["unregister"]()
+    except Exception:
+        pass
+
+with open(importer_path, "r", encoding="utf-8") as source_file:
+    source = source_file.read()
+
+runtime = {
+    "__name__": "za_lookdev_runtime",
+    "__file__": importer_path,
+}
+exec(compile(source, importer_path, "exec"), runtime)
+runtime["register"]()
+globals()["_ZA_LOOKDEV_RUNTIME"] = runtime
+
+print("Z-A Lookdev Importer Build", runtime["BUILD_VERSION"])
 ```
 
 `View3D > N Panel > Z-A Exporter` içinde:
