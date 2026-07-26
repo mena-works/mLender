@@ -149,36 +149,94 @@ Add-on olarak `za_lookdev_importer.py` dosyasını kurabilir veya Scripting
 workspace/console üzerinden çalıştırabilirsin:
 
 ```python
+import gc
+import socket
 import sys
+import types
+
+import bpy
 
 importer_path = r"D:\GitHub_Repository\mayatools\ZA_Exporter\za_lookdev_importer.py"
+module_name = "za_lookdev_importer"
+protocol_name = "za_lookdev_livelink"
 
-old_module = sys.modules.pop("za_lookdev_importer", None)
-if old_module is not None:
+# Stop every reachable previous Z-A runtime.
+old_runtimes = [
+    sys.modules.pop(module_name, None),
+    globals().pop("_ZA_LOOKDEV_RUNTIME", None),
+]
+for old_runtime in old_runtimes:
+    if old_runtime is None:
+        continue
     try:
-        old_module.unregister()
+        unregister = (
+            old_runtime.get("unregister")
+            if isinstance(old_runtime, dict)
+            else getattr(old_runtime, "unregister", None)
+        )
+        if unregister:
+            unregister()
     except Exception:
         pass
 
-old_runtime = globals().get("_ZA_LOOKDEV_RUNTIME")
-if old_runtime:
+# Remove timer callbacks left by older importlib.reload sessions.
+for item in list(gc.get_objects()):
     try:
-        old_runtime["unregister"]()
+        if (
+            isinstance(item, types.FunctionType)
+            and item.__name__ == "_process_messages"
+            and item.__globals__.get("LIVELINK_PROTOCOL") == protocol_name
+            and bpy.app.timers.is_registered(item)
+        ):
+            bpy.app.timers.unregister(item)
     except Exception:
         pass
 
+# Close an orphaned Z-A listener still holding the default port.
+for item in list(gc.get_objects()):
+    try:
+        if isinstance(item, socket.socket):
+            address = item.getsockname()
+            if isinstance(address, tuple) and len(address) > 1 and address[1] == 50505:
+                item.close()
+    except Exception:
+        pass
+
+# Remove stale Blender registrations.
+for class_name in (
+    "ZA_OT_start_listener",
+    "ZA_OT_stop_listener",
+    "ZA_PT_lookdev",
+):
+    old_class = getattr(bpy.types, class_name, None)
+    if old_class:
+        try:
+            bpy.utils.unregister_class(old_class)
+        except Exception:
+            pass
+
+for property_name in (
+    "za_import_scale",
+    "za_livelink_host",
+    "za_livelink_port",
+):
+    if hasattr(bpy.types.Scene, property_name):
+        delattr(bpy.types.Scene, property_name)
+
+# Read and execute the exact source file without importlib/bytecode cache.
 with open(importer_path, "r", encoding="utf-8") as source_file:
     source = source_file.read()
 
-runtime = {
-    "__name__": "za_lookdev_runtime",
-    "__file__": importer_path,
-}
-exec(compile(source, importer_path, "exec"), runtime)
-runtime["register"]()
+runtime = types.ModuleType(module_name)
+runtime.__file__ = importer_path
+runtime.__package__ = ""
+sys.modules[module_name] = runtime
+
+exec(compile(source, importer_path, "exec"), runtime.__dict__)
+runtime.register()
 globals()["_ZA_LOOKDEV_RUNTIME"] = runtime
 
-print("Z-A Lookdev Importer Build", runtime["BUILD_VERSION"])
+print("Z-A Lookdev Importer Build", runtime.BUILD_VERSION)
 ```
 
 `View3D > N Panel > Z-A Exporter` içinde:

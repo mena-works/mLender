@@ -2,7 +2,7 @@
 bl_info = {
     "name": "Z-A Exporter - Lookdev",
     "author": "Z-A Exporter",
-    "version": (1, 1, 2),
+    "version": (1, 1, 3),
     "blender": (3, 6, 0),
     "location": "View3D > Sidebar > Z-A Exporter",
     "description": "Live FBX lookdev transfer from Maya with Principled material rebuilding.",
@@ -29,7 +29,7 @@ LIVELINK_PROTOCOL = "za_lookdev_livelink"
 LIVELINK_VERSION = 1
 MAX_MESSAGE_BYTES = 32 * 1024 * 1024
 ROOT_COLLECTION_NAME = "Z-A Lookdev Import"
-BUILD_VERSION = "1.1.2"
+BUILD_VERSION = "1.1.3"
 
 _server = None
 _server_thread = None
@@ -519,10 +519,47 @@ def _organize_imported_objects(objects):
 
 
 def _clear_scene_and_purge():
+    try:
+        if bpy.context.object and bpy.context.object.mode != "OBJECT":
+            bpy.ops.object.mode_set(mode="OBJECT")
+    except Exception:
+        pass
+
+    # Context deletion clears objects linked to the active view layer.
+    try:
+        bpy.ops.object.select_all(action="SELECT")
+        bpy.ops.object.delete(use_global=True, confirm=False)
+    except Exception:
+        pass
+
+    # Datablock deletion also clears hidden, excluded and other-scene objects.
     for obj in list(bpy.data.objects):
-        bpy.data.objects.remove(obj, do_unlink=True)
+        try:
+            bpy.data.objects.remove(obj, do_unlink=True)
+        except Exception:
+            pass
     for collection in list(bpy.data.collections):
-        bpy.data.collections.remove(collection)
+        try:
+            bpy.data.collections.remove(collection)
+        except Exception:
+            pass
+
+    remaining_ids = list(bpy.data.objects) + list(bpy.data.collections)
+    if remaining_ids and hasattr(bpy.data, "batch_remove"):
+        try:
+            bpy.data.batch_remove(ids=remaining_ids)
+        except Exception:
+            pass
+
+    if bpy.data.objects or bpy.data.collections:
+        raise RuntimeError(
+            "The previous Blender scene could not be cleared completely "
+            "({0} object(s), {1} collection(s) remain).".format(
+                len(bpy.data.objects),
+                len(bpy.data.collections),
+            )
+        )
+
     for data_name in (
         "meshes",
         "curves",
