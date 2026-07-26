@@ -2,7 +2,7 @@
 bl_info = {
     "name": "Z-A Exporter - Lookdev",
     "author": "Z-A Exporter",
-    "version": (1, 1, 3),
+    "version": (1, 2, 1),
     "blender": (3, 6, 0),
     "location": "View3D > Sidebar > Z-A Exporter",
     "description": "Live FBX lookdev transfer from Maya with Principled material rebuilding.",
@@ -11,6 +11,7 @@ bl_info = {
 
 import glob
 import json
+import math
 import os
 import re
 import socket
@@ -21,6 +22,7 @@ except ImportError:
     import Queue as queue
 
 import bpy
+from mathutils import Matrix, Vector
 
 
 LIVELINK_HOST = "127.0.0.1"
@@ -29,7 +31,8 @@ LIVELINK_PROTOCOL = "za_lookdev_livelink"
 LIVELINK_VERSION = 1
 MAX_MESSAGE_BYTES = 32 * 1024 * 1024
 ROOT_COLLECTION_NAME = "Z-A Lookdev Import"
-BUILD_VERSION = "1.1.3"
+LIGHT_COLLECTION_NAME = "Z-A Lights"
+BUILD_VERSION = "1.2.1"
 
 _server = None
 _server_thread = None
@@ -91,6 +94,12 @@ def import_lookdev_package(package_folder, package_data=None, import_scale=1.0):
         if obj.type == "MESH"
     ]
     subdivision_count = _add_subdivision_modifiers(scene_meshes, warnings)
+    light_result = _import_lights(
+        package_data,
+        root_collection,
+        import_scale,
+        warnings,
+    )
 
     for material in list(bpy.data.materials):
         if material in before_materials:
@@ -109,6 +118,9 @@ def import_lookdev_package(package_folder, package_data=None, import_scale=1.0):
         "mesh_count": len(imported_meshes),
         "material_count": len(material_cache),
         "subdivision_count": subdivision_count,
+        "light_count": light_result["light_count"],
+        "light_object_count": light_result["object_count"],
+        "dome_count": light_result["dome_count"],
         "assignments": assignments,
         "warnings": warnings,
     }
@@ -242,13 +254,18 @@ def _build_principled_material(material_record, warnings):
     nodes = material.node_tree.nodes
     links = material.node_tree.links
     nodes.clear()
+    channels = material_record.get("channels") or {}
+
+    if material_record.get("shader_type") == "surfaceShader":
+        _build_surface_shader_material(material, channels, warnings)
+        return material
+
     output = nodes.new("ShaderNodeOutputMaterial")
     output.location = (520, 0)
     bsdf = nodes.new("ShaderNodeBsdfPrincipled")
     bsdf.location = (220, 0)
     links.new(bsdf.outputs.get("BSDF"), output.inputs.get("Surface"))
 
-    channels = material_record.get("channels") or {}
     _apply_channel(material, bsdf, "base_color", channels.get("base_color"), warnings)
     _apply_channel(material, bsdf, "roughness", channels.get("roughness"), warnings)
     _apply_channel(material, bsdf, "metallic", channels.get("metallic"), warnings)
@@ -271,6 +288,70 @@ def _build_principled_material(material_record, warnings):
             )
         )
     return material
+
+
+def _build_surface_shader_material(material, channels, warnings):
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+    output = nodes.new("ShaderNodeOutputMaterial")
+    output.location = (520, 0)
+    emission = nodes.new("ShaderNodeEmission")
+    emission.location = (20, 80)
+    transparent = nodes.new("ShaderNodeBsdfTransparent")
+    transparent.location = (20, -130)
+    mix = nodes.new("ShaderNodeMixShader")
+    mix.location = (280, 0)
+    links.new(transparent.outputs["BSDF"], mix.inputs[1])
+    links.new(emission.outputs["Emission"], mix.inputs[2])
+    links.new(mix.outputs["Shader"], output.inputs["Surface"])
+
+    emission_record = channels.get("emission") or {}
+    emission_texture = emission_record.get("texture") or {}
+    if emission_texture.get("path"):
+        image = _load_image(emission_texture, "emission", warnings)
+        if image:
+            image_node = nodes.new("ShaderNodeTexImage")
+            image_node.name = "ZA_SurfaceShader_Color"
+            image_node.image = image
+            links.new(
+                image_node.outputs["Color"],
+                emission.inputs["Color"],
+            )
+    elif "value" in emission_record:
+        emission.inputs["Color"].default_value = _color4(
+            emission_record.get("value")
+        )
+
+    strength_record = channels.get("emission_strength") or {}
+    emission.inputs["Strength"].default_value = max(
+        0.0,
+        _scalar(strength_record.get("value"), 1.0),
+    )
+
+    opacity_record = channels.get("opacity") or {}
+    opacity_texture = opacity_record.get("texture") or {}
+    if opacity_texture.get("path"):
+        image = _load_image(opacity_texture, "opacity", warnings)
+        if image:
+            image_node = nodes.new("ShaderNodeTexImage")
+            image_node.name = "ZA_SurfaceShader_Opacity"
+            image_node.image = image
+            rgb_to_bw = nodes.new("ShaderNodeRGBToBW")
+            links.new(image_node.outputs["Color"], rgb_to_bw.inputs["Color"])
+            opacity_output = rgb_to_bw.outputs["Val"]
+            if opacity_record.get("invert"):
+                invert = nodes.new("ShaderNodeMath")
+                invert.operation = "SUBTRACT"
+                invert.inputs[0].default_value = 1.0
+                links.new(opacity_output, invert.inputs[1])
+                opacity_output = invert.outputs[0]
+            links.new(opacity_output, mix.inputs[0])
+    else:
+        mix.inputs[0].default_value = max(
+            0.0,
+            min(1.0, _scalar(opacity_record.get("value"), 1.0)),
+        )
+    _enable_alpha(material)
 
 
 def _apply_channel(material, bsdf, channel, record, warnings):
@@ -518,6 +599,481 @@ def _organize_imported_objects(objects):
     return root
 
 
+def _import_lights(package_data, root_collection, import_scale, warnings):
+    records = list(package_data.get("lights") or [])
+    if not records:
+        bpy.context.scene.world = None
+        return {
+            "light_count": 0,
+            "object_count": 0,
+            "dome_count": 0,
+        }
+
+    light_collection = bpy.data.collections.new(LIGHT_COLLECTION_NAME)
+    root_collection.children.link(light_collection)
+    meters_per_unit = _scalar(
+        package_data.get("meters_per_maya_unit"),
+        0.01,
+    )
+    position_scale = meters_per_unit * max(_scalar(import_scale, 1.0), 0.000001)
+    object_count = 0
+    dome_records = []
+
+    for record in records:
+        if str(record.get("light_kind") or "").upper() == "DOME":
+            dome_records.append(record)
+            continue
+        try:
+            _create_light_object(
+                record,
+                light_collection,
+                position_scale,
+                warnings,
+            )
+            object_count += 1
+        except Exception as exc:
+            warnings.append(
+                'Light "{0}" could not be created: {1}'.format(
+                    record.get("full_name") or record.get("name") or "Light",
+                    exc,
+                )
+            )
+
+    dome_count = _create_dome_world(
+        dome_records,
+        light_collection,
+        position_scale,
+        warnings,
+    )
+    return {
+        "light_count": object_count + dome_count,
+        "object_count": object_count,
+        "dome_count": dome_count,
+    }
+
+
+def _create_light_object(record, collection, position_scale, warnings):
+    source_kind = str(record.get("light_kind") or "AREA").upper()
+    area_shape = str(record.get("area_shape") or "RECTANGLE").upper()
+    blender_type = source_kind
+    if source_kind == "IES":
+        blender_type = "SPOT"
+    elif source_kind == "AREA" and area_shape == "SPHERE":
+        blender_type = "POINT"
+    elif blender_type not in ("AREA", "POINT", "SPOT", "SUN"):
+        blender_type = "AREA"
+
+    clean_name = (
+        record.get("name")
+        or _namespace_free_name(record.get("full_name"))
+        or "Light"
+    )
+    data = bpy.data.lights.new(clean_name, blender_type)
+    obj = bpy.data.objects.new(clean_name, data)
+    collection.objects.link(obj)
+    obj.matrix_world = _maya_light_matrix(
+        record.get("transform") or {},
+        position_scale,
+    )
+    obj.scale = (1.0, 1.0, 1.0)
+
+    parameters = record.get("parameters") or {}
+    enabled = bool(record.get("enabled", True))
+    color = _light_color(record)
+    data.color = color
+    _apply_light_temperature(data, record)
+    data.energy = _light_energy(record, blender_type, position_scale)
+    if not enabled:
+        data.energy = 0.0
+
+    if hasattr(data, "use_shadow"):
+        data.use_shadow = bool(parameters.get("cast_shadows", True))
+    if hasattr(data, "diffuse_factor"):
+        data.diffuse_factor = max(0.0, _scalar(parameters.get("diffuse"), 1.0))
+    if hasattr(data, "specular_factor"):
+        data.specular_factor = max(0.0, _scalar(parameters.get("specular"), 1.0))
+    if hasattr(data, "volume_factor"):
+        data.volume_factor = max(0.0, _scalar(parameters.get("volume"), 1.0))
+    if hasattr(data, "normalize") and "normalize" in parameters:
+        data.normalize = bool(parameters.get("normalize"))
+
+    source_scale = _source_light_scale(record)
+    size_x = max(0.0001, source_scale[0] * position_scale)
+    size_y = max(0.0001, source_scale[1] * position_scale)
+    size_z = max(0.0001, source_scale[2] * position_scale)
+
+    if blender_type == "AREA":
+        _configure_area_light(
+            data,
+            area_shape,
+            size_x,
+            size_y,
+            size_z,
+            parameters,
+            warnings,
+            clean_name,
+        )
+    elif blender_type == "SPOT":
+        cone_angle = max(
+            0.1,
+            min(179.0, _scalar(parameters.get("cone_angle"), 45.0)),
+        )
+        falloff_angle = abs(
+            _scalar(parameters.get("falloff_angle"), cone_angle * 0.15)
+        )
+        data.spot_size = math.radians(cone_angle)
+        data.spot_blend = max(
+            0.0,
+            min(1.0, falloff_angle / max(cone_angle * 0.5, 0.0001)),
+        )
+        data.shadow_soft_size = max(
+            0.0,
+            _scalar(parameters.get("shadow_softness"), 0.0) * position_scale,
+        )
+    elif blender_type == "POINT":
+        radius = _scalar(parameters.get("shadow_softness"), 0.0) * position_scale
+        if source_kind == "AREA" and area_shape == "SPHERE":
+            radius = max(size_x, size_y, size_z) * 0.5
+        data.shadow_soft_size = max(0.0, radius)
+    elif blender_type == "SUN" and hasattr(data, "angle"):
+        softness = max(0.0, _scalar(parameters.get("shadow_softness"), 0.0))
+        data.angle = min(math.pi, softness)
+
+    _configure_light_texture_nodes(data, record, warnings)
+    _store_light_metadata(obj, data, record)
+    return obj
+
+
+def _configure_area_light(
+    data,
+    area_shape,
+    size_x,
+    size_y,
+    size_z,
+    parameters,
+    warnings,
+    light_name,
+):
+    if area_shape == "DISK":
+        data.shape = "DISK"
+        data.size = max(size_x, size_y)
+    else:
+        data.shape = "RECTANGLE"
+        data.size = size_x
+        data.size_y = size_y
+
+    if area_shape in ("CYLINDER", "MESH"):
+        warnings.append(
+            '{0} area shape on "{1}" was approximated with a rectangular '
+            "Blender Area light.".format(area_shape.title(), light_name)
+        )
+        if area_shape == "CYLINDER":
+            data.size_y = max(size_y, size_z)
+
+    if hasattr(data, "spread") and "spread" in parameters:
+        spread = max(0.0, min(1.0, _scalar(parameters.get("spread"), 1.0)))
+        data.spread = max(0.0001, spread * math.pi)
+
+
+def _light_energy(record, blender_type, position_scale):
+    effective = _scalar(
+        record.get("effective_intensity"),
+        _scalar(record.get("intensity"), 1.0)
+        * (2.0 ** _scalar(record.get("exposure"), 0.0)),
+    )
+    effective = max(0.0, effective)
+    labels = record.get("enum_labels") or {}
+    units = str(labels.get("units") or "").lower()
+
+    if blender_type == "SUN":
+        return effective
+    if "lumen" in units:
+        return effective / 683.0
+    if "candela" in units:
+        return effective * (4.0 * math.pi) / 683.0
+    if "watt" in units:
+        return effective
+    if "nit" in units or "radiance" in units or "exitance" in units:
+        scale = _source_light_scale(record)
+        area = max(
+            0.000001,
+            scale[0] * scale[1] * position_scale * position_scale,
+        )
+        return effective * area * math.pi / 683.0
+
+    # Redshift's Image unit defaults to intensity 100, while native Maya lights
+    # commonly default to 1. They therefore need separate visual calibration.
+    node_type = str(record.get("node_type") or "").lower()
+    calibration = 10.0 if "redshift" in node_type else 1000.0
+    return effective * calibration
+
+
+def _light_color(record):
+    value = record.get("color") or (1.0, 1.0, 1.0)
+    color = _color4(value)
+    return color[:3]
+
+
+def _apply_light_temperature(data, record):
+    parameters = record.get("parameters") or {}
+    labels = record.get("enum_labels") or {}
+    mode = str(labels.get("color_mode") or "").lower()
+    use_temperature = bool(parameters.get("use_temperature", False))
+    if "temperature" in mode:
+        use_temperature = True
+        if "color and" not in mode and "color+" not in mode:
+            data.color = (1.0, 1.0, 1.0)
+    temperature = max(
+        800.0,
+        min(20000.0, _scalar(parameters.get("temperature"), 6500.0)),
+    )
+    if hasattr(data, "use_temperature"):
+        data.use_temperature = use_temperature
+    if hasattr(data, "temperature"):
+        data.temperature = temperature
+
+
+def _configure_light_texture_nodes(data, record, warnings):
+    color_texture = record.get("color_texture") or {}
+    ies_record = record.get("ies_profile") or {}
+    color_path = color_texture.get("path") or ""
+    ies_path = ies_record.get("path") or ""
+    decay_label = str(
+        (record.get("enum_labels") or {}).get("decay") or ""
+    ).lower()
+    custom_decay = "linear" in decay_label or any(
+        token in decay_label for token in ("none", "constant")
+    )
+    if not color_path and not ies_path and not custom_decay:
+        return
+    if not hasattr(data, "use_nodes"):
+        return
+
+    try:
+        data.use_nodes = True
+        nodes = data.node_tree.nodes
+        links = data.node_tree.links
+        emission = next(
+            (node for node in nodes if node.bl_idname == "ShaderNodeEmission"),
+            None,
+        )
+        if emission is None:
+            return
+        strength_output = None
+
+        if color_path:
+            image = _load_image(color_texture, "base_color", warnings)
+            if image:
+                image_node = nodes.new("ShaderNodeTexImage")
+                image_node.name = "ZA_Light_Color_Texture"
+                image_node.image = image
+                links.new(
+                    image_node.outputs.get("Color"),
+                    emission.inputs.get("Color"),
+                )
+
+        if custom_decay:
+            falloff = nodes.new("ShaderNodeLightFalloff")
+            falloff.inputs["Strength"].default_value = max(0.0, data.energy)
+            output_name = "Linear" if "linear" in decay_label else "Constant"
+            strength_output = falloff.outputs.get(output_name)
+
+        if ies_path and os.path.isfile(ies_path):
+            try:
+                ies_node = nodes.new("ShaderNodeTexIES")
+                if hasattr(ies_node, "mode"):
+                    ies_node.mode = "EXTERNAL"
+                ies_node.filepath = ies_path
+                multiply = nodes.new("ShaderNodeMath")
+                multiply.operation = "MULTIPLY"
+                links.new(ies_node.outputs.get("Fac"), multiply.inputs[0])
+                if strength_output is not None:
+                    links.new(strength_output, multiply.inputs[1])
+                else:
+                    multiply.inputs[1].default_value = max(0.0, data.energy)
+                strength_output = multiply.outputs[0]
+            except Exception as exc:
+                warnings.append(
+                    'IES profile could not be connected on "{0}": {1}'.format(
+                        data.name,
+                        exc,
+                    )
+                )
+        elif ies_path:
+            warnings.append(
+                'IES profile was not found for "{0}": {1}'.format(
+                    data.name,
+                    ies_path,
+                )
+            )
+        if strength_output is not None:
+            links.new(
+                strength_output,
+                emission.inputs.get("Strength"),
+            )
+    except Exception as exc:
+        warnings.append(
+            'Light texture nodes could not be built for "{0}": {1}'.format(
+                data.name,
+                exc,
+            )
+        )
+
+
+def _create_dome_world(
+    dome_records,
+    collection,
+    position_scale,
+    warnings,
+):
+    bpy.context.scene.world = None
+    if not dome_records:
+        return 0
+
+    enabled_records = [
+        record for record in dome_records
+        if bool(record.get("enabled", True))
+    ]
+    selected = enabled_records[0] if enabled_records else dome_records[0]
+    if len(dome_records) > 1:
+        warnings.append(
+            "Blender has one active World environment; the first enabled "
+            "Redshift Dome light was used and the remaining domes were kept "
+            "as metadata empties."
+        )
+
+    world = bpy.data.worlds.new("Z-A Dome World")
+    world.use_nodes = True
+    bpy.context.scene.world = world
+    nodes = world.node_tree.nodes
+    links = world.node_tree.links
+    nodes.clear()
+    output = nodes.new("ShaderNodeOutputWorld")
+    background = nodes.new("ShaderNodeBackground")
+    background.inputs["Color"].default_value = _color4(
+        selected.get("color") or (1.0, 1.0, 1.0)
+    )
+    background.inputs["Strength"].default_value = (
+        _scalar(selected.get("effective_intensity"), 1.0)
+        if bool(selected.get("enabled", True))
+        else 0.0
+    )
+    links.new(background.outputs["Background"], output.inputs["Surface"])
+
+    texture_record = selected.get("dome_texture") or {}
+    if texture_record.get("path"):
+        image = _load_image(texture_record, "base_color", warnings)
+        if image:
+            environment = nodes.new("ShaderNodeTexEnvironment")
+            environment.image = image
+            texcoord = nodes.new("ShaderNodeTexCoord")
+            mapping = nodes.new("ShaderNodeMapping")
+            vector_output = (
+                texcoord.outputs.get("Generated")
+                or texcoord.outputs.get("Normal")
+            )
+            links.new(vector_output, mapping.inputs["Vector"])
+            links.new(mapping.outputs["Vector"], environment.inputs["Vector"])
+
+            tint = nodes.new("ShaderNodeMixRGB")
+            tint.blend_type = "MULTIPLY"
+            tint.inputs[0].default_value = 1.0
+            tint.inputs[2].default_value = _color4(
+                selected.get("color") or (1.0, 1.0, 1.0)
+            )
+            links.new(environment.outputs["Color"], tint.inputs[1])
+            links.new(tint.outputs["Color"], background.inputs["Color"])
+
+            matrix = _maya_light_matrix(
+                selected.get("transform") or {},
+                position_scale,
+            )
+            mapping.inputs["Rotation"].default_value = matrix.to_euler()
+
+    for record in dome_records:
+        name = (
+            record.get("name")
+            or _namespace_free_name(record.get("full_name"))
+            or "Dome"
+        )
+        empty = bpy.data.objects.new(name, None)
+        empty.empty_display_type = "SPHERE"
+        empty.empty_display_size = 1.0
+        collection.objects.link(empty)
+        empty.matrix_world = _maya_light_matrix(
+            record.get("transform") or {},
+            position_scale,
+        )
+        empty.scale = (1.0, 1.0, 1.0)
+        _store_light_metadata(empty, None, record)
+    return len(dome_records)
+
+
+def _maya_light_matrix(transform_record, position_scale):
+    values = transform_record.get("world_matrix") or []
+    if len(values) != 16:
+        translation = transform_record.get("translation") or (0.0, 0.0, 0.0)
+        converted = _maya_vector_to_blender(translation) * position_scale
+        matrix = Matrix.Identity(4)
+        matrix.translation = converted
+        return matrix
+
+    x_axis = _maya_vector_to_blender(values[0:3])
+    y_axis = _maya_vector_to_blender(values[4:7])
+    z_axis = _maya_vector_to_blender(values[8:11])
+    x_axis = _normalized_axis(x_axis, Vector((1.0, 0.0, 0.0)))
+    y_axis = _normalized_axis(y_axis, Vector((0.0, 0.0, 1.0)))
+    z_axis = _normalized_axis(z_axis, Vector((0.0, -1.0, 0.0)))
+    translation = _maya_vector_to_blender(values[12:15]) * position_scale
+    return Matrix(
+        (
+            (x_axis.x, y_axis.x, z_axis.x, translation.x),
+            (x_axis.y, y_axis.y, z_axis.y, translation.y),
+            (x_axis.z, y_axis.z, z_axis.z, translation.z),
+            (0.0, 0.0, 0.0, 1.0),
+        )
+    )
+
+
+def _normalized_axis(axis, fallback):
+    if axis.length <= 0.000001:
+        return fallback.copy()
+    return axis.normalized()
+
+
+def _maya_vector_to_blender(value):
+    values = list(value or (0.0, 0.0, 0.0))
+    while len(values) < 3:
+        values.append(0.0)
+    return Vector(
+        (
+            _scalar(values[0], 0.0),
+            -_scalar(values[2], 0.0),
+            _scalar(values[1], 0.0),
+        )
+    )
+
+
+def _source_light_scale(record):
+    transform = record.get("transform") or {}
+    value = transform.get("scale") or (1.0, 1.0, 1.0)
+    values = [abs(_scalar(item, 1.0)) for item in list(value)[:3]]
+    while len(values) < 3:
+        values.append(1.0)
+    return values
+
+
+def _store_light_metadata(obj, data, record):
+    target = data if data is not None else obj
+    target["za_generated"] = True
+    target["za_source_full_name"] = str(record.get("full_name") or "")
+    target["za_source_node_type"] = str(record.get("node_type") or "")
+    target["za_source_light_kind"] = str(record.get("light_kind") or "")
+    target["za_source_intensity"] = _scalar(record.get("intensity"), 1.0)
+    target["za_source_exposure"] = _scalar(record.get("exposure"), 0.0)
+    target["za_source_json"] = json.dumps(record, ensure_ascii=False)
+
+
 def _clear_scene_and_purge():
     try:
         if bpy.context.object and bpy.context.object.mode != "OBJECT":
@@ -560,11 +1116,15 @@ def _clear_scene_and_purge():
             )
         )
 
+    for scene in bpy.data.scenes:
+        scene.world = None
+
     for data_name in (
         "meshes",
         "curves",
         "cameras",
         "lights",
+        "worlds",
         "materials",
         "images",
         "textures",
@@ -684,8 +1244,19 @@ def _namespace_free_name(value):
 
 def _package_namespace_prefixes(package_data):
     prefixes = set()
-    for record in package_data.get("meshes") or []:
-        for field in ("mesh_full_name", "mesh_path", "shape", "shape_path"):
+    records = list(package_data.get("meshes") or [])
+    records.extend(package_data.get("lights") or [])
+    for record in records:
+        for field in (
+            "mesh_full_name",
+            "mesh_path",
+            "shape",
+            "shape_path",
+            "full_name",
+            "shape_full_name",
+        ):
+            if field not in record:
+                continue
             value = str(record.get(field) or "")
             tail = value.split("|")[-1].split("/")[-1].split("\\")[-1]
             if ":" in tail:
@@ -839,11 +1410,12 @@ def _process_messages():
         )
         _status = (
             "Imported {0} mesh(es), {1} material(s), "
-            "{2} subdivision modifier(s)."
+            "{2} subdivision modifier(s), {3} light(s)."
         ).format(
             result["mesh_count"],
             result["material_count"],
             result["subdivision_count"],
+            result["light_count"],
         )
         for warning in result.get("warnings") or []:
             print("Z-A Lookdev warning: {0}".format(warning))

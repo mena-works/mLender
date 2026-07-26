@@ -45,6 +45,7 @@ texture konumunu taşır; Blender image node aynı dosyayı doğrudan açar.
 - `RedshiftMaterial` (legacy)
 - `lambert`
 - `blinn`
+- `surfaceShader`
 
 Aktarılan kanallar:
 
@@ -102,6 +103,14 @@ değeri aktarılır. Maya transparency değeri Blender opacity değerine çevril
 - Lambert → Principled Roughness `0.7`
 - Blinn → Principled Roughness `0.1`
 - İkisi için de Metallic `0.0`
+
+### Surface Shader
+
+Maya `surfaceShader.outColor` değeri veya bağlı texture Blender'da Emission
+shader Color girişine aktarılır. `outTransparency`, Transparent BSDF ile
+Emission arasında Mix Shader opacity değerine dönüştürülür. Böylece material
+Principled yüzey gibi ışık almak yerine Maya Surface Shader'a yakın, doğrudan
+emissive davranır.
 
 ## Texture ağları
 
@@ -245,6 +254,44 @@ print("Z-A Lookdev Importer Build", runtime.BUILD_VERSION)
 2. Host/Port değerlerini kontrol et.
 3. `Start LiveLink` butonuna bas.
 
+## Işık aktarımı
+
+Işıklar FBX içine yazılmaz. Maya sahnesindeki geçerli frame değerleri JSON
+üzerinden gönderilir ve Blender'da `Z-A Lookdev Import > Z-A Lights` altında
+yeniden oluşturulur.
+
+Desteklenen eşlemeler:
+
+- Redshift Physical Area → Blender Area
+- Redshift Physical Point → Blender Point
+- Redshift Physical Spot → Blender Spot
+- Redshift Physical Directional → Blender Sun
+- Redshift Dome → Blender World Environment
+- Redshift IES → Blender Spot + IES texture node
+- Native Maya Area/Point/Spot/Directional → karşılık gelen Blender light
+
+Aktarılan temel değerler:
+
+- World konum ve rotasyon
+- Transform scale üzerinden area boyutu
+- Color ve color temperature
+- Intensity, exposure ve fiziksel unit
+- Area shape, normalize, spread ve bidirectional metadata
+- Spot cone/falloff
+- Shadow, softness ve contribution değerleri
+- Dome HDR ve IES dosya yolları
+
+Redshift exposure değeri `intensity * 2^exposure` olarak değerlendirilir.
+Lumens, watts ve candelas gibi fiziksel unit'ler Blender enerji değerine
+yaklaştırılır. Redshift Image unit ve native Maya intensity için ayrı görsel
+kalibrasyon kullanılır. Orijinal Redshift değerleri Blender light custom
+property'lerinde `za_source_*` alanlarıyla korunur.
+
+Blender'ın birebir karşılığı olmayan Cylinder/Mesh area light şekilleri
+Rectangle Area olarak yaklaştırılır. Birden fazla Dome varsa Blender'ın tek
+World ortamı için ilk aktif Dome kullanılır; diğer Dome kayıtları metadata
+empty olarak korunur.
+
 ## Blender import davranışı
 
 Yeni paket geldiğinde:
@@ -258,7 +305,9 @@ Yeni paket geldiğinde:
 6. JSON'daki mesh → material ve yüz atamaları uygulanır.
 7. Materialler Principled BSDF olarak yeniden kurulur.
 8. Textureler Maya'daki orijinal dosya konumlarından bağlanır.
-9. Import sonunda tekrar recursive orphan purge yapılır.
+9. JSON ışıkları ve Dome World ortamı yeniden oluşturulur.
+10. Bütün meshlerde Z-A Subdivision modifier ayarları kurulur.
+11. Import sonunda tekrar recursive orphan purge yapılır.
 
 Bir mesh birden fazla material kullanıyorsa Maya shadingEngine face membership
 bilgisi JSON'a yazılır ve Blender polygon material indexleri yeniden kurulur.

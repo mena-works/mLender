@@ -19,12 +19,65 @@ LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
 LIVELINK_PROTOCOL = "za_lookdev_livelink"
 LIVELINK_VERSION = 1
+EXPORT_SCHEMA_VERSION = 2
+
+LIGHT_NODE_TYPES = (
+    "RedshiftPhysicalLight",
+    "RedshiftDomeLight",
+    "RedshiftIESLight",
+    "RedshiftPortalLight",
+    "RedshiftPhysicalSun",
+    "ambientLight",
+    "areaLight",
+    "directionalLight",
+    "pointLight",
+    "spotLight",
+    "volumeLight",
+)
+
+LIGHT_ATTR_ALIASES = {
+    "on": ("on", "lightOn", "enabled"),
+    "light_type": ("lightType", "type"),
+    "area_shape": ("areaShape", "shape"),
+    "color": ("color", "lightColor"),
+    "color_mode": ("colorMode", "temperatureMode"),
+    "temperature": ("temperature", "colorTemperature"),
+    "use_temperature": ("useColorTemperature", "useTemperature"),
+    "intensity": ("intensity",),
+    "exposure": ("exposure", "exposure0"),
+    "units": ("unitsType", "intensityMode", "units", "intensityUnits"),
+    "decay": ("decayType", "decayRate"),
+    "normalize": ("normalize", "normalizeIntensity", "areaNormalize"),
+    "spread": ("spread", "areaSpread"),
+    "bidirectional": ("bidirectional", "areaBidirectional"),
+    "cone_angle": ("coneAngle", "spotConeAngle"),
+    "falloff_angle": (
+        "falloffAngle",
+        "spotConeFalloffAngle",
+        "spotFalloffAngle",
+        "penumbraAngle",
+    ),
+    "falloff_curve": ("falloffCurve", "dropoff"),
+    "cast_shadows": (
+        "castsShadows",
+        "castShadows",
+        "useRayTraceShadows",
+        "shadow",
+    ),
+    "shadow_softness": ("shadowSoftness", "lightRadius"),
+    "diffuse": ("diffuse", "diffuseScale"),
+    "specular": ("specular", "reflectionScale", "specularScale"),
+    "volume": ("volumeScale", "volume"),
+    "samples": ("samples", "lightSamples"),
+    "ies_profile": ("profile", "iesProfile", "profilePath", "iesFile"),
+}
 
 SUPPORTED_SHADER_TYPES = (
     "RedshiftStandardMaterial",
     "RedshiftMaterial",
     "lambert",
     "blinn",
+    "surfaceShader",
 )
 
 # Reflection roughness is the PBR surface roughness. Redshift's diffuse
@@ -68,8 +121,8 @@ def show_ui():
     cmds.text(label=TOOL_NAME, align="left", font="boldLabelFont")
     cmds.text(
         label=(
-            "All renderable scene meshes are exported as FBX. Material assignments, "
-            "Redshift/Lambert/Blinn values and original texture paths are sent to Blender."
+            "All renderable scene meshes are exported as FBX. Materials, original "
+            "texture paths and current-frame Maya/Redshift lights are sent to Blender."
         ),
         align="left",
         wordWrap=True,
@@ -134,6 +187,7 @@ def export_lookdev(output_folder):
         if not mesh_shapes:
             raise RuntimeError("The Maya scene contains no exportable mesh.")
         mesh_records = [_mesh_record(shape) for shape in mesh_shapes]
+        light_records = [_light_record(shape) for shape in _scene_light_shapes()]
         mesh_transforms = _unique(
             [
                 (cmds.listRelatives(shape, parent=True, fullPath=True) or [""])[0]
@@ -144,7 +198,7 @@ def export_lookdev(output_folder):
         _export_fbx(mesh_transforms, fbx_path)
 
         payload = {
-            "schema_version": 1,
+            "schema_version": EXPORT_SCHEMA_VERSION,
             "tool_name": TOOL_NAME,
             "profile": "lookdev",
             "exported_at_utc": datetime.datetime.utcnow().isoformat() + "Z",
@@ -154,6 +208,10 @@ def export_lookdev(output_folder):
             "fbx_file": _maya_path(fbx_path),
             "mesh_count": len(mesh_records),
             "meshes": mesh_records,
+            "light_count": len(light_records),
+            "lights": light_records,
+            "maya_linear_unit": _maya_linear_unit(),
+            "meters_per_maya_unit": _meters_per_maya_unit(),
         }
         _write_json(json_path, payload)
     except Exception:
@@ -172,6 +230,7 @@ def export_lookdev(output_folder):
         "json_path": json_path,
         "package_json": payload,
         "mesh_count": len(mesh_records),
+        "light_count": len(light_records),
     }
 
 
@@ -213,9 +272,10 @@ def _export_from_ui(export_folder, host_field, port_field):
     cmds.confirmDialog(
         title="Z-A Lookdev Export Complete",
         message=(
-            "Meshes: {0}\n\nPackage:\n{1}\n\nFBX:\n{2}"
+            "Meshes: {0}\nLights: {1}\n\nPackage:\n{2}\n\nFBX:\n{3}"
         ).format(
             result["mesh_count"],
+            result["light_count"],
             result["package_folder"],
             result["fbx_path"],
         ),
@@ -237,6 +297,349 @@ def _scene_mesh_shapes():
             continue
         result.append(shape)
     return _unique(result)
+
+
+def _scene_light_shapes():
+    result = list(cmds.ls(lights=True, long=True) or [])
+
+    for node_type in LIGHT_NODE_TYPES:
+        try:
+            result.extend(cmds.ls(type=node_type, long=True) or [])
+        except Exception:
+            pass
+
+    # This catches Redshift versions whose light node names differ from the
+    # known list while avoiding non-DAG nodes such as light linkers.
+    for transform in cmds.ls(type="transform", long=True) or []:
+        for shape in cmds.listRelatives(
+            transform,
+            shapes=True,
+            fullPath=True,
+        ) or []:
+            node_type = _node_type(shape)
+            if "light" in node_type.lower():
+                result.append(shape)
+
+    valid = []
+    for shape in _unique(result):
+        parents = cmds.listRelatives(shape, parent=True, fullPath=True) or []
+        if parents:
+            valid.append(shape)
+    return valid
+
+
+def _light_record(light_shape):
+    transform = (
+        cmds.listRelatives(light_shape, parent=True, fullPath=True) or [""]
+    )[0]
+    node_type = _node_type(light_shape)
+    source_attrs = {}
+    enum_labels = {}
+    values = {}
+
+    for semantic, aliases in LIGHT_ATTR_ALIASES.items():
+        value, attr, enum_label = _first_light_attr(light_shape, aliases)
+        if attr:
+            source_attrs[semantic] = attr
+        if enum_label:
+            enum_labels[semantic] = enum_label
+        if value is not None:
+            values[semantic] = value
+
+    enabled = _node_visible(transform) and _node_visible(light_shape)
+    if "on" in values:
+        enabled = enabled and bool(values["on"])
+
+    intensity = _number(values.get("intensity"), 1.0)
+    exposure = _number(values.get("exposure"), 0.0)
+    color = values.get("color")
+    if not isinstance(color, (list, tuple)):
+        color = [1.0, 1.0, 1.0]
+
+    world_matrix = _world_matrix(transform)
+    translate = _xform_vector(transform, translation=True, default=(0.0, 0.0, 0.0))
+    rotate = _xform_vector(transform, rotation=True, default=(0.0, 0.0, 0.0))
+    scale = _xform_vector(transform, scale=True, default=(1.0, 1.0, 1.0))
+
+    color_texture = _light_texture_from_attrs(
+        light_shape,
+        ("color", "lightColor", "tex0", "texture"),
+    )
+    dome_texture = _light_file_from_attrs(
+        light_shape,
+        (
+            "tex0",
+            "texture",
+            "domeTexture",
+            "map",
+            "mapTexture",
+            "color",
+        ),
+    )
+    ies_profile = _light_file_from_attrs(
+        light_shape,
+        LIGHT_ATTR_ALIASES["ies_profile"],
+    )
+
+    return {
+        "name": _without_namespace(_node_label(transform or light_shape)),
+        "full_name": _node_label(transform or light_shape),
+        "shape": _without_namespace(_node_label(light_shape)),
+        "shape_full_name": _node_label(light_shape),
+        "node_type": node_type,
+        "light_kind": _resolve_light_kind(
+            node_type,
+            values.get("light_type"),
+            enum_labels.get("light_type"),
+        ),
+        "area_shape": _resolve_area_shape(
+            values.get("area_shape"),
+            enum_labels.get("area_shape"),
+        ),
+        "enabled": enabled,
+        "color": [float(item) for item in color[:3]],
+        "intensity": intensity,
+        "exposure": exposure,
+        "effective_intensity": intensity * (2.0 ** exposure),
+        "parameters": values,
+        "source_attrs": source_attrs,
+        "enum_labels": enum_labels,
+        "color_texture": color_texture,
+        "dome_texture": dome_texture,
+        "ies_profile": ies_profile,
+        "transform": {
+            "world_matrix": world_matrix,
+            "translation": translate,
+            "rotation_degrees": rotate,
+            "scale": scale,
+        },
+        "frame": _current_frame(),
+    }
+
+
+def _first_light_attr(node, aliases):
+    for attr in aliases:
+        if not _attr_exists(node, attr):
+            continue
+        value = _raw_attr_value(node + "." + attr)
+        enum_label = _enum_attr_label(node, attr, value)
+        return value, attr, enum_label
+    return None, "", ""
+
+
+def _raw_attr_value(plug):
+    try:
+        value = cmds.getAttr(plug)
+    except Exception:
+        return None
+    while isinstance(value, (list, tuple)) and len(value) == 1:
+        value = value[0]
+    if isinstance(value, (list, tuple)):
+        result = []
+        for item in value:
+            try:
+                result.append(float(item))
+            except Exception:
+                result.append(str(item))
+        return result
+    if isinstance(value, bool):
+        return bool(value)
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, (str, bytes)):
+        return str(value)
+    return None
+
+
+def _enum_attr_label(node, attr, value):
+    try:
+        definitions = cmds.attributeQuery(attr, node=node, listEnum=True) or []
+    except Exception:
+        return ""
+    if not definitions or not isinstance(value, (int, float)):
+        return ""
+
+    target = int(value)
+    current_value = 0
+    for token in str(definitions[0]).split(":"):
+        label = token
+        if "=" in token:
+            label, raw_value = token.rsplit("=", 1)
+            try:
+                current_value = int(raw_value)
+            except Exception:
+                pass
+        if current_value == target:
+            return label
+        current_value += 1
+    return ""
+
+
+def _resolve_light_kind(node_type, value, enum_label):
+    label = str(enum_label or "").lower()
+    node_lower = str(node_type or "").lower()
+    combined = label + " " + node_lower
+    if "dome" in combined:
+        return "DOME"
+    if "ies" in combined or "photometric" in combined:
+        return "IES"
+    if "direction" in combined or "infinite" in combined or "sun" in combined:
+        return "SUN"
+    if "spot" in combined:
+        return "SPOT"
+    if "point" in combined or "volume" in combined or "ambient" in combined:
+        return "POINT"
+    if "area" in combined or "portal" in combined:
+        return "AREA"
+    if "redshiftphysicallight" in node_lower and isinstance(value, (int, float)):
+        return {
+            0: "AREA",
+            1: "POINT",
+            2: "SPOT",
+            3: "SUN",
+        }.get(int(value), "AREA")
+    return "AREA"
+
+
+def _resolve_area_shape(value, enum_label):
+    label = str(enum_label or "").lower()
+    if "rect" in label:
+        return "RECTANGLE"
+    if "disc" in label or "disk" in label:
+        return "DISK"
+    if "sphere" in label:
+        return "SPHERE"
+    if "cylinder" in label:
+        return "CYLINDER"
+    if "mesh" in label:
+        return "MESH"
+    if isinstance(value, (int, float)):
+        return {
+            0: "RECTANGLE",
+            1: "DISK",
+            2: "SPHERE",
+            3: "CYLINDER",
+            4: "MESH",
+        }.get(int(value), "RECTANGLE")
+    return "RECTANGLE"
+
+
+def _light_texture_from_attrs(node, aliases):
+    for attr in aliases:
+        if not _attr_exists(node, attr):
+            continue
+        texture = _texture_upstream_from_plug(node + "." + attr)
+        if texture and texture.get("path"):
+            return texture
+    return None
+
+
+def _light_file_from_attrs(node, aliases):
+    for attr in aliases:
+        if not _attr_exists(node, attr):
+            continue
+        plug = node + "." + attr
+        texture = _texture_upstream_from_plug(plug)
+        if texture and texture.get("path"):
+            return texture
+        value = _raw_attr_value(plug)
+        if isinstance(value, str) and value:
+            path = os.path.abspath(
+                os.path.expandvars(os.path.expanduser(value))
+            )
+            return {
+                "path": _maya_path(path),
+                "maya_attr": attr,
+                "exists": os.path.isfile(path),
+            }
+    return None
+
+
+def _node_visible(node):
+    if not node or not _attr_exists(node, "visibility"):
+        return True
+    try:
+        return bool(cmds.getAttr(node + ".visibility"))
+    except Exception:
+        return True
+
+
+def _world_matrix(transform):
+    if not transform:
+        return [
+            1.0, 0.0, 0.0, 0.0,
+            0.0, 1.0, 0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0,
+            0.0, 0.0, 0.0, 1.0,
+        ]
+    try:
+        return [
+            float(item)
+            for item in cmds.xform(
+                transform,
+                query=True,
+                worldSpace=True,
+                matrix=True,
+            )
+        ]
+    except Exception:
+        return []
+
+
+def _xform_vector(transform, translation=False, rotation=False, scale=False, default=None):
+    default = list(default or (0.0, 0.0, 0.0))
+    if not transform:
+        return default
+    kwargs = {
+        "query": True,
+        "worldSpace": True,
+    }
+    if translation:
+        kwargs["translation"] = True
+    elif rotation:
+        kwargs["rotation"] = True
+    elif scale:
+        kwargs["scale"] = True
+        kwargs.pop("worldSpace", None)
+        kwargs["relative"] = True
+    try:
+        return [float(item) for item in cmds.xform(transform, **kwargs)]
+    except Exception:
+        return default
+
+
+def _current_frame():
+    try:
+        return float(cmds.currentTime(query=True))
+    except Exception:
+        return 0.0
+
+
+def _maya_linear_unit():
+    try:
+        return str(cmds.currentUnit(query=True, linear=True) or "cm")
+    except Exception:
+        return "cm"
+
+
+def _meters_per_maya_unit():
+    return {
+        "mm": 0.001,
+        "cm": 0.01,
+        "m": 1.0,
+        "km": 1000.0,
+        "in": 0.0254,
+        "ft": 0.3048,
+        "yd": 0.9144,
+        "mi": 1609.344,
+    }.get(_maya_linear_unit(), 0.01)
+
+
+def _number(value, default=0.0):
+    try:
+        return float(value)
+    except Exception:
+        return float(default)
 
 
 def _mesh_record(mesh_shape):
@@ -297,6 +700,8 @@ def _shader_channels(shader, shader_type):
         return _maya_basic_channels(shader, roughness=0.1)
     if shader_type == "lambert":
         return _maya_basic_channels(shader, roughness=0.7)
+    if shader_type == "surfaceShader":
+        return _surface_shader_channels(shader)
     return _maya_basic_channels(shader, roughness=0.5)
 
 
@@ -368,6 +773,32 @@ def _maya_basic_channels(shader, roughness):
     if emission:
         result["emission"] = emission
         result["emission_strength"] = {"value": 1.0}
+    return result
+
+
+def _surface_shader_channels(shader):
+    result = {
+        "emission_strength": {"value": 1.0},
+    }
+    emission = _first_channel_record(shader, ("outColor", "color"))
+    if emission:
+        result["emission"] = emission
+    else:
+        result["emission"] = {"value": [0.0, 0.0, 0.0]}
+
+    transparency = _first_channel_record(
+        shader,
+        ("outTransparency", "transparency"),
+    )
+    if transparency:
+        transparency["invert"] = True
+        transparency["semantic"] = "maya_transparency_to_opacity"
+        if "value" in transparency:
+            transparency["value"] = _invert_color(transparency["value"])
+            transparency["invert"] = False
+        result["opacity"] = transparency
+    else:
+        result["opacity"] = {"value": [1.0, 1.0, 1.0, 1.0]}
     return result
 
 
