@@ -17,7 +17,7 @@ LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
 LIVELINK_PROTOCOL = "za_lookdev_livelink"
 LIVELINK_VERSION = 1
-EXPORT_SCHEMA_VERSION = 14
+EXPORT_SCHEMA_VERSION = 15
 
 LIGHT_NODE_TYPES = (
     "RedshiftPhysicalLight",
@@ -289,6 +289,37 @@ PLACEMENT_NUMERIC_ATTRS = {
     "stagger": "stagger",
     "noise_u": "noiseU",
     "noise_v": "noiseV",
+}
+
+# Visibility and render flags, read from a live Maya 2023 / MtoA 5.4.8 mesh.
+#
+# Arnold splits ray visibility more finely than Maya does and reads its own
+# ai* attributes; the plain Maya ones are what the other renderers read. Both
+# are listed so a scene authored for either resolves, Arnold's first.
+#
+# Every one of these defaults to on, so a mesh that says nothing is fully
+# visible and no flag is written for it.
+MESH_VISIBILITY_ATTRS = {
+    "camera": ("primaryVisibility",),
+    "shadow": ("castsShadows",),
+    "diffuse": ("aiVisibleInDiffuseReflection", "visibleInReflections"),
+    "glossy": ("aiVisibleInSpecularReflection", "visibleInReflections"),
+    "transmission": (
+        "aiVisibleInSpecularTransmission",
+        "visibleInRefractions",
+    ),
+    "volume_scatter": ("aiVisibleInVolume",),
+    "receive_shadows": ("receiveShadows",),
+    "self_shadows": ("aiSelfShadows",),
+    "opaque": ("aiOpaque",),
+    # aiMatte is Arnold's holdout; Maya's own holdOut means the same thing.
+    "matte": ("aiMatte", "holdOut"),
+}
+
+# Read from the transform rather than the shape.
+TRANSFORM_VISIBILITY_ATTRS = {
+    "visible": ("visibility",),
+    "lod_visible": ("lodVisibility",),
 }
 
 # Animation.

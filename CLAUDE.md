@@ -470,6 +470,9 @@ Kullanıcının elle doğrulaması gereken adımlar:
 - ❌ Displacement'a birim ölçeği ekleme; FBX birim dönüşümünü obje scale'ine
   koyar, vertex'ler Maya biriminde kalır, object space displacement zaten doğru
 - ❌ Displacement'ı shader'da arama; Maya onu shadingEngine'de tutar
+- ❌ Görünürlük bayraklarını varsayılanlarıyla birlikte yazma; yalnız
+  varsayılandan farklı olanı yaz, yoksa sahnenin istemediği bir şeyi
+  bütün meshlere uygularsın
 - ❌ Her frame'in matrisini bağımsız Euler'e çözme; tam turda sıçrar,
   `make_compatible` ile bir öncekine uyumlu hale getir
 - ❌ Bake edilmiş anahtarları Bezier bırakma; `LINEAR` olmalı

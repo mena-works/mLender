@@ -152,6 +152,18 @@ def build_scene():
         pass
     cmds.connectAttr(udim_node + ".outColor", lam + ".KdColor", force=True)
 
+    # A shadow-only object: invisible to the camera but still casting. This is
+    # the everyday lookdev case that used to arrive fully visible.
+    cmds.setAttr("glassCubeShape.primaryVisibility", False)
+    cmds.setAttr("glassCubeShape.aiVisibleInSpecularReflection", False)
+    cmds.setAttr("aiLambertCubeShape.aiMatte", True)
+    cmds.setAttr("openPbrCube.visibility", False)
+
+    # An animated mesh, so the FBX side of the animation transfer is covered
+    # too; the camera alone would only prove the JSON path works.
+    cmds.setKeyframe("flatCube.translateX", time=1, value=0.0)
+    cmds.setKeyframe("flatCube.translateX", time=25, value=8.0)
+
     # A turntable: the camera orbits a full 360 degrees while its focal length
     # pulls in. A full turn is the case that exposes Euler decomposition
     # flipping between frames, so the range deliberately closes the loop.
@@ -379,6 +391,27 @@ def main():
     ]
     check("remapValue reported as unrebuildable rather than dropped silently",
           "remapValue" in unsupported, unsupported)
+
+    print("\nvisibility flags")
+    by_name = {record.get("mesh"): record for record in payload["meshes"]}
+    glass_vis = (by_name.get("glassCube") or {}).get("visibility") or {}
+    check("primaryVisibility off exported",
+          glass_vis.get("camera") is False, glass_vis)
+    check("specular reflection visibility off exported",
+          glass_vis.get("glossy") is False, glass_vis)
+    check("flags left at their default are not written",
+          "shadow" not in glass_vis and "diffuse" not in glass_vis, glass_vis)
+    check("aiMatte exported as matte",
+          ((by_name.get("aiLambertCube") or {}).get("visibility") or {})
+          .get("matte") is True,
+          (by_name.get("aiLambertCube") or {}).get("visibility"))
+    check("a hidden transform exported",
+          ((by_name.get("openPbrCube") or {}).get("visibility") or {})
+          .get("visible") is False,
+          (by_name.get("openPbrCube") or {}).get("visibility"))
+    check("an ordinary mesh writes no flags at all",
+          (by_name.get("stdSurfCube") or {}).get("visibility") == {},
+          (by_name.get("stdSurfCube") or {}).get("visibility"))
 
     print("\nanimation")
     animation = payload.get("animation") or {}

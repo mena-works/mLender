@@ -8,7 +8,7 @@ message shape changes.
 
 import math
 
-BUILD_VERSION = "1.17.0"
+BUILD_VERSION = "1.18.0"
 
 LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
@@ -21,7 +21,7 @@ LIVELINK_EVENT = "lookdev_package_ready"
 # 3 added glass channels and 4 added UDIM on the main branch; 5 is this
 # branch with both, plus the Arnold channels.
 SUPPORTED_SCHEMA_VERSIONS = (
-    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14,
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
 )
 
 MAX_MESSAGE_BYTES = 32 * 1024 * 1024
@@ -241,6 +241,21 @@ OPENPBR_EMISSION_SEMANTIC = "openpbr_emission_luminance"
 # A light's node tree is a multiplier on top of its energy. Nodes feeding
 # Emission Strength must stay at unit scale, otherwise energy is applied twice.
 NODE_TREE_UNIT_STRENGTH = 1.0
+
+# Maya/Arnold ray visibility onto Blender's per-ray object visibility.
+# Measured: all of these exist directly on the object in 4.1 and 5.2, not
+# under object.cycles. They are Cycles features; EEVEE ignores them.
+OBJECT_VISIBILITY_ATTRS = {
+    "camera": "visible_camera",
+    "diffuse": "visible_diffuse",
+    "glossy": "visible_glossy",
+    "transmission": "visible_transmission",
+    "volume_scatter": "visible_volume_scatter",
+    "shadow": "visible_shadow",
+}
+
+# Arnold's matte and Maya's holdOut both mean "punch a hole in the render".
+HOLDOUT_ATTR = "is_holdout"
 
 # Animation. Samples arrive one per frame already baked, so linear is the
 # faithful reading; Blender's default Bezier would ease between every pair and

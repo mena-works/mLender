@@ -592,6 +592,37 @@ specularAnisotropy       -> Anisotropic
   5.2'de 0.005). Bu yüzden değer açıkça set edilir; varsayılana güvenmek aynı
   paketi iki sürümde farklı gösterirdi.
 
+## Görünürlük ve render bayrakları
+
+Maya'da kameraya gizlenmiş ama gölge bırakan bir obje eskiden Blender'a
+**tamamen görünür** geliyordu; lookdev'in en sık kurulumlarından biri sessizce
+kayboluyordu. Artık ışın bazlı görünürlük aktarılıyor:
+
+```text
+primaryVisibility                 -> visible_camera
+castsShadows                      -> visible_shadow
+aiVisibleInDiffuseReflection      -> visible_diffuse
+aiVisibleInSpecularReflection     -> visible_glossy
+aiVisibleInSpecularTransmission   -> visible_transmission
+aiVisibleInVolume                 -> visible_volume_scatter
+aiMatte / holdOut                 -> is_holdout
+visibility (transform)            -> hide_render + hide_viewport
+lodVisibility                     -> hide_viewport
+```
+
+Arnold ışın görünürlüğünü Maya'dan daha ince ayırır ve kendi `ai*`
+attribute'larını okur; Maya'nın `visibleInReflections`/`visibleInRefractions`
+değerleri diğer renderer'lar içindir. İkisi de aday listesinde, önce Arnold'unki.
+
+**Yalnız varsayılandan farklı olan bayraklar yazılır.** Sıradan bir mesh hiç
+bayrak üretmez ve Blender'ın kendi varsayılanlarına dokunulmaz — böylece
+aktarım, sahnenin istemediği bir şeyi bütün meshlere uygulamaz.
+
+Gizli bir Maya mesh'i Blender'da hem viewport'ta hem **render'da** gizlenir;
+yalnız viewport'u gizlemek render'da yine görünmesine yol açardı.
+
+Bu bayraklar **Cycles** özellikleridir; EEVEE ışın görünürlüğünü yok sayar.
+
 ## Animasyon (turntable)
 
 Varsayılan olarak **kapalı** — araç tek frame gönderir. Maya penceresindeki

@@ -14,6 +14,8 @@ from .constants import (
     DISPLACEMENT_REDSHIFT_ENABLE,
     DISPLACEMENT_REDSHIFT_SCALE,
     MAX_SUBDIV_ITERATIONS,
+    MESH_VISIBILITY_ATTRS,
+    TRANSFORM_VISIBILITY_ATTRS,
     SUBDIV_ARNOLD_ITERATIONS,
     SUBDIV_ARNOLD_TYPE,
     SUBDIV_ARNOLD_UV_SMOOTHING,
@@ -77,6 +79,7 @@ def mesh_record(mesh_shape, bake_context=None):
         "shape": node_label(mesh_shape),
         "shape_path": mesh_shape,
         "groups": group_path(transform),
+        "visibility": visibility_info(mesh_shape, transform),
         "subdivision": subdivision_info(mesh_shape),
         "materials": mesh_materials(mesh_shape, bake_context),
     }
@@ -105,6 +108,30 @@ def group_path(transform):
             continue
         groups.append(without_namespace(part))
     return groups
+
+
+def visibility_info(mesh_shape, transform):
+    """Per-ray visibility and holdout flags, shape and transform together.
+
+    Only flags that differ from Maya's default are written. Everything here
+    defaults to on, so an ordinary mesh produces an empty record and the
+    importer leaves Blender's own defaults alone.
+    """
+    result = {}
+    for semantic, attrs in MESH_VISIBILITY_ATTRS.items():
+        value, attr, _label = first_existing_attr(mesh_shape, attrs)
+        if not attr or not isinstance(value, bool):
+            continue
+        # matte defaults to off, the rest default to on.
+        default = semantic != "matte"
+        if bool(value) != default:
+            result[semantic] = bool(value)
+
+    for semantic, attrs in TRANSFORM_VISIBILITY_ATTRS.items():
+        value, attr, _label = first_existing_attr(transform, attrs)
+        if attr and isinstance(value, bool) and not value:
+            result[semantic] = False
+    return result
 
 
 def subdivision_info(mesh_shape):

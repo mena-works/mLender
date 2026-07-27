@@ -5,7 +5,9 @@ import bpy
 
 from .constants import (
     DEFAULT_SUBDIV_ITERATIONS,
+    HOLDOUT_ATTR,
     MAX_SUBDIV_ITERATIONS,
+    OBJECT_VISIBILITY_ATTRS,
     PURGED_DATA_COLLECTIONS,
     ROOT_COLLECTION_NAME,
     SUBDIVISION_MODIFIER_NAME,
@@ -145,6 +147,46 @@ def place_in_group(obj, record, root, cache):
         collection.objects.unlink(obj)
     target.objects.link(obj)
     return True
+
+
+def apply_visibility(obj, record):
+    """Rebuild Maya's per-ray visibility and holdout flags on an object.
+
+    The exporter only writes flags that differ from Maya's default, so an
+    empty record means "leave Blender's defaults alone" rather than "set
+    everything to on".
+    """
+    visibility = (record or {}).get("visibility") or {}
+    if not visibility:
+        return False
+
+    changed = False
+    for semantic, attr in OBJECT_VISIBILITY_ATTRS.items():
+        if semantic not in visibility or not hasattr(obj, attr):
+            continue
+        try:
+            setattr(obj, attr, bool(visibility[semantic]))
+            changed = True
+        except Exception:
+            pass
+
+    if visibility.get("matte") and hasattr(obj, HOLDOUT_ATTR):
+        try:
+            setattr(obj, HOLDOUT_ATTR, True)
+            changed = True
+        except Exception:
+            pass
+
+    # A mesh hidden in Maya is hidden in both the viewport and the render;
+    # hiding only the viewport would still show it in a render.
+    if visibility.get("visible") is False:
+        obj.hide_render = True
+        obj.hide_viewport = True
+        changed = True
+    elif visibility.get("lod_visible") is False:
+        obj.hide_viewport = True
+        changed = True
+    return changed
 
 
 def add_subdivision_modifiers(mesh_records, warnings=None):

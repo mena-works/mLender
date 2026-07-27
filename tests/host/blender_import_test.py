@@ -188,6 +188,37 @@ def main():
               any("remapValue" in warning for warning in result["warnings"]),
               result["warnings"])
 
+    print("\nvisibility flags")
+    shadow_only = object_named("glassCube")
+    check("shadow-only object is hidden from the camera",
+          shadow_only is not None and shadow_only.visible_camera is False,
+          shadow_only.visible_camera if shadow_only else None)
+    check("but still casts a shadow",
+          shadow_only is not None and shadow_only.visible_shadow is True,
+          shadow_only.visible_shadow if shadow_only else None)
+    check("glossy visibility off",
+          shadow_only is not None and shadow_only.visible_glossy is False)
+    check("untouched ray visibility left alone",
+          shadow_only is not None and shadow_only.visible_diffuse is True)
+
+    matte = object_named("aiLambertCube")
+    check("aiMatte became a holdout",
+          matte is not None and matte.is_holdout is True,
+          matte.is_holdout if matte else None)
+
+    hidden = object_named("openPbrCube")
+    check("a hidden Maya mesh is hidden in the render too",
+          hidden is not None and hidden.hide_render and hidden.hide_viewport,
+          (hidden.hide_render, hidden.hide_viewport) if hidden else None)
+
+    ordinary = object_named("stdSurfCube")
+    check("an ordinary mesh keeps every default",
+          ordinary is not None
+          and ordinary.visible_camera and ordinary.visible_shadow
+          and not ordinary.is_holdout and not ordinary.hide_render)
+    check("three meshes reported as having flags",
+          result["visibility_count"] == 3, result["visibility_count"])
+
     print("\nanimation")
     scene = bpy.context.scene
     check("import reports it animated", result["animated"] is True)
@@ -197,6 +228,30 @@ def main():
     check("fps 24 with a base of 1",
           scene.render.fps == 24 and abs(scene.render.fps_base - 1.0) < 1e-6,
           (scene.render.fps, scene.render.fps_base))
+
+    # Mesh animation rides the FBX rather than the JSON, so it is worth
+    # asserting separately: the camera passing proves only the JSON path.
+    animated_mesh = object_named("flatCube")
+    mesh_action = getattr(
+        getattr(animated_mesh, "animation_data", None), "action", None
+    )
+    check("the animated mesh arrived with animation", mesh_action is not None,
+          animated_mesh.name if animated_mesh else None)
+    if mesh_action:
+        loc_x = next(
+            (c for c in fcurves_of(mesh_action)
+             if c.data_path == "location" and c.array_index == 0),
+            None,
+        )
+        check("mesh translation is keyed", loc_x is not None
+              and len(loc_x.keyframe_points) >= 2,
+              len(loc_x.keyframe_points) if loc_x else None)
+        if loc_x:
+            span = abs(loc_x.keyframe_points[-1].co[1]
+                       - loc_x.keyframe_points[0].co[1])
+            # 8 Maya centimetres is 0.08 Blender metres.
+            check("mesh moved 8 Maya units, so 0.08 in Blender",
+                  abs(span - 0.08) < 1e-3, span)
 
     turntable = object_named("turntableCam")
     check("turntable camera imported", turntable is not None)

@@ -16,6 +16,7 @@ from .lights import import_lights
 from .materials import apply_face_assignments, build_material
 from .scene import (
     add_subdivision_modifiers,
+    apply_visibility,
     clear_scene_and_purge,
     find_mesh_record,
     organize_imported_objects,
@@ -95,6 +96,7 @@ def import_lookdev_package(
     matched_meshes = []
     group_cache = {}
     grouped_count = 0
+    visibility_count = 0
 
     for obj in imported_meshes:
         mesh_record = find_mesh_record(obj, mesh_records, used_record_ids)
@@ -108,6 +110,8 @@ def import_lookdev_package(
         matched_meshes.append((obj, mesh_record))
         if place_in_group(obj, mesh_record, root_collection, group_cache):
             grouped_count += 1
+        if apply_visibility(obj, mesh_record):
+            visibility_count += 1
         assignments.append(
             assign_mesh_materials(obj, mesh_record, material_cache, warnings)
         )
@@ -149,6 +153,7 @@ def import_lookdev_package(
             "frame_count", 1
         )),
         "group_collection_count": len(group_cache),
+        "visibility_count": visibility_count,
         "grouped_mesh_count": grouped_count,
         "subdivision_count": subdivision_count,
         "light_count": light_result["light_count"],
