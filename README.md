@@ -99,7 +99,15 @@ Aktarılan kanallar:
 - Opacity/Transparency
 - Emission Color
 - Emission Strength
+- Specular (ağırlık)
 - Transmission (weight, renk, roughness), IOR, Thin Walled
+
+Arnold ve Redshift speküleri 0–1 ağırlık olarak verir; Blender'ın
+`Specular IOR Level`'ında 0.5 sıradan bir dielektrik, 0 ise speküler yok
+demektir. Bu yüzden ağırlık 1 Blender'ın varsayılanına eşlenir, 1'e değil.
+Principled enerji koruduğu için bu önemlidir: Maya'da speküleri sıfır olan bir
+yüzeye 0.5 bırakmak hem olmayan bir parlama ekler hem o enerjiyi diffuse'dan
+çalar.
 
 Materialin transmission ağırlığı sıfırdan büyükse Principled yerine **Glass
 BSDF** kurulur. Cam bir yüzeyde refraction'ı Principled transmission'la taklit
@@ -345,7 +353,7 @@ Kopyalamak yerine add-on klasörünü depoya bağla; `git pull` sonrası kopyala
 derdi kalmaz:
 
 ```bat
-mklink /J "%APPDATA%\Blender Foundation\Blender.2\scriptsddons\za_lookdev_importer" ^
+mklink /J "%APPDATA%\Blender Foundation\Blender\5.2\scripts\addons\za_lookdev_importer" ^
           "<depo>\za_lookdev_importer"
 ```
 
@@ -455,10 +463,14 @@ Redshift      x10      (olculemedi, orijinal aractan devralindi)
 
 π tesadüf değil: Arnold'ın normalize edilmiş `intensity`'si ışığın normali
 yönündeki ışıl şiddettir (`I₀`), Lambert yayıcı için toplam akı `Φ = π·I₀`, ve
-Blender'ın Power'ı toplam akıdır. Yani:
+Blender'ın Power'ı toplam akıdır.
+
+Buna sahne biriminin karesi de girer, çünkü Arnold birimden bağımsızdır:
+santimetre sahnede 150 birimlik mesafe Blender'da 1.5 m olur ve aydınlatma
+`1/d²` ile 10⁴ kat şaşar.
 
 ```text
-Blender Power = pi * intensity * 2^exposure
+Blender Power = pi * meters_per_maya_unit^2 * intensity * 2^exposure
 ```
 
 Mesafe, yoğunluk ve exposure değiştirilen beş varyantta çapa her seferinde

@@ -222,19 +222,42 @@ def main():
         data.update(extra)
         return data
 
+    # Measured: an Arnold or native Maya quad spans -1..1, so its emitting
+    # size is twice the transform scale. Redshift is unmeasured and stays 1:1.
+    check(
+        "arnold and maya area lights are twice their transform scale",
+        (lights.area_size_factor(record(node_type="aiAreaLight")),
+         lights.area_size_factor(record(node_type="areaLight"))) == (2.0, 2.0),
+    )
+    check(
+        "redshift keeps the unmeasured one to one reading",
+        lights.area_size_factor(record(node_type="RedshiftPhysicalLight")) == 1.0,
+    )
     close(
-        "rectangle 2x3 area",
-        lights.emitting_surface_area(record("RECTANGLE", (2.0, 3.0, 1.0)), 1.0),
+        "redshift rectangle 2x3 area",
+        lights.emitting_surface_area(
+            record("RECTANGLE", (2.0, 3.0, 1.0),
+                   node_type="RedshiftPhysicalLight"), 1.0),
         6.0,
     )
     close(
-        "disk diameter 4 area",
-        lights.emitting_surface_area(record("DISK", (4.0, 2.0, 1.0)), 1.0),
+        "arnold rectangle 2x3 area doubles on each edge",
+        lights.emitting_surface_area(
+            record("RECTANGLE", (2.0, 3.0, 1.0), node_type="aiAreaLight"), 1.0),
+        24.0,
+    )
+    close(
+        "redshift disk diameter 4 area",
+        lights.emitting_surface_area(
+            record("DISK", (4.0, 2.0, 1.0),
+                   node_type="RedshiftPhysicalLight"), 1.0),
         math.pi * 4.0,
     )
     close(
-        "sphere diameter 4 area",
-        lights.emitting_surface_area(record("SPHERE", (4.0, 2.0, 1.0)), 1.0),
+        "redshift sphere diameter 4 area",
+        lights.emitting_surface_area(
+            record("SPHERE", (4.0, 2.0, 1.0),
+                   node_type="RedshiftPhysicalLight"), 1.0),
         16.0 * math.pi,
     )
     close(
@@ -263,6 +286,15 @@ def main():
     watts = importer.constants.WATTS_PER_INTENSITY
     close("arnold converts through pi", watts["arnold"], math.pi)
     close("native maya converts through pi", watts["maya"], math.pi)
+    close(
+        "a centimetre scene folds the unit scale in as its square",
+        lights.light_energy(
+            record(effective_intensity=1.0, node_type="aiAreaLight"),
+            "AREA",
+            0.01,
+        ),
+        math.pi * 0.0001,
+    )
     close(
         "arnold intensity 1 becomes pi watts",
         lights.light_energy(
@@ -317,9 +349,9 @@ def main():
         math.pi,
     )
     close(
-        "non-normalized light folds in its 2x3 area",
+        "non-normalized light folds in its area once",
         lights.light_energy(unnormalized, "AREA", 1.0),
-        math.pi * 6.0,
+        math.pi * 24.0,
     )
     close(
         "non-normalized spot has no area to fold in",

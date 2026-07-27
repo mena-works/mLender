@@ -8,7 +8,7 @@ message shape changes.
 
 import math
 
-BUILD_VERSION = "1.10.0"
+BUILD_VERSION = "1.11.0"
 
 LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
@@ -20,7 +20,7 @@ LIVELINK_EVENT = "lookdev_package_ready"
 # the scene, so an unreadable package must be rejected before anything is lost.
 # 3 added glass channels and 4 added UDIM on the main branch; 5 is this
 # branch with both, plus the Arnold channels.
-SUPPORTED_SCHEMA_VERSIONS = (1, 2, 3, 4, 5, 6, 7)
+SUPPORTED_SCHEMA_VERSIONS = (1, 2, 3, 4, 5, 6, 7, 8)
 
 MAX_MESSAGE_BYTES = 32 * 1024 * 1024
 SOCKET_POLL_SECONDS = 0.5
@@ -45,6 +45,7 @@ SUBDIVISION_MODIFIER_NAME = "Z-A Subdivision"
 PRINCIPLED_INPUTS = {
     "base_color": ("Base Color",),
     "roughness": ("Roughness",),
+    "specular": ("Specular IOR Level", "Specular"),
     "metallic": ("Metallic",),
     "opacity": ("Alpha",),
     "normal": ("Normal",),
@@ -74,6 +75,15 @@ METADATA_CHANNELS = (
     "thin_walled",
     "transmission_affects_alpha",
 )
+
+# Arnold and Redshift state specular as a 0..1 weight; Blender states it as a
+# level where 0.5 is an ordinary dielectric and 0 is no specular at all. So a
+# full weight of 1 maps onto Blender's default rather than onto 1.
+#
+# This matters more than it looks: Principled conserves energy, so leaving the
+# level at 0.5 for a shader whose Maya specular was 0 both adds a highlight
+# that was never there and steals that energy from the diffuse.
+SPECULAR_WEIGHT_TO_LEVEL = 0.5
 
 # Channels that carry colour data; everything else is loaded as Non-Color.
 COLOR_CHANNELS = ("base_color", "emission")
@@ -170,6 +180,18 @@ WATTS_PER_INTENSITY = {
     "arnold": math.pi,
     "maya": math.pi,
     "redshift": 10.0,
+}
+
+# How a light's transform scale relates to its emitting size. Measured by
+# rendering a camera-visible quad light face on through an orthographic camera
+# of known width: a transform scale of 1 produced a 2 unit wide light, because
+# Arnold's quad spans -1..1. Native Maya area lights export to the same
+# quad_light and measured identically. Redshift is unmeasured, the plugin is
+# not installed here, so it keeps the previous one-to-one reading.
+AREA_SIZE_PER_SCALE = {
+    "arnold": 2.0,
+    "maya": 2.0,
+    "redshift": 1.0,
 }
 
 # User multiplier on top of the conversion above, exposed in the sidebar. It

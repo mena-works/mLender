@@ -25,6 +25,7 @@ from .constants import (
     OPENPBR_EMISSION_SEMANTIC,
     GLASS_INPUTS,
     PRINCIPLED_INPUTS,
+    SPECULAR_WEIGHT_TO_LEVEL,
     TRANSMISSION_THRESHOLD,
     UNLIT_SHADER_TYPES,
 )
@@ -93,6 +94,7 @@ def _build_principled(material, channels, warnings):
     for channel in (
         "base_color",
         "roughness",
+        "specular",
         "metallic",
         "opacity",
         "normal",
@@ -341,6 +343,10 @@ def apply_record_to_socket(material, shader, target, channel, record, warnings):
     elif channel == "normal":
         # A normal socket has no meaningful flat value.
         return
+    elif channel == "specular":
+        target.default_value = max(
+            0.0, min(1.0, scalar(value, 1.0) * SPECULAR_WEIGHT_TO_LEVEL)
+        )
     elif record.get("source_semantic") == OPENPBR_EMISSION_SEMANTIC:
         # A luminance in nits, not a socket-ready weight.
         target.default_value = max(

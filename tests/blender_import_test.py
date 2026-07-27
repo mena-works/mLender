@@ -269,10 +269,13 @@ def main():
           area is not None and area.data.type == "AREA")
     if area:
         check("disk shape", area.data.shape == "DISK", area.data.shape)
-        # 12 intensity x 2^2 exposure = 48 effective, converted through the
-        # measured factor of pi.
-        expected = 48.0 * math.pi
-        check("energy is 48 x pi", abs(area.data.energy - expected) < 1e-3,
+        # 12 intensity x 2^2 exposure = 48 effective, through the measured
+        # factor of pi, and then the square of the scene unit: Arnold is unit
+        # agnostic, so a centimetre scene is a hundredth the size in Blender
+        # and its lights fall off over a hundredth the distance.
+        expected = 48.0 * math.pi * (0.01 ** 2)
+        check("energy is 48 x pi x the unit scale squared",
+              abs(area.data.energy - expected) < 1e-9,
               "{0} vs {1}".format(area.data.energy, expected))
         if hasattr(area.data, "normalize"):
             check("Blender Power left meaning total flux",

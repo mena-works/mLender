@@ -102,14 +102,56 @@ ve pikseli aynıdır (oran 1.000000), yani onun çapası da π.
 
 Arnold'ın normalize edilmiş `intensity`'si, ışığın normali yönündeki **ışıl
 şiddettir** (`I₀`). Lambert yayıcı için toplam akı `Φ = π·I₀`. Blender'ın
-Power'ı toplam akı. Dolayısıyla:
+Power'ı toplam akı.
+
+## Birim ölçeği de girer — ilk ölçümün kör noktası
+
+Yukarıdaki ölçüm iki sahneyi de **aynı ham sayılarla** kurmuştu (ışık 10
+birimde, Blender'da da 10). Bu, dönüşümün sahne birimine bağlı olduğunu
+gizledi.
+
+Arnold birimden bağımsızdır: ışık `d` birim uzaktaysa aydınlatma `1/d²` düşer,
+`d`'nin ne anlama geldiğine bakmaz. Blender metre çalışır. Maya santimetredeyse
+150 birimlik mesafe Blender'da 1.5 m olur ve aynı ışık **10⁴ kat** parlak
+görünür.
 
 ```text
-Blender Power = pi * Arnold intensity * 2^exposure
+piksel_arnold  = k · I / d_maya²
+piksel_blender = P / (pi² · (s·d_maya)²)        s = meters_per_maya_unit
+
+esitle  ->  P = pi · s² · I
 ```
 
-Bu ampirik bir uydurma değil, **tam dönüşüm**. Ölçülen 3.1412 ile π arasındaki
-%0.013 fark render gürültüsüdür.
+Doğru dönüşüm:
+
+```text
+Blender Power = pi * s^2 * intensity * 2^exposure
+```
+
+`s = 0.01` (santimetre sahne) için bu, çıplak π'nin **10⁻⁴ katıdır**. Kalibrasyon
+sahnesi `s = 1` kullandığı için terim görünmüyordu.
+
+## Uçtan uca doğrulama
+
+`render_match_maya.py` + `render_match_blender.py` bunu gerçek hattan sınar:
+Maya'da bir küp, zemin, alan ışığı ve kamera kurar, paketi export eder, `.ass`'i
+kick ile render eder; Blender paketi import edip **aynı kameradan** render eder
+ve pikselleri karşılaştırır.
+
+Bu karşılaştırma üç ayrı hata ortaya çıkardı:
+
+```text
+1. birim olcegi enerjide yok sayiliyordu        ~10000x
+2. Arnold quad'i -1..1, yani scale'in 2 kati    sekil/yumusaklik
+3. specular agirligi hic aktarilmiyordu         ~%20 + aciya gore degisim
+```
+
+Üçü düzeltildikten sonra dört örnek noktasının üçü beş anlamlı hanede birebir
+aynı, ortalama oran **0.9976**, yayılım %1.03.
+
+Üçüncüsü sinsiydi: Principled enerji korur, dolayısıyla Maya'da `specular 0`
+olan bir yüzeye Blender'ın varsayılan 0.5 speküler seviyesini bırakmak hem
+olmayan bir parlama ekler hem o enerjiyi diffuse'dan çalar.
 
 ## Redshift
 

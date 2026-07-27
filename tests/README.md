@@ -1,6 +1,6 @@
 # Testler
 
-Dört kademe var. Yukarıdan aşağıya doğru daha yavaş ama daha gerçek.
+Beş kademe var. Yukarıdan aşağıya doğru daha yavaş ama daha gerçek.
 
 ## 1. Sözleşme kontrolleri (host gerekmez, saniyeler)
 
@@ -66,6 +66,26 @@ ağaçlarına, ışık data'sına assert eder. Önce 2. adımı çalıştır.
 
 Birden fazla Blender sürümünde çalıştırmak sürüm uyum kodunu sınar; bu araç
 3.6'dan 5.2'ye kadar iddia ediyor.
+
+## 5. Render eşleşmesi (gerçek Arnold + gerçek Cycles, ~2 dk)
+
+```bash
+"C:\Program Files\Autodesk\Maya2023\bin\mayapy.exe" tests/render_match_maya.py
+"C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" ^
+    --background --factory-startup --python tests/render_match_blender.py
+```
+
+Tek soruyu uçtan uca yanıtlar: Arnold'da belli bir şekilde görünen ışık,
+aktarımdan sonra Blender'da aynı görünüyor mu? Kamera da aktarıldığı için iki
+render aynı yerden aynı lensle bakar; ikisi de lineer EXR yazdığı için view
+transform devrede değildir ve sayılar doğrudan karşılaştırılabilir.
+
+Bu karşılaştırma üç gerçek hata buldu: enerjide birim ölçeğinin yok sayılması
+(~10000×), Arnold quad'ının transform scale'in iki katı olması, ve speküler
+ağırlığının hiç aktarılmaması. Ayrıntı `light_calibration.md`.
+
+`.ass` export ederken `lightLinks=0, shadowLinks=0` şart; yoksa export boş bir
+ışık grubuna karşı `use_light_group on` yazar ve render simsiyah çıkar.
 
 ## Ne doğrulanmıyor
 

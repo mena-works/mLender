@@ -14,6 +14,7 @@ import os
 import bpy
 
 from .constants import (
+    AREA_SIZE_PER_SCALE,
     DEFAULT_LIGHT_POWER_SCALE,
     LIGHT_COLLECTION_NAME,
     LUMENS_PER_WATT,
@@ -149,10 +150,7 @@ def create_light_object(
     if hasattr(data, "volume_factor"):
         data.volume_factor = max(0.0, scalar(parameters.get("volume"), 1.0))
 
-    source_scale = source_light_scale(record)
-    size_x = max(0.0001, source_scale[0] * position_scale)
-    size_y = max(0.0001, source_scale[1] * position_scale)
-    size_z = max(0.0001, source_scale[2] * position_scale)
+    size_x, size_y, size_z = emitting_dimensions(record, position_scale)
 
     if blender_type == "AREA":
         configure_area_light(
@@ -284,13 +282,31 @@ def light_energy(record, blender_type, position_scale, power_scale=None):
         area = max(0.000001, emitting_surface_area(record, position_scale))
         return effective * area * math.pi / LUMENS_PER_WATT
 
+    # A dimensionless intensity illuminates according to the scene's raw
+    # numbers, because Arnold and Redshift are unit agnostic: a light 150
+    # units away falls off as 1/150 squared whatever those units mean. Blender
+    # works in metres, so the same light sits 1.5 m away and would be ten
+    # thousand times brighter unless the unit scale is folded in as well.
     watts_per_intensity = WATTS_PER_INTENSITY.get(renderer_key(record), math.pi)
-    flux = effective * watts_per_intensity * power_scale
+    unit_scale = max(1e-12, scalar(position_scale, 1.0)) ** 2
+    flux = effective * watts_per_intensity * unit_scale * power_scale
     if blender_type == "AREA" and not source_is_normalized(record):
         # A non-normalized source states intensity per unit area; Blender
         # Power does not, so the area is folded in here exactly once.
         flux *= max(0.000001, emitting_surface_area(record, position_scale))
     return flux
+
+
+def area_size_factor(record):
+    """Emitting size per unit of transform scale, by renderer convention."""
+    return AREA_SIZE_PER_SCALE.get(renderer_key(record), 1.0)
+
+
+def emitting_dimensions(record, position_scale):
+    """The light's emitting size in metres, on each axis."""
+    scale = source_light_scale(record)
+    factor = area_size_factor(record) * position_scale
+    return tuple(max(0.0001, value * factor) for value in scale[:3])
 
 
 def emitting_surface_area(record, position_scale):
@@ -300,16 +316,14 @@ def emitting_surface_area(record, position_scale):
     ``configure_area_light`` puts on the light data: rectangles use width by
     height, while discs and spheres treat the larger dimension as a diameter.
     """
-    scale = source_light_scale(record)
-    width = scale[0] * position_scale
-    height = scale[1] * position_scale
+    width, height, depth = emitting_dimensions(record, position_scale)
     shape = str(record.get("area_shape") or "RECTANGLE").upper()
 
     if shape == "DISK":
         radius = max(width, height) * 0.5
         return math.pi * radius * radius
     if shape == "SPHERE":
-        radius = max(width, height, scale[2] * position_scale) * 0.5
+        radius = max(width, height, depth) * 0.5
         return 4.0 * math.pi * radius * radius
     return width * height
 

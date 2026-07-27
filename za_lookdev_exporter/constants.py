@@ -17,7 +17,7 @@ LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
 LIVELINK_PROTOCOL = "za_lookdev_livelink"
 LIVELINK_VERSION = 1
-EXPORT_SCHEMA_VERSION = 7
+EXPORT_SCHEMA_VERSION = 8
 
 LIGHT_NODE_TYPES = (
     "RedshiftPhysicalLight",
@@ -135,6 +135,7 @@ SUPPORTED_SHADER_TYPES = (
 ARNOLD_STANDARD_CHANNELS = {
     "base_color": ("baseColor",),
     "roughness": ("specularRoughness",),
+    "specular": ("specular",),
     "metallic": ("metalness",),
     "opacity": ("opacity",),
     "transmission": ("transmission",),
@@ -154,6 +155,7 @@ ARNOLD_STANDARD_CHANNELS = {
 ARNOLD_OPENPBR_CHANNELS = {
     "base_color": ("baseColor",),
     "roughness": ("specularRoughness",),
+    "specular": ("specularWeight", "specular"),
     "metallic": ("baseMetalness", "metalness"),
     "opacity": ("geometryOpacity", "opacity"),
     "transmission": ("transmissionWeight",),
@@ -182,6 +184,7 @@ OPENPBR_EMISSION_SEMANTIC = "openpbr_emission_luminance"
 REDSHIFT_STANDARD_CHANNELS = {
     "base_color": ("base_color", "baseColor", "diffuse_color", "color"),
     "roughness": ("refl_roughness", "reflection_roughness", "specular_roughness"),
+    "specular": ("refl_weight", "reflection_weight"),
     "metallic": ("metalness", "refl_metalness"),
     "opacity": ("opacity_color", "opacity"),
     "transmission": ("refr_weight", "transmission_weight"),
@@ -198,6 +201,7 @@ REDSHIFT_STANDARD_CHANNELS = {
 REDSHIFT_LEGACY_CHANNELS = {
     "base_color": ("diffuse_color", "base_color", "color"),
     "roughness": ("refl_roughness", "reflection_roughness"),
+    "specular": ("refl_weight", "reflection_weight"),
     "metallic": ("refl_metalness", "metalness"),
     "opacity": ("opacity_color", "opacity"),
     "transmission": ("refr_weight", "transmission_weight"),

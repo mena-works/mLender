@@ -118,7 +118,7 @@ Kurallar:
 - Breaking bir değişiklik yapıyorsan `LIVELINK_VERSION`'ı **her iki dosyada
   birlikte** artır. Tek taraflı artırma sessiz değil, açık hata verir — bu iyi;
   ama iki tarafı da güncellemeden commit etme.
-- `EXPORT_SCHEMA_VERSION` (exporter, şu an `2`) JSON'a yazılır ve importer
+- `EXPORT_SCHEMA_VERSION` (exporter, şu an `8`) JSON'a yazılır ve importer
   `SUPPORTED_SCHEMA_VERSIONS` ile doğrular. Şema kırıcı bir değişiklik
   yaparsan exporter'da sürümü artır **ve** importer'ın desteklenen sürüm
   listesini güncelle.
@@ -134,9 +134,9 @@ Exporter'ın ürettiği kanal anahtarları, importer'ın `_principled_input()`
 eşlemesiyle birebir uyuşmalıdır:
 
 ```text
-base_color  roughness  metallic  opacity  normal  emission  emission_strength
-transmission  transmission_color  transmission_roughness  ior  thin_walled
-transmission_affects_alpha
+base_color  roughness  specular  metallic  opacity  normal  emission
+emission_strength  transmission  transmission_color  transmission_roughness
+ior  thin_walled  transmission_affects_alpha
 ```
 
 Üç build yolu var ve kanalın hangisine gittiği `constants.py`'de açıktır:
@@ -294,6 +294,10 @@ dokunma.
 
 ### Yoğunluktan watt'a dönüşüm ölçüldü
 
+Dönüşüm `WATTS_PER_INTENSITY × position_scale²`'dir. Sahne biriminin karesi
+**zorunlu**: Arnold birimden bağımsızdır, aydınlatma ham sayılara göre `1/d²`
+düşer. Bu terimi düşürmek santimetre sahnelerde 10⁴ kat hata verir.
+
 `WATTS_PER_INTENSITY` tahmin değil, ölçüm sonucudur. Arnold ve native Maya
 için değer **π**'dir; Arnold'ın normalize `intensity`'si normal yöndeki ışıl
 şiddettir ve Lambert yayıcının toplam akısı onun π katıdır.
@@ -441,6 +445,8 @@ Kullanıcının elle doğrulaması gereken adımlar:
 - ❌ Arnold shader'ında `outColor` okuma (hesaplanmış çıktı, girdi değil)
 - ❌ Yeni davranışı teste assertion eklemeden bırakma
 - ❌ Kaynak sahnenin istemediği bir şeyi bütün meshlere uygulama
+- ❌ Işık enerjisinden `position_scale²` terimini düşürme
+- ❌ Blender soket varsayılanını kaynaktan gelen değer sanma (speküler 0.5)
 
 ---
 
