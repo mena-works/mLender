@@ -17,7 +17,7 @@ LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
 LIVELINK_PROTOCOL = "za_lookdev_livelink"
 LIVELINK_VERSION = 1
-EXPORT_SCHEMA_VERSION = 2
+EXPORT_SCHEMA_VERSION = 5
 
 LIGHT_NODE_TYPES = (
     "RedshiftPhysicalLight",
@@ -137,6 +137,11 @@ ARNOLD_STANDARD_CHANNELS = {
     "roughness": ("specularRoughness",),
     "metallic": ("metalness",),
     "opacity": ("opacity",),
+    "transmission": ("transmission",),
+    "transmission_color": ("transmissionColor",),
+    "transmission_roughness": ("transmissionExtraRoughness",),
+    "ior": ("specularIOR",),
+    "thin_walled": ("thinWalled",),
     "normal": ("normalCamera",),
     "emission": ("emissionColor",),
     "emission_strength": ("emission",),
@@ -151,6 +156,10 @@ ARNOLD_OPENPBR_CHANNELS = {
     "roughness": ("specularRoughness",),
     "metallic": ("baseMetalness", "metalness"),
     "opacity": ("geometryOpacity", "opacity"),
+    "transmission": ("transmissionWeight",),
+    "transmission_color": ("transmissionColor",),
+    "ior": ("specularIOR",),
+    "thin_walled": ("geometryThinWalled",),
     "normal": ("normalCamera",),
     "emission": ("emissionColor",),
     "emission_strength": ("emissionLuminance",),
@@ -175,6 +184,12 @@ REDSHIFT_STANDARD_CHANNELS = {
     "roughness": ("refl_roughness", "reflection_roughness", "specular_roughness"),
     "metallic": ("metalness", "refl_metalness"),
     "opacity": ("opacity_color", "opacity"),
+    "transmission": ("refr_weight", "transmission_weight"),
+    "transmission_color": ("refr_color", "transmission_color"),
+    "transmission_roughness": ("refr_roughness", "transmission_roughness"),
+    "ior": ("refl_ior", "refr_ior", "ior"),
+    "thin_walled": ("refr_thin_walled", "thin_walled"),
+    "transmission_affects_alpha": ("affects_alpha",),
     "normal": ("bump_input", "normalCamera"),
     "emission": ("emission_color", "emission"),
     "emission_strength": ("emission_weight", "emissionWeight"),
@@ -185,6 +200,12 @@ REDSHIFT_LEGACY_CHANNELS = {
     "roughness": ("refl_roughness", "reflection_roughness"),
     "metallic": ("refl_metalness", "metalness"),
     "opacity": ("opacity_color", "opacity"),
+    "transmission": ("refr_weight", "transmission_weight"),
+    "transmission_color": ("refr_color", "transmission_color"),
+    "transmission_roughness": ("refr_roughness", "transmission_roughness"),
+    "ior": ("refr_ior", "refl_ior", "ior"),
+    "thin_walled": ("refr_thin_walled", "thin_walled"),
+    "transmission_affects_alpha": ("affects_alpha",),
     "normal": ("bump_input", "normalCamera"),
     "emission": ("emission_color", "emission"),
     "emission_strength": ("emission_weight", "emissionWeight"),
@@ -199,8 +220,19 @@ REDSHIFT_GLOSSINESS_FLAGS = (
     "refl_convert_from_glossiness",
 )
 
+# UDIM. Maya's uvTilingMode 3 is the UDIM mode and tiles are numbered from
+# 1001, which is what separates a tile number from a version number in a file
+# name. The token pattern covers the spellings different tools write.
+UDIM_TOKEN = "<UDIM>"
+UDIM_TOKEN_PATTERN = r"(?i)(<udim>|%\(udim\)d|\$udim|\{udim\})"
+UDIM_TILING_MODE = 3
+UDIM_FIRST_TILE = 1001
+
 # File path attributes checked while walking a texture network upstream.
 TEXTURE_PATH_ATTRS = ("fileTextureName", "tex0", "filename", "file")
+
+# Dielectric default, used when a shader exposes no IOR attribute.
+DEFAULT_IOR = 1.5
 
 # Principled roughness approximations for Maya's non-PBR shaders.
 LAMBERT_ROUGHNESS = 0.7

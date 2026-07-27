@@ -9,10 +9,17 @@ the network's result that can be rebuilt in Blender without baking.
 from __future__ import absolute_import
 
 import os
+import re
 
 import maya.cmds as cmds
 
-from .constants import TEXTURE_PATH_ATTRS
+from .constants import (
+    TEXTURE_PATH_ATTRS,
+    UDIM_FIRST_TILE,
+    UDIM_TILING_MODE,
+    UDIM_TOKEN,
+    UDIM_TOKEN_PATTERN,
+)
 from .mayautils import (
     absolute_user_path,
     attr_exists,
@@ -47,13 +54,20 @@ def texture_from_plug(plug):
     for node in unique(candidates):
         path = texture_path_from_node(node)
         if path:
-            return {
-                "path": maya_path(path),
+            udim = udim_texture_info(node, path)
+            record = {
+                "path": maya_path(udim.get("pattern") or path),
+                "original_path": maya_path(path),
                 "node": node_label(node),
                 "node_type": node_type(node),
                 "source_plug": source_plug,
                 "color_space": texture_color_space(node),
             }
+            if udim.get("is_udim"):
+                record["udim"] = True
+                record["udim_pattern"] = maya_path(udim["pattern"])
+                record["udim_mode"] = udim.get("mode") or "detected"
+            return record
     return {
         "path": "",
         "node": node_label(source_node),
@@ -61,6 +75,75 @@ def texture_from_plug(plug):
         "source_plug": source_plug,
         "unsupported_network": True,
     }
+
+
+def udim_texture_info(node, path):
+    """Detect a UDIM sequence and return the pattern to ship to Blender.
+
+    Maya is asked directly rather than guessed at: uvTilingMode says whether
+    the file node is tiled, and computedFileTextureNamePattern is the pattern
+    Maya itself resolved. Only if neither is conclusive does the tile number
+    get substituted out of the file name.
+    """
+    original_path = absolute_user_path(path)
+
+    tiling_mode = 0
+    if attr_exists(node, "uvTilingMode"):
+        try:
+            tiling_mode = int(cmds.getAttr(node + ".uvTilingMode"))
+        except Exception:
+            tiling_mode = 0
+
+    pattern = ""
+    if attr_exists(node, "computedFileTextureNamePattern"):
+        try:
+            pattern = cmds.getAttr(
+                node + ".computedFileTextureNamePattern"
+            ) or ""
+        except Exception:
+            pattern = ""
+    pattern = absolute_user_path(pattern or original_path)
+    pattern, has_token = normalize_udim_token(pattern)
+
+    # uvTilingMode 3 is Maya's UDIM mode.
+    if not has_token and tiling_mode == UDIM_TILING_MODE:
+        pattern = replace_udim_tile_number(pattern)
+        has_token = UDIM_TOKEN in pattern
+
+    return {
+        "is_udim": bool(has_token or tiling_mode == UDIM_TILING_MODE),
+        "pattern": pattern if has_token else original_path,
+        "mode": (
+            "maya_uv_tiling_mode"
+            if tiling_mode == UDIM_TILING_MODE
+            else "path_token"
+        ),
+    }
+
+
+def normalize_udim_token(path):
+    """Collapse the UDIM spellings different tools write into one token."""
+    normalized = re.sub(UDIM_TOKEN_PATTERN, UDIM_TOKEN, str(path))
+    return normalized, UDIM_TOKEN in normalized
+
+
+def replace_udim_tile_number(path):
+    """Swap a concrete tile number in the file name for the UDIM token.
+
+    Only the last four digit run of 1001 or above is treated as a tile, so
+    version numbers and dates earlier in the name survive.
+    """
+    folder, filename = os.path.split(path)
+    matches = [
+        match
+        for match in re.finditer(r"(?<!\d)([1-9]\d{3})(?!\d)", filename)
+        if int(match.group(1)) >= UDIM_FIRST_TILE
+    ]
+    if not matches:
+        return path
+    match = matches[-1]
+    filename = filename[: match.start()] + UDIM_TOKEN + filename[match.end():]
+    return os.path.join(folder, filename)
 
 
 def texture_path_from_node(node):

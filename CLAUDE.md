@@ -132,7 +132,19 @@ eşlemesiyle birebir uyuşmalıdır:
 
 ```text
 base_color  roughness  metallic  opacity  normal  emission  emission_strength
+transmission  transmission_color  transmission_roughness  ior  thin_walled
+transmission_affects_alpha
 ```
+
+Üç build yolu var ve kanalın hangisine gittiği `constants.py`'de açıktır:
+
+- `PRINCIPLED_INPUTS` — Principled BSDF soketleri
+- `GLASS_INPUTS` — transmission sıfırdan büyükse kurulan Glass BSDF soketleri
+- `METADATA_CHANNELS` — soketi olmayan, yolu seçen veya custom property olarak
+  saklanan kanallar
+
+Yeni kanal eklerken bu üç sözlükten **birine** girmeli; sözleşme testi
+kapsanmayan kanalı yakalar.
 
 Her kanal kaydı şu alanları taşıyabilir:
 
@@ -148,8 +160,11 @@ Her kanal kaydı şu alanları taşıyabilir:
 ```
 
 - Yeni kanal eklerken **üç yeri birden** güncelle: exporter kanal tablosu,
-  importer `_principled_input()`, ve gerekiyorsa `_apply_channel()` özel
-  davranışı.
+  importer'daki ilgili soket sözlüğü, ve gerekiyorsa `apply_record_to_socket()`
+  özel davranışı.
+- Şema kırıcı kanal eklediysen `EXPORT_SCHEMA_VERSION`'ı artır ve importer'ın
+  `SUPPORTED_SCHEMA_VERSIONS` listesine ekle. Liste eski sürümleri de tutar,
+  böylece başka bir daldan gelen paket reddedilmez.
 - `invert` bayrağını exporter koyar, importer uygular. Exporter değeri kendisi
   ters çevirdiyse `invert`'i `False`'a çeker — çift inversiyon hatasına dikkat
   (`_maya_basic_channels`, `_surface_shader_channels`).

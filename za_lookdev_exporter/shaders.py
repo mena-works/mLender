@@ -3,11 +3,16 @@
 
 The channel keys produced here are the contract with the Blender importer:
 
-    base_color  roughness  metallic  opacity  normal  emission  emission_strength
+    base_color  roughness  metallic  opacity  normal  emission
+    emission_strength  transmission  transmission_color
+    transmission_roughness  ior  thin_walled  transmission_affects_alpha
+
+The first seven drive a Principled BSDF. The transmission group drives a Glass
+BSDF instead, which the importer switches to when transmission is non-zero.
 
 Each channel record may carry ``value``, ``texture``, ``invert`` and the
 ``maya_attr``/``maya_plug`` the data actually came from. Adding a channel means
-updating the importer's ``_principled_input`` mapping in the same change.
+updating the importer's socket mapping in the same change.
 """
 from __future__ import absolute_import
 
@@ -18,6 +23,7 @@ from .constants import (
     ARNOLD_OPENPBR_CHANNELS,
     ARNOLD_STANDARD_CHANNELS,
     BLINN_ROUGHNESS,
+    DEFAULT_IOR,
     FALLBACK_ROUGHNESS,
     LAMBERT_ROUGHNESS,
     OPENPBR_EMISSION_SEMANTIC,
@@ -78,9 +84,7 @@ def arnold_channels(shader, channel_map, roughness=None, openpbr=False):
 
     if roughness is not None:
         result["roughness"] = {"value": float(roughness)}
-    result.setdefault("roughness", {"value": FALLBACK_ROUGHNESS})
-    result.setdefault("metallic", {"value": 0.0})
-    result.setdefault("opacity", {"value": [1.0, 1.0, 1.0, 1.0]})
+    _apply_surface_defaults(result)
     return result
 
 
@@ -91,9 +95,21 @@ def redshift_channels(shader, channel_map):
         if record:
             result[channel] = record
     apply_glossiness_conversion(shader, result.get("roughness"))
+    _apply_surface_defaults(result)
+    return result
+
+
+def _apply_surface_defaults(result):
+    """Fill in the channels a Principled or Glass rebuild always needs.
+
+    Transmission defaults to zero so an absent refraction attribute never
+    trips the glass path, and IOR to the usual 1.5 for dielectrics.
+    """
     result.setdefault("roughness", {"value": FALLBACK_ROUGHNESS})
     result.setdefault("metallic", {"value": 0.0})
     result.setdefault("opacity", {"value": [1.0, 1.0, 1.0, 1.0]})
+    result.setdefault("transmission", {"value": 0.0})
+    result.setdefault("ior", {"value": DEFAULT_IOR})
     return result
 
 

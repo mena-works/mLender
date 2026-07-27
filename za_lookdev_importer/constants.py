@@ -8,7 +8,7 @@ message shape changes.
 
 import math
 
-BUILD_VERSION = "1.7.0"
+BUILD_VERSION = "1.8.0"
 
 LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
@@ -18,7 +18,9 @@ LIVELINK_EVENT = "lookdev_package_ready"
 
 # Package JSON schema versions this build knows how to read. The import wipes
 # the scene, so an unreadable package must be rejected before anything is lost.
-SUPPORTED_SCHEMA_VERSIONS = (1, 2)
+# 3 added glass channels and 4 added UDIM on the main branch; 5 is this
+# branch with both, plus the Arnold channels.
+SUPPORTED_SCHEMA_VERSIONS = (1, 2, 3, 4, 5)
 
 MAX_MESSAGE_BYTES = 32 * 1024 * 1024
 SOCKET_POLL_SECONDS = 0.5
@@ -40,8 +42,36 @@ PRINCIPLED_INPUTS = {
     "emission_strength": ("Emission Strength",),
 }
 
+# UDIM. Tiles are numbered from 1001. The token pattern covers the spellings
+# different tools write, so a package from any exporter version resolves.
+UDIM_TOKEN = "<UDIM>"
+UDIM_TOKEN_PATTERN = r"(?i)(<udim>|%\(udim\)d|\$udim|\{udim\})"
+UDIM_TILING_MODE = 3
+UDIM_FIRST_TILE = 1001
+
+# Glass BSDF socket names per channel, used by the refractive build path.
+GLASS_INPUTS = {
+    "transmission_color": ("Color",),
+    "transmission_roughness": ("Roughness",),
+    "ior": ("IOR",),
+    "normal": ("Normal",),
+}
+
+# Channels with no socket of their own. They either select the build path or
+# survive as custom properties on the material for reference.
+METADATA_CHANNELS = (
+    "transmission",
+    "thin_walled",
+    "transmission_affects_alpha",
+)
+
 # Channels that carry colour data; everything else is loaded as Non-Color.
 COLOR_CHANNELS = ("base_color", "emission")
+
+# A transmission weight above this switches a material to the Glass BSDF path
+# instead of Principled. It also serves as the tolerance for deciding that an
+# opacity value is meaningfully below one.
+TRANSMISSION_THRESHOLD = 1e-6
 
 # Shaders that are unlit. These are rebuilt as Emission mixed against a
 # Transparent BSDF rather than as a Principled surface, which is far closer to
@@ -70,7 +100,7 @@ PURGED_DATA_COLLECTIONS = (
 SUBDIVISION_SETTINGS = {
     "subdivision_type": "CATMULL_CLARK",
     "levels": 2,
-    "render_levels": 2,
+    "render_levels": 3,
     "boundary_smooth": "PRESERVE_CORNERS",
     "use_limit_surface": True,
     "quality": 3,

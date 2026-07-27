@@ -4,7 +4,13 @@
 Channel keys arriving in the package JSON are the contract with the Maya
 exporter::
 
-    base_color  roughness  metallic  opacity  normal  emission  emission_strength
+    base_color  roughness  metallic  opacity  normal  emission
+    emission_strength  transmission  transmission_color
+    transmission_roughness  ior  thin_walled  transmission_affects_alpha
+
+There are three build paths: unlit shaders become Emission mixed against a
+Transparent BSDF, refractive ones become a Glass BSDF, and everything else
+becomes a Principled BSDF.
 
 Every material produced here carries the ``za_generated`` custom property so
 the import can tell its own datablocks apart from the placeholder materials
@@ -17,7 +23,9 @@ from .constants import (
     DEFAULT_EMISSION_STRENGTH,
     OPENPBR_EMISSION_LUMINANCE_SCALE,
     OPENPBR_EMISSION_SEMANTIC,
+    GLASS_INPUTS,
     PRINCIPLED_INPUTS,
+    TRANSMISSION_THRESHOLD,
     UNLIT_SHADER_TYPES,
 )
 from .images import load_image
@@ -54,6 +62,10 @@ def build_material(material_record, warnings):
     channels = material_record.get("channels") or {}
     if material_record.get("shader_type") in UNLIT_SHADER_TYPES:
         _build_unlit(material, channels, warnings)
+        return material
+
+    if channel_is_active(channels.get("transmission")):
+        _build_glass(material, channels, warnings)
         return material
 
     _build_principled(material, channels, warnings)
@@ -103,6 +115,121 @@ def _default_emission_strength(bsdf, channels):
     socket = principled_input(bsdf, "emission_strength")
     if socket is not None:
         socket.default_value = DEFAULT_EMISSION_STRENGTH
+
+
+def channel_is_active(record):
+    """Whether a weight channel is switched on in the source material.
+
+    A textured weight counts as on regardless of its flat value, because the
+    texture is what actually drives it.
+    """
+    if not record:
+        return False
+    if (record.get("texture") or {}).get("path"):
+        return True
+    return scalar(record.get("value"), 0.0) > TRANSMISSION_THRESHOLD
+
+
+def _build_glass(material, channels, warnings):
+    """Rebuild a refractive material as a Glass BSDF.
+
+    Principled can do transmission, but a dedicated Glass BSDF matches what
+    Redshift and Arnold refraction actually look like far more closely, and
+    keeps the roughness and IOR meaning the same thing on both sides.
+    """
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+
+    output = nodes.new("ShaderNodeOutputMaterial")
+    output.location = (560, 0)
+    glass = nodes.new("ShaderNodeBsdfGlass")
+    glass.name = "ZA_Glass"
+    glass.label = "Glass"
+    glass.location = (80, 40)
+
+    # OpenPBR has no transmission roughness of its own, and neither do some
+    # Redshift versions, so the surface roughness stands in.
+    colour_record = channels.get("transmission_color") or channels.get("base_color")
+    roughness_record = (
+        channels.get("transmission_roughness") or channels.get("roughness")
+    )
+    for channel, record in (
+        ("transmission_color", colour_record),
+        ("transmission_roughness", roughness_record),
+        ("ior", channels.get("ior")),
+        ("normal", channels.get("normal")),
+    ):
+        apply_record_to_socket(
+            material,
+            glass,
+            _socket_for(glass, GLASS_INPUTS, channel),
+            channel,
+            record,
+            warnings,
+        )
+
+    opacity_record = channels.get("opacity") or {}
+    if _opacity_requires_mix(opacity_record):
+        # Cutout opacity is a different thing from refraction, so it stays a
+        # mix against a Transparent BSDF rather than tinting the glass.
+        transparent = nodes.new("ShaderNodeBsdfTransparent")
+        transparent.location = (80, -170)
+        mix = nodes.new("ShaderNodeMixShader")
+        mix.name = "ZA_Glass_Opacity"
+        mix.label = "Glass Cutout Opacity"
+        mix.location = (330, 0)
+        links.new(transparent.outputs.get("BSDF"), mix.inputs[1])
+        links.new(glass.outputs.get("BSDF"), mix.inputs[2])
+        links.new(mix.outputs.get("Shader"), output.inputs.get("Surface"))
+        apply_record_to_socket(
+            material,
+            mix,
+            mix.inputs[0],
+            "opacity",
+            opacity_record,
+            warnings,
+        )
+    else:
+        links.new(glass.outputs.get("BSDF"), output.inputs.get("Surface"))
+
+    material["za_material_mode"] = "GLASS_BSDF"
+    material["za_transmission_weight"] = scalar(
+        (channels.get("transmission") or {}).get("value"),
+        1.0,
+    )
+    material["za_thin_walled"] = bool(
+        scalar((channels.get("thin_walled") or {}).get("value"), 0.0)
+    )
+    material["za_transmission_affects_alpha"] = bool(
+        scalar(
+            (channels.get("transmission_affects_alpha") or {}).get("value"),
+            1.0,
+        )
+    )
+    _enable_transmission(material)
+
+
+def _opacity_requires_mix(record):
+    if not record:
+        return False
+    if (record.get("texture") or {}).get("path"):
+        return True
+    return scalar(record.get("value"), 1.0) < 1.0 - TRANSMISSION_THRESHOLD
+
+
+def _enable_transmission(material):
+    """Turn on whatever refraction support the running Blender offers."""
+    for attr, value in (
+        ("use_screen_refraction", True),
+        ("use_raytrace_refraction", True),
+        ("use_backface_culling", False),
+        ("use_transparent_shadow", True),
+    ):
+        if hasattr(material, attr):
+            try:
+                setattr(material, attr, value)
+            except Exception:
+                pass
 
 
 def _build_unlit(material, channels, warnings):
@@ -170,10 +297,23 @@ def _build_unlit(material, channels, warnings):
 
 def apply_channel(material, bsdf, channel, record, warnings):
     """Wire one channel into the Principled BSDF, texture first then value."""
-    if not record:
-        return
-    target = principled_input(bsdf, channel)
-    if target is None:
+    apply_record_to_socket(
+        material,
+        bsdf,
+        principled_input(bsdf, channel),
+        channel,
+        record,
+        warnings,
+    )
+
+
+def apply_record_to_socket(material, shader, target, channel, record, warnings):
+    """Wire a channel record into any socket, texture first then flat value.
+
+    Kept separate from the Principled mapping so the glass path can drive a
+    Glass BSDF's sockets through exactly the same texture and invert handling.
+    """
+    if not record or target is None:
         return
 
     texture = record.get("texture") or {}
@@ -182,7 +322,7 @@ def apply_channel(material, bsdf, channel, record, warnings):
         if image:
             connect_image_channel(
                 material,
-                bsdf,
+                shader,
                 target,
                 channel,
                 image,
@@ -193,7 +333,7 @@ def apply_channel(material, bsdf, channel, record, warnings):
     if "value" not in record:
         return
     value = record.get("value")
-    if channel in ("base_color", "emission"):
+    if channel in ("base_color", "emission", "transmission_color"):
         target.default_value = color4(value)
     elif channel == "opacity":
         target.default_value = scalar(value, 1.0)
@@ -254,8 +394,13 @@ def _insert_value_invert(nodes, links, output):
 
 def principled_input(bsdf, channel):
     """Resolve a channel to a Principled socket across Blender versions."""
-    for name in PRINCIPLED_INPUTS.get(channel, ()):
-        socket = bsdf.inputs.get(name)
+    return _socket_for(bsdf, PRINCIPLED_INPUTS, channel)
+
+
+def _socket_for(shader, mapping, channel):
+    """First socket on a shader that a channel's candidate names resolve to."""
+    for name in mapping.get(channel, ()):
+        socket = shader.inputs.get(name)
         if socket is not None:
             return socket
     return None

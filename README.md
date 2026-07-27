@@ -97,6 +97,21 @@ Aktarılan kanallar:
 - Opacity/Transparency
 - Emission Color
 - Emission Strength
+- Transmission (weight, renk, roughness), IOR, Thin Walled
+
+Materialin transmission ağırlığı sıfırdan büyükse Principled yerine **Glass
+BSDF** kurulur. Cam bir yüzeyde refraction'ı Principled transmission'la taklit
+etmek yerine ayrı bir Glass BSDF kullanmak, hem Redshift hem Arnold tarafındaki
+görüntüye belirgin şekilde daha yakın duruyor; roughness ve IOR de iki tarafta
+aynı anlama geliyor.
+
+Cutout opacity refraction'dan ayrı tutulur: opacity 1'in altındaysa Glass BSDF
+bir Transparent BSDF ile Mix Shader üzerinden karıştırılır, cam rengine
+karıştırılmaz.
+
+Kaynak değerler material custom property'lerinde saklanır:
+`za_material_mode`, `za_transmission_weight`, `za_thin_walled`,
+`za_transmission_affects_alpha`.
 
 ### Redshift roughness kuralı
 
@@ -207,6 +222,25 @@ Principled kurulum yapılır.
 Base Color ve Emission textureleri renkli; Roughness, Metalness, Opacity ve
 Normal textureleri Blender'da Non-Color olarak açılır. Normal texture,
 `Normal Map` node üzerinden Principled Normal inputuna bağlanır.
+
+### UDIM
+
+UDIM tespiti dosya adına bakarak tahmin edilmez, **Maya'ya sorulur**:
+`file.uvTilingMode` tiled olup olmadığını, `computedFileTextureNamePattern` ise
+Maya'nın kendi çözdüğü deseni verir. Yalnız ikisi de sonuç vermezse dosya
+adındaki tile numarası `<UDIM>` ile değiştirilir.
+
+- `<UDIM>`, `<udim>`, `%(UDIM)d`, `$UDIM`, `{UDIM}` biçimleri tek token'a
+  normalize edilir.
+- Tile numarası sayılmak için 1001 veya üstü olmalı ve dosya adındaki **son**
+  dört haneli grup olmalıdır; böylece versiyon numaraları tile sanılmaz.
+- Blender tarafında image `TILED` yapılır ve `reload()` edilir — Blender kardeş
+  tile'ları yalnız reload sırasında tarar.
+- Glob'da `*` yerine `[1-9][0-9][0-9][0-9]` kullanılır; `*` aynı önekle
+  başlayan alakasız dosyaları yakalayabiliyordu.
+
+JSON hem `<UDIM>` desenini (`path`, `udim_pattern`) hem de somut tile yolunu
+(`original_path`) taşır.
 
 Bir shader emission rengi gönderip emission strength göndermezse Blender'da
 strength `1.0` olarak set edilir. Blender 3.x bu soketi varsayılan olarak `1.0`,

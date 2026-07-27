@@ -70,6 +70,13 @@ def build_scene():
     _, flat = shaded_cube("flatCube", "aiFlat")
     cmds.setAttr(flat + ".color", 0.1, 0.9, 0.4, type="double3")
 
+    _, glass = shaded_cube("glassCube", "aiStandardSurface")
+    cmds.setAttr(glass + ".transmission", 1.0)
+    cmds.setAttr(glass + ".transmissionColor", 0.2, 0.9, 0.8, type="double3")
+    cmds.setAttr(glass + ".transmissionExtraRoughness", 0.05)
+    cmds.setAttr(glass + ".specularIOR", 1.52)
+    cmds.setAttr(glass + ".thinWalled", True)
+
     _, lam = shaded_cube("aiLambertCube", "aiLambert")
     cmds.setAttr(lam + ".KdColor", 0.3, 0.3, 0.7, type="double3")
     cmds.setAttr(lam + ".opacity", 0.8, 0.8, 0.8, type="double3")
@@ -83,6 +90,23 @@ def build_scene():
     correct = cmds.shadingNode("aiColorCorrect", asUtility=True, name="cc")
     cmds.connectAttr(file_node + ".outColor", correct + ".input", force=True)
     cmds.connectAttr(correct + ".outColor", std + ".baseColor", force=True)
+
+    # A UDIM set, driven through Maya's own tiling mode rather than a token in
+    # the path, which is the case a naive path scan gets wrong.
+    for tile in (1001, 1002, 1011):
+        with open(os.path.join(OUT, "tile.{0}.tx".format(tile)), "w") as handle:
+            handle.write("tile {0}".format(tile))
+    udim_node = cmds.shadingNode("file", asTexture=True, name="udimTex")
+    cmds.setAttr(
+        udim_node + ".fileTextureName",
+        os.path.join(OUT, "tile.1001.tx").replace("\\", "/"),
+        type="string",
+    )
+    try:
+        cmds.setAttr(udim_node + ".uvTilingMode", 3)
+    except Exception:
+        pass
+    cmds.connectAttr(udim_node + ".outColor", lam + ".KdColor", force=True)
 
     area = cmds.createNode("aiAreaLight", name="aiAreaShape")
     area_tf = cmds.listRelatives(area, parent=True, fullPath=True)[0]
@@ -126,21 +150,26 @@ def main():
     with open(result["json_path"], "r") as handle:
         payload = json.load(handle)
 
+    # Keyed by material name, not shader type: the glass cube is also an
+    # aiStandardSurface and would otherwise overwrite the plain one.
     materials = {}
     for mesh in payload["meshes"]:
         for material in mesh["materials"]:
-            materials[material["shader_type"]] = material
+            materials[material.get("material") or ""] = material
     lights = {light["node_type"]: light for light in payload["lights"]}
 
-    def channels(shader_type):
-        return materials.get(shader_type, {}).get("channels", {})
+    def channels(name):
+        for key, material in materials.items():
+            if name in key:
+                return material.get("channels", {})
+        return {}
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("4 meshes exported", payload["mesh_count"] == 4, payload["mesh_count"])
+    check("5 meshes exported", payload["mesh_count"] == 5, payload["mesh_count"])
 
     print("\naiStandardSurface")
-    std = channels("aiStandardSurface")
+    std = channels("stdSurfCube")
     check("roughness from specularRoughness",
           std.get("roughness", {}).get("maya_attr") == "specularRoughness")
     check("metallic from metalness 0.75",
@@ -152,7 +181,7 @@ def main():
           .endswith(".tx"))
 
     print("\naiOpenPBRSurface")
-    pbr = channels("aiOpenPBRSurface")
+    pbr = channels("openPbrCube")
     check("metallic from baseMetalness",
           pbr.get("metallic", {}).get("maya_attr") == "baseMetalness")
     check("opacity from geometryOpacity",
@@ -164,7 +193,7 @@ def main():
           abs(pbr.get("emission_strength", {}).get("value", -1) - 250.0) < 1e-6)
 
     print("\naiFlat")
-    flat = channels("aiFlat")
+    flat = channels("flatCube")
     check("emission reads color, not the computed outColor",
           flat.get("emission", {}).get("maya_attr") == "color",
           flat.get("emission"))
@@ -175,11 +204,46 @@ def main():
           flat.get("opacity", {}).get("value") == [1.0, 1.0, 1.0, 1.0])
 
     print("\naiLambert")
-    lam = channels("aiLambert")
+    lam = channels("aiLambertCube")
     check("base colour from KdColor",
           lam.get("base_color", {}).get("maya_attr") == "KdColor")
     check("opacity is NOT inverted",
           not lam.get("opacity", {}).get("invert", False))
+
+    print("\nglass")
+    glass = channels("glassCube")
+    check("glass material exported", bool(glass))
+    check("transmission weight 1.0",
+          abs(glass.get("transmission", {}).get("value", -1) - 1.0) < 1e-6,
+          glass.get("transmission"))
+    check("transmission colour from transmissionColor",
+          glass.get("transmission_color", {}).get("maya_attr") == "transmissionColor",
+          glass.get("transmission_color"))
+    check("transmission roughness from transmissionExtraRoughness",
+          glass.get("transmission_roughness", {}).get("maya_attr")
+          == "transmissionExtraRoughness",
+          glass.get("transmission_roughness"))
+    check("ior 1.52 from specularIOR",
+          abs(glass.get("ior", {}).get("value", -1) - 1.52) < 1e-5,
+          glass.get("ior"))
+    check("thin walled flag carried",
+          bool(glass.get("thin_walled", {}).get("value")),
+          glass.get("thin_walled"))
+    check("a non refractive shader still reports transmission 0",
+          abs(channels("openPbrCube").get("transmission", {}).get("value", -1))
+          < 1e-9,
+          channels("openPbrCube").get("transmission"))
+
+    print("\nUDIM")
+    udim = channels("aiLambertCube").get("base_color", {}).get("texture", {})
+    check("UDIM detected from Maya's tiling mode", bool(udim.get("udim")), udim)
+    check("path carries the <UDIM> token, not tile 1001",
+          "<UDIM>" in udim.get("path", ""), udim.get("path"))
+    check("the concrete tile path is kept alongside",
+          udim.get("original_path", "").endswith("tile.1001.tx"),
+          udim.get("original_path"))
+    check("detection credited to Maya, not to path guessing",
+          udim.get("udim_mode") == "maya_uv_tiling_mode", udim.get("udim_mode"))
 
     print("\nlights")
     area = lights.get("aiAreaLight", {})

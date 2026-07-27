@@ -86,10 +86,10 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("4 meshes imported", result["mesh_count"] == 4, result["mesh_count"])
-    check("4 materials built", result["material_count"] == 4,
+    check("5 meshes imported", result["mesh_count"] == 5, result["mesh_count"])
+    check("5 materials built", result["material_count"] == 5,
           result["material_count"])
-    check("subdivision on every mesh", result["subdivision_count"] == 4,
+    check("subdivision on every mesh", result["subdivision_count"] == 5,
           result["subdivision_count"])
 
     print("\naiStandardSurface")
@@ -140,6 +140,46 @@ def main():
               abs(value(lam, "Roughness") - 0.7) < 1e-5)
         check("alpha 0.8, not inverted to 0.2",
               abs(value(lam, "Alpha") - 0.8) < 1e-5, value(lam, "Alpha"))
+
+    print("\nglass")
+    glass = material_for("glassCube")
+    check("material exists", glass is not None)
+    if glass:
+        ids = {n.bl_idname for n in glass.node_tree.nodes}
+        check("built as a Glass BSDF, not Principled",
+              "ShaderNodeBsdfGlass" in ids
+              and "ShaderNodeBsdfPrincipled" not in ids,
+              sorted(ids))
+        node = next((n for n in glass.node_tree.nodes
+                     if n.bl_idname == "ShaderNodeBsdfGlass"), None)
+        if node:
+            colour = [round(c, 3) for c in node.inputs["Color"].default_value[:3]]
+            check("transmission colour carried", colour == [0.2, 0.9, 0.8], colour)
+            check("transmission roughness 0.05",
+                  abs(node.inputs["Roughness"].default_value - 0.05) < 1e-5,
+                  node.inputs["Roughness"].default_value)
+            check("ior 1.52", abs(node.inputs["IOR"].default_value - 1.52) < 1e-5,
+                  node.inputs["IOR"].default_value)
+        check("thin walled recorded", glass.get("za_thin_walled") is True,
+              glass.get("za_thin_walled"))
+        check("material mode recorded",
+              glass.get("za_material_mode") == "GLASS_BSDF",
+              glass.get("za_material_mode"))
+    check("a non refractive material stays Principled",
+          bsdf_of(material_for("stdSurfCube")) is not None)
+
+    print("\nUDIM")
+    image = None
+    if lam:
+        node = next((n for n in lam.node_tree.nodes
+                     if n.bl_idname == "ShaderNodeTexImage"), None)
+        image = node.image if node else None
+    check("aiLambert base colour loaded an image", image is not None)
+    if image:
+        check("image is tiled", image.source == "TILED", image.source)
+        check("udim marked on the image", image.get("za_udim") is True)
+        check("all three tiles registered", len(image.tiles) == 3,
+              [tile.number for tile in image.tiles])
 
     print("\nlights")
     lights = {obj.data.get("za_source_node_type"): obj

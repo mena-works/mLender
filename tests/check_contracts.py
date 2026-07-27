@@ -178,11 +178,22 @@ def main():
         exporter_constants.ARNOLD_LAMBERT_CHANNELS,
     ):
         exported.update(table.keys())
-    known = set(importer.constants.PRINCIPLED_INPUTS.keys())
+    # A channel is honoured if it drives a Principled socket, a Glass socket,
+    # or is deliberately metadata only.
+    known = (
+        set(importer.constants.PRINCIPLED_INPUTS)
+        | set(importer.constants.GLASS_INPUTS)
+        | set(importer.constants.METADATA_CHANNELS)
+    )
     check(
-        "every exported channel maps to a Principled socket",
+        "every exported channel is honoured by the importer",
         exported <= known,
         "unmapped: {0}".format(sorted(exported - known)),
+    )
+    check(
+        "the glass path covers the refraction channels",
+        {"transmission_color", "transmission_roughness", "ior"}
+        <= set(importer.constants.GLASS_INPUTS),
     )
     print("       channels: {0}".format(", ".join(sorted(exported))))
 
