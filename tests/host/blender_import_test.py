@@ -47,6 +47,13 @@ def find_package():
     return packages[-1]
 
 
+def object_named(fragment):
+    for obj in bpy.data.objects:
+        if fragment.lower() in obj.name.lower():
+            return obj
+    return None
+
+
 def material_for(fragment):
     for material in bpy.data.materials:
         if fragment.lower() in str(material.get("za_maya_material", "")).lower():
@@ -109,6 +116,33 @@ def main():
               abs(value(std, "Emission Strength") - 0.4) < 1e-5)
         check("base colour driven by a texture",
               socket(std, "Base Color").is_linked)
+
+    print("\ngroup collections")
+    root = bpy.data.collections.get(result["root_collection"])
+    check("root collection exists", root is not None)
+    set_dressing = bpy.data.collections.get("setDressing")
+    props = bpy.data.collections.get("props")
+    check("outer group became a collection under the root",
+          set_dressing is not None
+          and set_dressing.name in {c.name for c in root.children})
+    check("inner group nests inside the outer one",
+          props is not None and set_dressing is not None
+          and props.name in {c.name for c in set_dressing.children})
+    grouped = object_named("stdSurfCube")
+    ungrouped = object_named("flatCube")
+    check("the mesh sits in the innermost collection only",
+          grouped is not None
+          and [c.name for c in grouped.users_collection] == ["props"],
+          [c.name for c in grouped.users_collection] if grouped else None)
+    check("collections are marked as ours",
+          props is not None and props.get("za_generated") is True)
+    check("an ungrouped mesh stays at the root",
+          ungrouped is not None
+          and [c.name for c in ungrouped.users_collection]
+          == [result["root_collection"]],
+          [c.name for c in ungrouped.users_collection] if ungrouped else None)
+    check("two collections were reported", result["group_collection_count"] == 2,
+          result["group_collection_count"])
 
     print("\nrebuilt colour correction")
     if std:

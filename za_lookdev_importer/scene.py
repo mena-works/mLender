@@ -16,6 +16,7 @@ from .utils import (
     name_keys,
     namespace_free_import_name,
     namespace_free_name,
+    safe_name,
 )
 
 
@@ -103,6 +104,47 @@ def organize_imported_objects(objects):
             collection.objects.unlink(obj)
         root.objects.link(obj)
     return root
+
+
+def group_collection(root, groups, cache):
+    """Collection for a Maya group path, creating the trail as needed.
+
+    ``groups`` is outermost first, so "|set|props" nests props inside set.
+    ``cache`` maps a path to the collection already made for it, which is what
+    stops two meshes in the same Maya group landing in two collections that
+    share a name.
+    """
+    parent = root
+    path = []
+    for name in groups:
+        if not str(name or "").strip():
+            continue
+        name = safe_name(name)
+        path.append(name)
+        key = "/".join(path)
+        collection = cache.get(key)
+        if collection is None:
+            collection = bpy.data.collections.new(name)
+            collection["za_generated"] = True
+            collection["za_maya_group"] = key
+            parent.children.link(collection)
+            cache[key] = collection
+        parent = collection
+    return parent
+
+
+def place_in_group(obj, record, root, cache):
+    """Link a mesh into the collection mirroring its Maya group path."""
+    groups = (record or {}).get("groups") or []
+    if not groups:
+        return False
+    target = group_collection(root, groups, cache)
+    if target is root:
+        return False
+    for collection in list(obj.users_collection):
+        collection.objects.unlink(obj)
+    target.objects.link(obj)
+    return True
 
 
 def add_subdivision_modifiers(mesh_records, warnings=None):

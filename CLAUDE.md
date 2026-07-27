@@ -264,6 +264,11 @@ doğrulamasının tek yoludur. Uyumsuz bırakma.
 `za_generated` bayrağı, aracın ürettiği datablock'ları FBX'in ürettiği geçici
 olanlardan ayırmak için kullanılır. Yeni datablock üretiyorsan bu bayrağı koy.
 
+Maya grup hiyerarşisi iç içe collection olarak kurulur (`place_in_group`).
+Yalnız **shape'i olmayan** transform'lar klasör sayılır; geometri taşıyan bir
+transform objedir. Aynı gruba düşen meshler tek collection paylaşsın diye
+`group_cache` import boyunca taşınır — onu her mesh için sıfırlama.
+
 ---
 
 ## 7. Yıkıcı Davranış — Bilinçli Tasarım

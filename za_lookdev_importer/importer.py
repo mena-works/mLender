@@ -18,6 +18,7 @@ from .scene import (
     clear_scene_and_purge,
     find_mesh_record,
     organize_imported_objects,
+    place_in_group,
     purge_orphans,
     remove_object_namespace,
     rename_mesh_from_record,
@@ -88,6 +89,8 @@ def import_lookdev_package(
     mesh_records = list(package_data.get("meshes") or [])
     used_record_ids = set()
     matched_meshes = []
+    group_cache = {}
+    grouped_count = 0
 
     for obj in imported_meshes:
         mesh_record = find_mesh_record(obj, mesh_records, used_record_ids)
@@ -99,6 +102,8 @@ def import_lookdev_package(
         used_record_ids.add(id(mesh_record))
         rename_mesh_from_record(obj, mesh_record)
         matched_meshes.append((obj, mesh_record))
+        if place_in_group(obj, mesh_record, root_collection, group_cache):
+            grouped_count += 1
         assignments.append(
             assign_mesh_materials(obj, mesh_record, material_cache, warnings)
         )
@@ -135,6 +140,8 @@ def import_lookdev_package(
         "object_count": len(imported_objects),
         "mesh_count": len(imported_meshes),
         "material_count": len(material_cache),
+        "group_collection_count": len(group_cache),
+        "grouped_mesh_count": grouped_count,
         "subdivision_count": subdivision_count,
         "light_count": light_result["light_count"],
         "light_object_count": light_result["object_count"],

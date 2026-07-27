@@ -26,7 +26,7 @@ from .package import export_lookdev
 from .ui import show_ui
 
 
-BUILD_VERSION = "1.14.0"
+BUILD_VERSION = "1.15.0"
 
 # Dependency order; reloading follows this list so each module re-imports
 # already refreshed dependencies.

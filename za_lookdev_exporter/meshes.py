@@ -66,9 +66,35 @@ def mesh_record(mesh_shape, bake_context=None):
         "mesh_path": transform,
         "shape": node_label(mesh_shape),
         "shape_path": mesh_shape,
+        "groups": group_path(transform),
         "subdivision": subdivision_info(mesh_shape),
         "materials": mesh_materials(mesh_shape, bake_context),
     }
+
+
+def group_path(transform):
+    """Names of the group transforms above a mesh, outermost first.
+
+    Only a transform with no shape of its own counts as a group. A transform
+    that carries geometry is an object, and turning it into a folder would
+    invent a level of nesting the artist never made.
+
+    The mesh's own transform is the last element of the path and is excluded;
+    the result is the folder trail, which the importer mirrors as collections.
+    """
+    parts = [part for part in str(transform or "").split("|") if part]
+    groups = []
+    path = ""
+    for part in parts[:-1]:
+        path = path + "|" + part
+        try:
+            shapes = cmds.listRelatives(path, shapes=True, fullPath=True)
+        except Exception:
+            shapes = None
+        if shapes:
+            continue
+        groups.append(without_namespace(part))
+    return groups
 
 
 def subdivision_info(mesh_shape):

@@ -592,6 +592,35 @@ specularAnisotropy       -> Anisotropic
   5.2'de 0.005). Bu yüzden değer açıkça set edilir; varsayılana güvenmek aynı
   paketi iki sürümde farklı gösterirdi.
 
+## Grup hiyerarşisi → Collection
+
+Maya'daki grup yapısı Blender'da **iç içe collection** olarak yeniden kurulur.
+Eskiden bütün meshler tek bir kök collection'a düz olarak giriyordu; kalabalık
+bir sahnede outliner kullanılamaz hale geliyordu.
+
+```text
+Maya                              Blender
+|setDressing|props|chair    ->    Z-A Lookdev Import
+                                    setDressing
+                                      props
+                                        chair
+```
+
+Kurallar:
+
+- **Yalnız gerçek gruplar klasör olur.** Kendi shape'i olan bir transform obje
+  sayılır, klasör değil; yoksa geometri taşıyan bir transform olmayan bir
+  nesting seviyesi uydururdu.
+- Grubu olmayan mesh kök collection'da kalır.
+- Aynı Maya grubundaki iki mesh **aynı** collection'a girer, isim benzeri iki
+  ayrı collection oluşmaz.
+- Üretilen collection'lar `za_generated` ve `za_maya_group` custom
+  property'lerini taşır.
+
+Işıklar ve kameralar bu hiyerarşiye girmez; `Z-A Lights` ve `Z-A Cameras`
+altında toplu kalırlar, çünkü lookdev sırasında hepsine birden erişmek
+istenir.
+
 ## Renk düzeltme
 
 Texture ile shader arasındaki düzeltme node'ları eskiden **sessizce

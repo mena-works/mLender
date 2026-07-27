@@ -56,6 +56,10 @@ def shaded_cube(name, shader_type):
 
 def build_scene():
     _, std = shaded_cube("stdSurfCube", "aiStandardSurface")
+    # Nested groups, so the exported folder trail has more than one level.
+    # stdSurfCube is parented under |setDressing|props.
+    cmds.group("stdSurfCube", name="props")
+    cmds.group("props", name="setDressing")
     cmds.setAttr(std + ".specularRoughness", 0.33)
     cmds.setAttr(std + ".metalness", 0.75)
     cmds.setAttr(std + ".opacity", 0.5, 0.5, 0.5, type="double3")
@@ -334,6 +338,16 @@ def main():
     ]
     check("remapValue reported as unrebuildable rather than dropped silently",
           "remapValue" in unsupported, unsupported)
+
+    print("\ngroup hierarchy")
+    by_mesh = {record.get("mesh"): record for record in payload["meshes"]}
+    check("nested groups exported outermost first",
+          by_mesh.get("stdSurfCube", {}).get("groups")
+          == ["setDressing", "props"],
+          by_mesh.get("stdSurfCube", {}).get("groups"))
+    check("an ungrouped mesh reports no folders",
+          by_mesh.get("flatCube", {}).get("groups") == [],
+          by_mesh.get("flatCube", {}).get("groups"))
 
     print("\naiOpenPBRSurface")
     pbr = channels("openPbrCube")
