@@ -5,7 +5,7 @@ The point is to check that the mesh and the lights land at the same scale in
 Blender. Meshes travel through the FBX and lights through the JSON, so the two
 are scaled by completely separate code paths and can silently disagree.
 
-    "C:\\Program Files\\Autodesk\\Maya2023\\bin\\mayapy.exe" tests/scale_probe_maya.py
+    "C:\\Program Files\\Autodesk\\Maya2023\\bin\\mayapy.exe" tests/calibration/scale_probe_maya.py
 """
 from __future__ import print_function
 
@@ -21,7 +21,10 @@ maya.standalone.initialize(name="python")
 
 import maya.cmds as cmds  # noqa: E402
 
-TOOL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Three levels up: tests/<group>/<file>.py
+TOOL_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 OUT = os.path.join(tempfile.gettempdir(), "za_scale_probe")
 
 if TOOL_ROOT not in sys.path:

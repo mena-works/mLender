@@ -7,7 +7,7 @@ working add-on. That last case is what "Reload Scripts" does, and it is where
 a broken register silently leaves a panel whose buttons do nothing.
 
     "C:\\Program Files\\Blender Foundation\\Blender 5.2\\blender.exe" ^
-        --background --factory-startup --python tests/blender_addon_test.py
+        --background --factory-startup --python tests/host/blender_addon_test.py
 
 Needs no installation; the package is imported straight from the repository.
 """
@@ -16,7 +16,10 @@ import sys
 
 import bpy
 
-TOOL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Three levels up: tests/<group>/<file>.py
+TOOL_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 if TOOL_ROOT not in sys.path:
     sys.path.insert(0, TOOL_ROOT)
 

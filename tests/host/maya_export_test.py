@@ -4,7 +4,7 @@
 Builds a scene using every supported Arnold shader and light, runs the real
 exporter, and asserts on the JSON it produces. Nothing is mocked.
 
-    "C:\\Program Files\\Autodesk\\Maya2023\\bin\\mayapy.exe" tests/maya_export_test.py
+    "C:\\Program Files\\Autodesk\\Maya2023\\bin\\mayapy.exe" tests/host/maya_export_test.py
 
 Writes its package to <temp>/za_lookdev_test, which blender_import_test.py
 then reads. Run this one first.
@@ -23,7 +23,10 @@ maya.standalone.initialize(name="python")
 
 import maya.cmds as cmds  # noqa: E402
 
-TOOL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Three levels up: tests/<group>/<file>.py
+TOOL_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 OUT = os.path.join(tempfile.gettempdir(), "za_lookdev_test")
 
 if TOOL_ROOT not in sys.path:

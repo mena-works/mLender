@@ -28,7 +28,7 @@ python -m py_compile za_lookdev_exporter/*.py za_lookdev_importer/*.py
 ## 2. Maya export testi (gerçek Maya + Arnold, ~2 dk)
 
 ```bash
-"C:\Program Files\Autodesk\Maya2023\bin\mayapy.exe" tests/maya_export_test.py
+"C:\Program Files\Autodesk\Maya2023\bin\mayapy.exe" tests/host/maya_export_test.py
 ```
 
 Headless Maya'da desteklenen her Arnold shader ve ışığından bir tane içeren
@@ -44,7 +44,7 @@ string'inden şekil çözümlemesi, `aiExposure` yazım farkı, `aiFlat`'ın
 
 ```bash
 "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" ^
-    --background --factory-startup --python tests/blender_addon_test.py
+    --background --factory-startup --python tests/host/blender_addon_test.py
 ```
 
 Add-on'un kayıt olduğunu, operator'ların **çağrılabildiğini** ve arka arkaya
@@ -58,7 +58,7 @@ Kurulum gerektirmez, package'ı doğrudan depodan import eder.
 
 ```bash
 "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" ^
-    --background --factory-startup --python tests/blender_import_test.py
+    --background --factory-startup --python tests/host/blender_import_test.py
 ```
 
 2. adımın yazdığı paketi gerçek Blender'a import eder ve oluşan node
@@ -70,9 +70,9 @@ Birden fazla Blender sürümünde çalıştırmak sürüm uyum kodunu sınar; bu
 ## 5. Render eşleşmesi (gerçek Arnold + gerçek Cycles, ~2 dk)
 
 ```bash
-"C:\Program Files\Autodesk\Maya2023\bin\mayapy.exe" tests/render_match_maya.py
+"C:\Program Files\Autodesk\Maya2023\bin\mayapy.exe" tests/calibration/render_match_maya.py
 "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" ^
-    --background --factory-startup --python tests/render_match_blender.py
+    --background --factory-startup --python tests/calibration/render_match_blender.py
 ```
 
 Tek soruyu uçtan uca yanıtlar: Arnold'da belli bir şekilde görünen ışık,

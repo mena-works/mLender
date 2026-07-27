@@ -55,8 +55,20 @@ za_lookdev_importer/     # Blender multi-file add-on
   ui.py                  # operator, property, panel
   __init__.py            # bl_info, register/unregister, reload bloğu
 
+tests/                   # amaca göre ayrılmış, ayrıntı tests/README.md
+  check_contracts.py     # host gerekmez, saniyeler — en sık çalıştırılan
+  host/                  # gerçek Maya ve gerçek Blender testleri
+  calibration/           # render eşleşmesi ve ölçek probları
+  docs/                  # ölçüm kayıtları (ışık, düzeltme node'ları)
+
 README.md                # Kullanıcı dokümantasyonu (Türkçe)
 ```
+
+`tests/` üç gruba ayrılmıştır çünkü üçü farklı şeyler yapar: sözleşme
+kontrolleri saniyede çalışır ve her değişiklikten sonra çalıştırılır, `host/`
+gerçek DCC ister, `calibration/` ise test değil **ölçüm rig'idir** — sabitleri
+doğrulamaz, onları üretir. Yeni bir dosya eklerken hangisine ait olduğuna karar
+ver; ölçüm rig'lerini `host/` içine koyma.
 
 İki package birbirini **import etmez**. Aralarındaki tek bağ, aşağıdaki
 protokol ve JSON sözleşmesidir. Ortak yardımcı modül ekleme — Maya ve Blender
@@ -305,7 +317,7 @@ için değer **π**'dir; Arnold'ın normalize `intensity`'si normal yöndeki ı�
 şiddettir ve Lambert yayıcının toplam akısı onun π katıdır.
 
 Bu sayıyı "kalibrasyon" diye değiştirme. Değiştirmen isteniyorsa önce
-`tests/light_calibration.md` içindeki ölçümü tekrarla; rig'in doğruluğunu
+`tests/docs/light_calibration.md` içindeki ölçümü tekrarla; rig'in doğruluğunu
 Blender'ın `piksel = P/(π²d²)` özdeşliğini tutturmasıyla sınayabilirsin.
 
 Redshift girdisi (`10.0`) hâlâ devralınmış bir tahmindir çünkü plugin bu
@@ -361,11 +373,11 @@ python -m py_compile za_lookdev_exporter/*.py za_lookdev_importer/*.py
 python tests/check_contracts.py
 
 # 3. Gercek Maya + Arnold (~2 dk)
-"C:\Program Files\Autodesk\Maya2023\bin\mayapy.exe" tests/maya_export_test.py
+"C:\Program Files\Autodesk\Maya2023\bin\mayapy.exe" tests/host/maya_export_test.py
 
 # 4. Gercek Blender, 3'un yazdigi paketi okur (~30 sn)
 "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" ^
-    --background --factory-startup --python tests/blender_import_test.py
+    --background --factory-startup --python tests/host/blender_import_test.py
 ```
 
 Kurulu Blender sürümleri: 4.1, 4.3, 4.5, 5.2. Kullanıcının hedefi **5.2**.

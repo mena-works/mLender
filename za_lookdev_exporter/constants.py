@@ -294,7 +294,7 @@ PLACEMENT_NUMERIC_ATTRS = {
 # Correction nodes sitting between a texture and a shader input. Both the
 # attribute names and the maths behind them were measured on Maya 2023 with
 # MtoA 5.4.8, by driving an unlit aiFlat and rendering it; see
-# tests/correction_nodes.md for the numbers.
+# tests/docs/correction_nodes.md for the numbers.
 #
 # Two of the measurements contradict the obvious reading, so they are stated
 # here rather than left to the importer to rediscover:

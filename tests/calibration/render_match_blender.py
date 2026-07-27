@@ -6,7 +6,7 @@ lens from the same place. Both write linear EXR, so no view transform is in
 the way and the numbers are directly comparable.
 
     "C:\\Program Files\\Blender Foundation\\Blender 5.2\\blender.exe" ^
-        --background --factory-startup --python tests/render_match_blender.py
+        --background --factory-startup --python tests/calibration/render_match_blender.py
 
 Run render_match_maya.py first.
 """
@@ -18,7 +18,10 @@ import tempfile
 
 import bpy
 
-TOOL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Three levels up: tests/<group>/<file>.py
+TOOL_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 OUT = os.path.join(tempfile.gettempdir(), "za_render_match")
 
 if TOOL_ROOT not in sys.path:

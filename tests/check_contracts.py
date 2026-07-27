@@ -309,7 +309,7 @@ def main():
     # Measured, not chosen. Arnold's normalized intensity is the radiant
     # intensity along the light's normal, and a Lambertian emitter's total flux
     # is pi times that, which is what Blender Power means. Confirmed by
-    # rendering matched scenes in both; see tests/light_calibration.md.
+    # rendering matched scenes in both; see tests/docs/light_calibration.md.
     watts = importer.constants.WATTS_PER_INTENSITY
     close("arnold converts through pi", watts["arnold"], math.pi)
     close("native maya converts through pi", watts["maya"], math.pi)

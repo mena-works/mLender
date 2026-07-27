@@ -6,7 +6,7 @@ are set by unrelated code. If they disagree the light-to-object distance is
 wrong and no amount of correct energy conversion will match the Maya render.
 
     "C:\\Program Files\\Blender Foundation\\Blender 5.2\\blender.exe" ^
-        --background --factory-startup --python tests/scale_probe_blender.py
+        --background --factory-startup --python tests/calibration/scale_probe_blender.py
 
 Run scale_probe_maya.py first.
 """
@@ -19,7 +19,10 @@ import tempfile
 
 import bpy
 
-TOOL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Three levels up: tests/<group>/<file>.py
+TOOL_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 PROBE = os.path.join(tempfile.gettempdir(), "za_scale_probe")
 
 if TOOL_ROOT not in sys.path:

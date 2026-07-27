@@ -6,7 +6,7 @@ light that looks a certain way in Arnold look the same in Blender after the
 transfer? Everything is neutral and colour management is off, so the two
 renders are directly comparable linear values rather than tone mapped images.
 
-    "C:\\Program Files\\Autodesk\\Maya2023\\bin\\mayapy.exe" tests/render_match_maya.py
+    "C:\\Program Files\\Autodesk\\Maya2023\\bin\\mayapy.exe" tests/calibration/render_match_maya.py
 """
 from __future__ import print_function
 
@@ -24,7 +24,10 @@ maya.standalone.initialize(name="python")
 
 import maya.cmds as cmds  # noqa: E402
 
-TOOL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Three levels up: tests/<group>/<file>.py
+TOOL_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 OUT = os.path.join(tempfile.gettempdir(), "za_render_match")
 KICK = r"C:\Program Files\Autodesk\Arnold\maya2023\bin\kick.exe"
 

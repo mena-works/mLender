@@ -20,7 +20,7 @@ conventions disagree in ways that are easy to get backwards:
 
 The Arnold values were read out of renders through an unlit shader and the
 Blender ones out of renders of a node chain driving the world background; both
-sets are in tests/correction_nodes.md. The contrast mapping below reproduces
+sets are in tests/docs/correction_nodes.md. The contrast mapping below reproduces
 Arnold's measured pixel exactly.
 
 Sockets are addressed by index, not by name: "Fac" became "Factor" and "Bright"

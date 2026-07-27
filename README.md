@@ -38,6 +38,7 @@ za_lookdev_importer/        # Blender tarafı (multi-file add-on)
   constants.py              # protokol sabitleri, socket adları, kalibrasyon
   utils.py                  # değer dönüşümü, isim normalizasyonu
   images.py                 # texture yükleme, UDIM çözümleme
+  corrections.py            # Maya düzeltme node'larını Blender node'u olarak kurma
   materials.py              # Principled ve Surface Shader node ağaçları
   lights.py                 # Blender ışıkları ve Dome World
   cameras.py                # Blender kameraları
@@ -47,6 +48,12 @@ za_lookdev_importer/        # Blender tarafı (multi-file add-on)
   importer.py               # import orkestrasyonu, şema doğrulaması
   livelink.py               # socket listener ve ana thread mesaj pompası
   ui.py                     # operator'lar, scene property'leri, panel
+
+tests/
+  check_contracts.py        # host gerekmez, saniyeler
+  host/                     # gerçek Maya ve gerçek Blender testleri
+  calibration/              # render eşleşmesi, ölçek probları
+  docs/                     # ölçüm kayıtları
 ```
 
 Bölünmeden önceki tek dosyalık sürümler git geçmişinde `0dcbff4` commit'inde
@@ -475,7 +482,7 @@ Blender Power = pi * meters_per_maya_unit^2 * intensity * 2^exposure
 
 Mesafe, yoğunluk ve exposure değiştirilen beş varyantta çapa her seferinde
 3.1412 çıktı (yayılım %0.00006). Yöntem ve ham sayılar için
-`tests/light_calibration.md`.
+`tests/docs/light_calibration.md`.
 
 > Bu, 1.7.0'dan önceki sürümlerde Arnold ve Maya ışıklarının **318× fazla
 > parlak** geldiği anlamına gelir. Eski paketleri yeniden gönderirsen
@@ -606,7 +613,7 @@ hızlı ve sonradan elle düzenlenebilir:
 Node'lar `ZA_CC_` / `ZA_` önekiyle adlandırılır. Bir ayar nötr değerindeyse o
 node hiç kurulmaz, yani dokunulmamış bir düzeltme node'u ağacı kalabalıklaştırmaz.
 
-Üç dönüşüm ölçüldü ve sezginin tersi çıktı (ayrıntı: `tests/correction_nodes.md`):
+Üç dönüşüm ölçüldü ve sezginin tersi çıktı (ayrıntı: `tests/docs/correction_nodes.md`):
 
 - **`gamma` ters üstür.** Maya `in^(1/g)` uygular, Blender'ın Gamma node'u
   `in^g`. Değer bu yüzden tersine çevrilerek yazılır.

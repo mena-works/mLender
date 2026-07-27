@@ -206,7 +206,7 @@ LUMENS_PER_WATT = 683.0
 #
 # Redshift is the one entry that is still a carried-over guess: the plugin is
 # not installed on this machine, so the same measurement could not be run. See
-# tests/light_calibration.md for the procedure to settle it.
+# tests/docs/light_calibration.md for the procedure to settle it.
 WATTS_PER_INTENSITY = {
     "arnold": math.pi,
     "maya": math.pi,

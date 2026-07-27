@@ -133,7 +133,7 @@ sahnesi `s = 1` kullandığı için terim görünmüyordu.
 
 ## Uçtan uca doğrulama
 
-`render_match_maya.py` + `render_match_blender.py` bunu gerçek hattan sınar:
+`calibration/render_match_maya.py` + `calibration/render_match_blender.py` bunu gerçek hattan sınar:
 Maya'da bir küp, zemin, alan ışığı ve kamera kurar, paketi export eder, `.ass`'i
 kick ile render eder; Blender paketi import edip **aynı kameradan** render eder
 ve pikselleri karşılaştırır.

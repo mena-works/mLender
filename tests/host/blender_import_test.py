@@ -5,7 +5,7 @@ Imports the package written by maya_export_test.py and asserts on the actual
 node trees and light data Blender ends up with.
 
     "C:\\Program Files\\Blender Foundation\\Blender 5.2\\blender.exe" ^
-        --background --factory-startup --python tests/blender_import_test.py
+        --background --factory-startup --python tests/host/blender_import_test.py
 
 Run maya_export_test.py first; this reads its output from
 <temp>/za_lookdev_test/MTB_Z_A_01.
@@ -18,7 +18,10 @@ import tempfile
 
 import bpy
 
-TOOL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Three levels up: tests/<group>/<file>.py
+TOOL_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 TEST_ROOT = os.path.join(tempfile.gettempdir(), "za_lookdev_test")
 
 if TOOL_ROOT not in sys.path:
