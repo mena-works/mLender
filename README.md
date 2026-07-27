@@ -510,6 +510,37 @@ toplanır ve Blender System Console'a `Z-A Lookdev warning:` önekiyle yazılır
 Bir mesh birden fazla material kullanıyorsa Maya shadingEngine face membership
 bilgisi JSON'a yazılır ve Blender polygon material indexleri yeniden kurulur.
 
+## Subdivision
+
+Subdivision **her mesh'e uygulanmaz**; yalnızca Maya'daki mesh gerçekten
+istiyorsa uygulanır. Kaynak şu sırayla aranır, çünkü renderer ayarı gerçekten
+render edilen şeydir ve Maya'nın smooth preview'ı niyetin yedeğidir:
+
+```text
+1. Arnold    aiSubdivType != none   -> aiSubdivIterations
+2. Redshift  rsEnableSubdivision    -> rsMaxTessellationSubdivs
+3. Maya      displaySmoothMesh != 0 -> smoothLevel / renderSmoothLevel
+```
+
+Hiçbiri istemiyorsa mesh'e modifier eklenmez. Arnold'un `aiSubdivType`
+varsayılanı **none** olduğu için, modellenmemiş bir küpü Catmull-Clark ile
+yuvarlamak yerine olduğu gibi bırakır.
+
+Şema eşlemeleri:
+
+- `catclark` → Blender `CATMULL_CLARK`
+- `linear` → Blender `SIMPLE`
+- `aiSubdivUvSmoothing`: `pin_corners` → `PRESERVE_CORNERS`,
+  `pin_borders` → `PRESERVE_BOUNDARIES`, `smooth` → `SMOOTH_ALL`
+
+Maya'da `useSmoothPreviewForRender` kapalıysa viewport seviyesi `smoothLevel`,
+render seviyesi `renderSmoothLevel` olarak ayrı ayrı aktarılır. Kaynağın
+hangisi olduğu mesh data'sında `za_subdivision_source` ile saklanır.
+
+> Şema 6'dan eski paketlerde subdivision kaydı yoktur ve o meshler
+> **subdivide edilmez**. 1.9.0 öncesinde her mesh subdivide ediliyordu; eski
+> bir paketi yeniden göndermen yeterli.
+
 ## Git
 
 Bu klasör bağımsız Git deposudur:

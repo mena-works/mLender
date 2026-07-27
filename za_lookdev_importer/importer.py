@@ -86,6 +86,7 @@ def import_lookdev_package(
     warnings = []
     mesh_records = list(package_data.get("meshes") or [])
     used_record_ids = set()
+    matched_meshes = []
 
     for obj in imported_meshes:
         mesh_record = find_mesh_record(obj, mesh_records, used_record_ids)
@@ -96,6 +97,7 @@ def import_lookdev_package(
             continue
         used_record_ids.add(id(mesh_record))
         rename_mesh_from_record(obj, mesh_record)
+        matched_meshes.append((obj, mesh_record))
         assignments.append(
             assign_mesh_materials(obj, mesh_record, material_cache, warnings)
         )
@@ -104,13 +106,9 @@ def import_lookdev_package(
     for obj in imported_objects:
         remove_object_namespace(obj, namespace_prefixes)
 
-    # The scene was cleared before the FBX import, so scanning the active scene
-    # is the most reliable way to include every imported mesh object.
-    scene_meshes = [
-        obj for obj in bpy.context.scene.objects
-        if obj.type == "MESH"
-    ]
-    subdivision_count = add_subdivision_modifiers(scene_meshes, warnings)
+    # Only meshes that matched a Maya record can say whether they want to be
+    # subdivided, so unmatched objects are deliberately left alone.
+    subdivision_count = add_subdivision_modifiers(matched_meshes, warnings)
     light_result = import_lights(
         package_data,
         root_collection,

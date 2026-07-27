@@ -4,10 +4,13 @@
 import bpy
 
 from .constants import (
+    DEFAULT_SUBDIV_ITERATIONS,
+    MAX_SUBDIV_ITERATIONS,
     PURGED_DATA_COLLECTIONS,
     ROOT_COLLECTION_NAME,
     SUBDIVISION_MODIFIER_NAME,
     SUBDIVISION_SETTINGS,
+    SUBDIV_UV_SMOOTHING,
 )
 from .utils import (
     name_keys,
@@ -102,29 +105,26 @@ def organize_imported_objects(objects):
     return root
 
 
-def add_subdivision_modifiers(mesh_objects, warnings=None):
-    """Give every mesh the Z-A subdivision setup, verifying it took effect."""
+def add_subdivision_modifiers(mesh_records, warnings=None):
+    """Subdivide only the meshes whose Maya counterpart asked to be.
+
+    ``mesh_records`` is a sequence of ``(object, record)`` pairs. A mesh with
+    no record, or one whose record says subdivision is off, is left alone:
+    subdividing everything rounds off hard surface geometry that was never
+    modelled smooth.
+    """
     modified_count = 0
     warnings = warnings if warnings is not None else []
 
-    for obj in mesh_objects:
+    for obj, record in mesh_records:
         if obj.type != "MESH":
             continue
+        subdivision = (record or {}).get("subdivision") or {}
+        if not subdivision.get("enabled"):
+            _remove_subdivision(obj)
+            continue
         try:
-            modifier = obj.modifiers.get(SUBDIVISION_MODIFIER_NAME)
-            if modifier is not None and modifier.type != "SUBSURF":
-                obj.modifiers.remove(modifier)
-                modifier = None
-            if modifier is None:
-                modifier = obj.modifiers.new(
-                    name=SUBDIVISION_MODIFIER_NAME,
-                    type="SUBSURF",
-                )
-
-            for attr, value in SUBDIVISION_SETTINGS.items():
-                setattr(modifier, attr, value)
-
-            _verify_subdivision(modifier)
+            _apply_subdivision(obj, subdivision)
             modified_count += 1
         except Exception as exc:
             warnings.append(
@@ -137,7 +137,53 @@ def add_subdivision_modifiers(mesh_objects, warnings=None):
     return modified_count
 
 
-def _verify_subdivision(modifier):
+def _remove_subdivision(obj):
+    modifier = obj.modifiers.get(SUBDIVISION_MODIFIER_NAME)
+    if modifier is not None:
+        obj.modifiers.remove(modifier)
+
+
+def _apply_subdivision(obj, subdivision):
+    modifier = obj.modifiers.get(SUBDIVISION_MODIFIER_NAME)
+    if modifier is not None and modifier.type != "SUBSURF":
+        obj.modifiers.remove(modifier)
+        modifier = None
+    if modifier is None:
+        modifier = obj.modifiers.new(
+            name=SUBDIVISION_MODIFIER_NAME,
+            type="SUBSURF",
+        )
+
+    settings = dict(SUBDIVISION_SETTINGS)
+    settings["subdivision_type"] = (
+        "SIMPLE" if subdivision.get("scheme") == "LINEAR" else "CATMULL_CLARK"
+    )
+    settings["levels"] = _iterations(subdivision, "viewport_iterations")
+    settings["render_levels"] = _iterations(subdivision, "render_iterations")
+
+    uv_smooth = SUBDIV_UV_SMOOTHING.get(
+        str(subdivision.get("uv_smoothing") or "").lower()
+    )
+    if uv_smooth:
+        settings["uv_smooth"] = uv_smooth
+
+    for attr, value in settings.items():
+        setattr(modifier, attr, value)
+
+    _verify_subdivision(modifier, settings)
+    obj.data["za_subdivision_source"] = str(subdivision.get("source") or "")
+    return modifier
+
+
+def _iterations(subdivision, key):
+    try:
+        value = int(subdivision.get(key, DEFAULT_SUBDIV_ITERATIONS))
+    except (TypeError, ValueError):
+        value = DEFAULT_SUBDIV_ITERATIONS
+    return max(0, min(MAX_SUBDIV_ITERATIONS, value))
+
+
+def _verify_subdivision(modifier, settings):
     """Confirm the modifier really holds the requested settings.
 
     Blender silently ignores some assignments across versions, so the values
@@ -145,9 +191,15 @@ def _verify_subdivision(modifier):
     """
     if modifier.type != "SUBSURF":
         raise RuntimeError("modifier settings could not be verified")
-    for attr, value in SUBDIVISION_SETTINGS.items():
+    for attr, value in settings.items():
         if getattr(modifier, attr, None) != value:
-            raise RuntimeError("modifier settings could not be verified")
+            raise RuntimeError(
+                "{0} did not take: wanted {1!r}, got {2!r}".format(
+                    attr,
+                    value,
+                    getattr(modifier, attr, None),
+                )
+            )
 
 
 def find_mesh_record(obj, records, used_record_ids):

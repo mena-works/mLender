@@ -130,6 +130,20 @@ def build_scene():
     cmds.setAttr(ies + ".aiFilename", profile, type="string")
     cmds.setAttr(ies + ".coneAngle", 75.0)
 
+    # Subdivision must follow the Maya mesh, not be applied blindly.
+    # stdSurfCube is left alone: Arnold defaults aiSubdivType to none.
+    pbr_shape = cmds.listRelatives("openPbrCube", shapes=True, fullPath=True)[0]
+    cmds.setAttr(pbr_shape + ".aiSubdivType", 1)          # catclark
+    cmds.setAttr(pbr_shape + ".aiSubdivIterations", 3)
+    cmds.setAttr(pbr_shape + ".aiSubdivUvSmoothing", 1)   # pin_borders
+
+    flat_shape = cmds.listRelatives("flatCube", shapes=True, fullPath=True)[0]
+    cmds.setAttr(flat_shape + ".aiSubdivType", 2)         # linear
+
+    lam_shape = cmds.listRelatives("aiLambertCube", shapes=True, fullPath=True)[0]
+    cmds.setAttr(lam_shape + ".displaySmoothMesh", 2)     # smooth mesh preview
+    cmds.setAttr(lam_shape + ".smoothLevel", 1)
+
     # Portals emit nothing and must not become black area lights.
     cmds.createNode("aiLightPortal", name="aiPortalShape")
 

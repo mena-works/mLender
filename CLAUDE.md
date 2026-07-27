@@ -437,6 +437,7 @@ Kullanıcının elle doğrulaması gereken adımlar:
 - ❌ Arnold `opacity`'sini Maya `transparency` gibi ters çevirme
 - ❌ Arnold shader'ında `outColor` okuma (hesaplanmış çıktı, girdi değil)
 - ❌ Yeni davranışı teste assertion eklemeden bırakma
+- ❌ Kaynak sahnenin istemediği bir şeyi bütün meshlere uygulama
 
 ---
 

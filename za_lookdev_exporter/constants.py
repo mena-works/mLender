@@ -17,7 +17,7 @@ LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
 LIVELINK_PROTOCOL = "za_lookdev_livelink"
 LIVELINK_VERSION = 1
-EXPORT_SCHEMA_VERSION = 5
+EXPORT_SCHEMA_VERSION = 6
 
 LIGHT_NODE_TYPES = (
     "RedshiftPhysicalLight",
@@ -230,6 +230,36 @@ UDIM_FIRST_TILE = 1001
 
 # File path attributes checked while walking a texture network upstream.
 TEXTURE_PATH_ATTRS = ("fileTextureName", "tex0", "filename", "file")
+
+# Subdivision. Attribute names read from a live Maya 2023 / MtoA 5.4.8 mesh.
+#
+# Nothing is subdivided unless the Maya mesh actually asks for it. Arnold
+# defaults aiSubdivType to "none", so blanket subdivision would turn a cube
+# into a ball that was never modelled that way.
+#
+# Sources are checked in this order, because a renderer setting is what
+# actually renders and Maya's smooth preview is the fallback intent.
+SUBDIV_ARNOLD_TYPE = "aiSubdivType"
+SUBDIV_ARNOLD_ITERATIONS = "aiSubdivIterations"
+SUBDIV_ARNOLD_UV_SMOOTHING = "aiSubdivUvSmoothing"
+
+# Redshift is not installed on the development machine, so these names come
+# from its documentation rather than from a probe. They are read defensively
+# and simply miss if a build spells them differently.
+SUBDIV_REDSHIFT_ENABLE = ("rsEnableSubdivision", "rsEnableSubdiv")
+SUBDIV_REDSHIFT_ITERATIONS = ("rsMaxTessellationSubdivs", "rsScreenSpaceAdaptive")
+
+# Maya's own smooth mesh preview, which is always Catmull-Clark.
+SUBDIV_MAYA_DISPLAY = "displaySmoothMesh"
+SUBDIV_MAYA_VIEWPORT_LEVEL = "smoothLevel"
+SUBDIV_MAYA_RENDER_LEVEL = "renderSmoothLevel"
+SUBDIV_MAYA_USE_PREVIEW_FOR_RENDER = "useSmoothPreviewForRender"
+
+# Blender only has Catmull-Clark and Simple, so Arnold's linear maps to Simple.
+SUBDIV_SCHEME_CATMULL_CLARK = "CATMULL_CLARK"
+SUBDIV_SCHEME_LINEAR = "LINEAR"
+
+MAX_SUBDIV_ITERATIONS = 6
 
 # Dielectric default, used when a shader exposes no IOR attribute.
 DEFAULT_IOR = 1.5

@@ -8,7 +8,7 @@ message shape changes.
 
 import math
 
-BUILD_VERSION = "1.8.1"
+BUILD_VERSION = "1.9.0"
 
 LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
@@ -20,7 +20,7 @@ LIVELINK_EVENT = "lookdev_package_ready"
 # the scene, so an unreadable package must be rejected before anything is lost.
 # 3 added glass channels and 4 added UDIM on the main branch; 5 is this
 # branch with both, plus the Arnold channels.
-SUPPORTED_SCHEMA_VERSIONS = (1, 2, 3, 4, 5)
+SUPPORTED_SCHEMA_VERSIONS = (1, 2, 3, 4, 5, 6)
 
 MAX_MESSAGE_BYTES = 32 * 1024 * 1024
 SOCKET_POLL_SECONDS = 0.5
@@ -97,10 +97,25 @@ PURGED_DATA_COLLECTIONS = (
     "armatures",
 )
 
+# Subdivision is applied only when the Maya mesh asked for it. Packages older
+# than schema 6 carry no subdivision record at all, and those meshes are left
+# unsubdivided rather than guessed at.
+DEFAULT_SUBDIV_ITERATIONS = 2
+MAX_SUBDIV_ITERATIONS = 6
+
+# Arnold's aiSubdivUvSmoothing values mapped onto Blender's uv_smooth enum.
+SUBDIV_UV_SMOOTHING = {
+    "pin_corners": "PRESERVE_CORNERS",
+    "pin_borders": "PRESERVE_BOUNDARIES",
+    "linear": "PRESERVE_BOUNDARIES",
+    "smooth": "SMOOTH_ALL",
+}
+
+# Everything except the type and the levels, which come from the mesh record.
 SUBDIVISION_SETTINGS = {
     "subdivision_type": "CATMULL_CLARK",
-    "levels": 2,
-    "render_levels": 3,
+    "levels": DEFAULT_SUBDIV_ITERATIONS,
+    "render_levels": DEFAULT_SUBDIV_ITERATIONS,
     "boundary_smooth": "PRESERVE_CORNERS",
     "use_limit_surface": True,
     "quality": 3,

@@ -89,8 +89,10 @@ def main():
     check("5 meshes imported", result["mesh_count"] == 5, result["mesh_count"])
     check("5 materials built", result["material_count"] == 5,
           result["material_count"])
-    check("subdivision on every mesh", result["subdivision_count"] == 5,
-          result["subdivision_count"])
+    # Three of the five cubes asked for subdivision in Maya; the other two
+    # must arrive unmodified.
+    check("only the meshes that asked are subdivided",
+          result["subdivision_count"] == 3, result["subdivision_count"])
 
     print("\naiStandardSurface")
     std = material_for("stdSurfCube")
