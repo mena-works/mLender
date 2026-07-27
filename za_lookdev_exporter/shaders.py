@@ -31,37 +31,51 @@ from .constants import (
     REDSHIFT_LEGACY_CHANNELS,
     REDSHIFT_STANDARD_CHANNELS,
 )
+from .bake import bake_channel
 from .mayautils import attr_exists, invert_color, plug_value
 from .textures import texture_from_plug
 
 
-def shader_channels(shader, shader_type):
+def shader_channels(shader, shader_type, bake_context=None):
     if shader_type == "RedshiftStandardMaterial":
-        return redshift_channels(shader, REDSHIFT_STANDARD_CHANNELS)
+        return redshift_channels(
+            shader, REDSHIFT_STANDARD_CHANNELS, bake_context
+        )
     if shader_type == "RedshiftMaterial":
-        return redshift_channels(shader, REDSHIFT_LEGACY_CHANNELS)
+        return redshift_channels(
+            shader, REDSHIFT_LEGACY_CHANNELS, bake_context
+        )
     if shader_type == "aiStandardSurface":
-        return arnold_channels(shader, ARNOLD_STANDARD_CHANNELS)
+        return arnold_channels(
+            shader, ARNOLD_STANDARD_CHANNELS, bake_context=bake_context
+        )
     if shader_type == "aiOpenPBRSurface":
-        return arnold_channels(shader, ARNOLD_OPENPBR_CHANNELS, openpbr=True)
+        return arnold_channels(
+            shader,
+            ARNOLD_OPENPBR_CHANNELS,
+            openpbr=True,
+            bake_context=bake_context,
+        )
     if shader_type == "aiLambert":
         return arnold_channels(
             shader,
             ARNOLD_LAMBERT_CHANNELS,
             roughness=LAMBERT_ROUGHNESS,
+            bake_context=bake_context,
         )
     if shader_type == "aiFlat":
-        return arnold_flat_channels(shader)
+        return arnold_flat_channels(shader, bake_context)
     if shader_type == "blinn":
-        return maya_basic_channels(shader, roughness=BLINN_ROUGHNESS)
+        return maya_basic_channels(shader, BLINN_ROUGHNESS, bake_context)
     if shader_type == "lambert":
-        return maya_basic_channels(shader, roughness=LAMBERT_ROUGHNESS)
+        return maya_basic_channels(shader, LAMBERT_ROUGHNESS, bake_context)
     if shader_type == "surfaceShader":
-        return surface_shader_channels(shader)
-    return maya_basic_channels(shader, roughness=FALLBACK_ROUGHNESS)
+        return surface_shader_channels(shader, bake_context)
+    return maya_basic_channels(shader, FALLBACK_ROUGHNESS, bake_context)
 
 
-def arnold_channels(shader, channel_map, roughness=None, openpbr=False):
+def arnold_channels(shader, channel_map, roughness=None, openpbr=False,
+                    bake_context=None):
     """Channels for Arnold surfaces.
 
     Arnold's opacity is genuine opacity, so unlike the Maya shader paths it is
@@ -74,7 +88,7 @@ def arnold_channels(shader, channel_map, roughness=None, openpbr=False):
     """
     result = {}
     for channel, attrs in channel_map.items():
-        record = first_channel_record(shader, attrs)
+        record = first_channel_record(shader, attrs, bake_context, channel)
         if record:
             result[channel] = record
 
@@ -88,10 +102,10 @@ def arnold_channels(shader, channel_map, roughness=None, openpbr=False):
     return result
 
 
-def redshift_channels(shader, channel_map):
+def redshift_channels(shader, channel_map, bake_context=None):
     result = {}
     for channel, attrs in channel_map.items():
-        record = first_channel_record(shader, attrs)
+        record = first_channel_record(shader, attrs, bake_context, channel)
         if record:
             result[channel] = record
     apply_glossiness_conversion(shader, result.get("roughness"))
@@ -140,29 +154,37 @@ def apply_glossiness_conversion(shader, roughness_record):
         roughness_record["value"] = 1.0 - float(roughness_record["value"])
 
 
-def maya_basic_channels(shader, roughness):
+def maya_basic_channels(shader, roughness, bake_context=None):
     """Channels for lambert, blinn and any unrecognised surface shader."""
     result = {
         "roughness": {"value": float(roughness)},
         "metallic": {"value": 0.0},
     }
-    base_color = first_channel_record(shader, ("color",))
+    base_color = first_channel_record(
+        shader, ("color",), bake_context, "base_color"
+    )
     if base_color:
         result["base_color"] = base_color
 
-    result["opacity"] = _transparency_as_opacity(shader, ("transparency",))
+    result["opacity"] = _transparency_as_opacity(
+        shader, ("transparency",), bake_context
+    )
 
-    normal = first_channel_record(shader, ("normalCamera",))
+    normal = first_channel_record(
+        shader, ("normalCamera",), bake_context, "normal"
+    )
     if normal and normal.get("texture"):
         result["normal"] = normal
-    emission = first_channel_record(shader, ("incandescence",))
+    emission = first_channel_record(
+        shader, ("incandescence",), bake_context, "emission"
+    )
     if emission:
         result["emission"] = emission
         result["emission_strength"] = {"value": 1.0}
     return result
 
 
-def arnold_flat_channels(shader):
+def arnold_flat_channels(shader, bake_context=None):
     """Channels for aiFlat, which is unlit and therefore treated as emissive.
 
     Read "color", never "outColor". On a Maya surfaceShader outColor is a real
@@ -172,7 +194,9 @@ def arnold_flat_channels(shader):
     Verified against MtoA 5.4.8: aiFlat exposes only color and normalCamera,
     with no opacity or transparency attribute.
     """
-    emission = first_channel_record(shader, ("color",))
+    emission = first_channel_record(
+        shader, ("color",), bake_context, "emission"
+    )
     return {
         "emission": emission or {"value": [0.0, 0.0, 0.0]},
         "emission_strength": {"value": 1.0},
@@ -180,12 +204,14 @@ def arnold_flat_channels(shader):
     }
 
 
-def surface_shader_channels(shader):
+def surface_shader_channels(shader, bake_context=None):
     """Surface shaders are emissive, so outColor drives emission not base."""
     result = {
         "emission_strength": {"value": 1.0},
     }
-    emission = first_channel_record(shader, ("outColor", "color"))
+    emission = first_channel_record(
+        shader, ("outColor", "color"), bake_context, "emission"
+    )
     if emission:
         result["emission"] = emission
     else:
@@ -194,17 +220,18 @@ def surface_shader_channels(shader):
     result["opacity"] = _transparency_as_opacity(
         shader,
         ("outTransparency", "transparency"),
+        bake_context,
     )
     return result
 
 
-def _transparency_as_opacity(shader, attrs):
+def _transparency_as_opacity(shader, attrs, bake_context=None):
     """Convert a Maya transparency plug into an opacity channel record.
 
     A flat colour is inverted immediately and ``invert`` cleared, so the
     importer never inverts an already inverted value.
     """
-    record = first_channel_record(shader, attrs)
+    record = first_channel_record(shader, attrs, bake_context, "opacity")
     if not record:
         return {"value": [1.0, 1.0, 1.0, 1.0]}
     record["invert"] = True
@@ -215,7 +242,7 @@ def _transparency_as_opacity(shader, attrs):
     return record
 
 
-def first_channel_record(shader, attrs):
+def first_channel_record(shader, attrs, bake_context=None, channel=None):
     """Build a channel record from the first attribute that exists."""
     for attr in attrs:
         if not attr_exists(shader, attr):
@@ -226,6 +253,18 @@ def first_channel_record(shader, attrs):
             "maya_plug": plug,
         }
         texture = texture_from_plug(plug)
+        if texture and not texture.get("path"):
+            # A connection with no file behind it: a checker, a ramp,
+            # layered noise. There is nothing to reference, so bake the
+            # network down to the mesh's UVs instead.
+            baked = bake_channel(
+                bake_context,
+                shader,
+                channel or attr,
+                texture.get("source_plug") or "",
+            )
+            if baked:
+                texture = baked
         if texture:
             record["texture"] = texture
         value = plug_value(plug)

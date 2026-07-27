@@ -7,8 +7,7 @@ kuran Lookdev aktarım aracıdır.
 Bu sürümde:
 
 - Alembic yoktur.
-- UV bake yoktur.
-- Texture kopyalama yoktur.
+- Texture kopyalama yoktur; yalnız bake edilen prosedüreller pakete yazılır.
 - Lookdev `.blend` seçimi yoktur.
 - Shape key, parent veya constraint kurulumu yoktur.
 - Yeni paket geldiğinde Blender sahnesi tamamen temizlenir ve unused data purge
@@ -524,6 +523,45 @@ toplanır ve Blender System Console'a `Z-A Lookdev warning:` önekiyle yazılır
 
 Bir mesh birden fazla material kullanıyorsa Maya shadingEngine face membership
 bilgisi JSON'a yazılır ve Blender polygon material indexleri yeniden kurulur.
+
+## Prosedürel bake
+
+Bir kanal dosyası olmayan bir ağla sürülüyorsa (checker, ramp, katmanlı noise)
+referans verilecek bir şey yoktur. Exporter bu durumda ağı mesh'in UV'lerine
+**bake eder** ve paketin içine yazar.
+
+```text
+MTB_Z_A_01/
+  MTB_Z_A_01.fbx
+  MTB_Z_A_01_lookdev.json
+  textures/
+    procCube_shd_base_color.png
+    procCube_shd_roughness.png
+```
+
+Bake yalnızca gerçekten gerektiğinde çalışır: upstream taraması bir dosya
+bulursa o dosya referans verilir, bake edilmez.
+
+Maya UI'da iki kontrol var: `Bake Procedurals` ve `Bake Resolution`
+(varsayılan 1024).
+
+İki ölçülmüş kısıt tasarımı belirledi:
+
+- **Maya lineer yazar.** `convertSolidTx`, renk yönetimi açık da olsa kapalı da
+  olsa lineer değer yazıyor (0.5 girdi → 0.498 saklanan; sRGB olsaydı 0.735).
+  Bu yüzden baked map'ler Blender'da **renk kanalı bile olsa Non-Color** yüklenir.
+  sRGB sanmak her bake'i koyulturdu.
+- **EXR yazamaz.** File node yolu gösteriyor ama diske bir şey düşmüyor. Format
+  bu yüzden PNG.
+
+Renk kanalları için 8-bit lineer PNG karanlıklarda bant verebilir; bu bilinçli
+bir takas, alternatifi hiç aktarmamak.
+
+Bake edilen kayıt nereden geldiğini de taşır (`baked_from`), yani Blender'da
+bir map'in hangi Maya node'undan çıktığı JSON'dan izlenebilir.
+
+Bake mesh'in UV'lerini kullanır. UV'si olmayan veya bozuk olan bir mesh'te
+sonuç boş çıkar; bu durumda export uyarı listesine yazılır ve akış durmaz.
 
 ## Kamera aktarımı
 

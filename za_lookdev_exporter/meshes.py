@@ -57,7 +57,7 @@ def mesh_transforms(mesh_shapes):
     return [item for item in transforms if item]
 
 
-def mesh_record(mesh_shape):
+def mesh_record(mesh_shape, bake_context=None):
     transform = parent_of(mesh_shape)
     full_name = node_label(transform or mesh_shape)
     return {
@@ -67,7 +67,7 @@ def mesh_record(mesh_shape):
         "shape": node_label(mesh_shape),
         "shape_path": mesh_shape,
         "subdivision": subdivision_info(mesh_shape),
-        "materials": mesh_materials(mesh_shape),
+        "materials": mesh_materials(mesh_shape, bake_context),
     }
 
 
@@ -194,7 +194,11 @@ def _clamp_iterations(value):
     return max(0, min(MAX_SUBDIV_ITERATIONS, iterations))
 
 
-def mesh_materials(mesh_shape):
+def mesh_materials(mesh_shape, bake_context=None):
+    # Baking needs this mesh's UVs, so the context is pointed at it
+    # before any of its shaders are read.
+    if bake_context is not None:
+        bake_context.for_mesh(parent_of(mesh_shape))
     result = []
     seen = set()
     shading_engines = unique(
@@ -224,7 +228,11 @@ def mesh_materials(mesh_shape):
                         mesh_shape,
                         shading_engine,
                     ),
-                    "channels": shader_channels(shader, shader_type),
+                    "channels": shader_channels(
+                        shader,
+                        shader_type,
+                        bake_context,
+                    ),
                 }
             )
     return result

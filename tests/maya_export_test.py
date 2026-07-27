@@ -144,6 +144,21 @@ def build_scene():
     cmds.setAttr(lam_shape + ".displaySmoothMesh", 2)     # smooth mesh preview
     cmds.setAttr(lam_shape + ".smoothLevel", 1)
 
+    # A purely procedural network. There is no file on disk to reference, so
+    # the exporter has to bake it or the material arrives flat.
+    _, proc = shaded_cube("procCube", "aiStandardSurface")
+    checker = cmds.shadingNode("checker", asTexture=True, name="procChecker")
+    place = cmds.shadingNode("place2dTexture", asUtility=True, name="procPlace")
+    cmds.connectAttr(place + ".outUV", checker + ".uvCoord", force=True)
+    cmds.connectAttr(
+        place + ".outUvFilterSize", checker + ".uvFilterSize", force=True
+    )
+    cmds.setAttr(checker + ".color1", 0.9, 0.1, 0.1, type="double3")
+    cmds.setAttr(checker + ".color2", 0.1, 0.2, 0.9, type="double3")
+    cmds.connectAttr(checker + ".outColor", proc + ".baseColor", force=True)
+    ramp = cmds.shadingNode("ramp", asTexture=True, name="procRamp")
+    cmds.connectAttr(ramp + ".outAlpha", proc + ".specularRoughness", force=True)
+
     # Portals emit nothing and must not become black area lights.
     cmds.createNode("aiLightPortal", name="aiPortalShape")
 
@@ -184,6 +199,9 @@ def main():
     import za_lookdev_exporter as za
 
     print("exporter build:", za.BUILD_VERSION)
+    # Baking creates file nodes; the export must clean up after itself, so the
+    # scene's own file nodes are recorded to compare against afterwards.
+    file_nodes_before = set(cmds.ls(type="file") or [])
     result = za.export_lookdev(OUT)
     with open(result["json_path"], "r") as handle:
         payload = json.load(handle)
@@ -204,7 +222,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("5 meshes exported", payload["mesh_count"] == 5, payload["mesh_count"])
+    check("6 meshes exported", payload["mesh_count"] == 6, payload["mesh_count"])
 
     print("\naiStandardSurface")
     std = channels("stdSurfCube")
@@ -314,6 +332,35 @@ def main():
           preview)
     check("preview level 1 carried",
           preview.get("viewport_iterations") == 1, preview)
+
+    print("\nprocedural baking")
+    proc = channels("procCube")
+    base = proc.get("base_color", {}).get("texture", {})
+    check("procedural base colour was baked", bool(base.get("baked")), base)
+    check("the baked file exists on disk",
+          os.path.isfile(base.get("path", "")), base.get("path"))
+    check("the baked map is flagged linear", base.get("linear") is True, base)
+    check("the bake records what it came from",
+          "procChecker" in str(base.get("baked_from")), base.get("baked_from"))
+    check("procedural roughness was baked too",
+          bool(proc.get("roughness", {}).get("texture", {}).get("baked")),
+          proc.get("roughness", {}).get("texture"))
+    check("baked textures are counted in the payload",
+          payload.get("baked_texture_count", 0) >= 2,
+          payload.get("baked_texture_count"))
+    check("bakes live inside the package folder",
+          base.get("path", "").startswith(
+              result["package_folder"].replace("\\", "/")),
+          base.get("path"))
+    check("a real file texture is still referenced rather than baked",
+          not channels("stdSurfCube").get("base_color", {})
+          .get("texture", {}).get("baked", False))
+    # convertSolidTx wires a new file node into the scene for every bake. The
+    # export must hand the user's scene back exactly as it found it, so what
+    # matters is the difference across the export, not the total.
+    check("baking left no new file node behind",
+          set(cmds.ls(type="file") or []) == file_nodes_before,
+          sorted(set(cmds.ls(type="file") or []) - file_nodes_before))
 
     print("\ncameras")
     cameras = {c["name"]: c for c in payload.get("cameras") or []}

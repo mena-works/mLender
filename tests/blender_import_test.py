@@ -86,8 +86,8 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("5 meshes imported", result["mesh_count"] == 5, result["mesh_count"])
-    check("5 materials built", result["material_count"] == 5,
+    check("6 meshes imported", result["mesh_count"] == 6, result["mesh_count"])
+    check("6 materials built", result["material_count"] == 6,
           result["material_count"])
     # Three of the five cubes asked for subdivision in Maya; the other two
     # must arrive unmodified.
@@ -218,6 +218,27 @@ def main():
     check("the smooth preview cube has one at level 1",
           lam_mod is not None and lam_mod.levels == 1,
           lam_mod.levels if lam_mod else None)
+
+    print("\nbaked procedurals")
+    proc = material_for("procCube")
+    check("procedural material exists", proc is not None)
+    if proc:
+        images = [
+            node.image for node in proc.node_tree.nodes
+            if node.bl_idname == "ShaderNodeTexImage" and node.image
+        ]
+        check("the bake produced image nodes", len(images) >= 2, len(images))
+        check("base colour is driven by a texture, not a flat value",
+              socket(proc, "Base Color").is_linked)
+        check("roughness is driven by a texture too",
+              socket(proc, "Roughness").is_linked)
+        for image in images:
+            # Maya bakes linear values, so an sRGB decode would darken them.
+            check("baked map {0} loaded as Non-Color".format(image.name),
+                  image.colorspace_settings.name == "Non-Color",
+                  image.colorspace_settings.name)
+            check("baked map {0} has real pixels".format(image.name),
+                  image.size[0] > 0 and image.size[1] > 0, image.size)
 
     print("\ncameras")
     cams = {o.name: o for o in bpy.data.objects if o.type == "CAMERA"}

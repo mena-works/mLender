@@ -17,7 +17,7 @@ LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
 LIVELINK_PROTOCOL = "za_lookdev_livelink"
 LIVELINK_VERSION = 1
-EXPORT_SCHEMA_VERSION = 8
+EXPORT_SCHEMA_VERSION = 9
 
 LIGHT_NODE_TYPES = (
     "RedshiftPhysicalLight",
@@ -234,6 +234,28 @@ UDIM_FIRST_TILE = 1001
 
 # File path attributes checked while walking a texture network upstream.
 TEXTURE_PATH_ATTRS = ("fileTextureName", "tex0", "filename", "file")
+
+# Procedural baking. Measured on Maya 2023: convertSolidTx writes linear
+# values whatever the colour management setting, and it cannot write EXR (the
+# file node appears but nothing lands on disk), so the format list is short.
+BAKE_FILE_FORMAT = "png"
+BAKE_BACKGROUND_MODE = "black"
+BAKE_SEMANTIC = "baked_procedural"
+DEFAULT_BAKE_RESOLUTION = 1024
+MAX_BAKE_RESOLUTION = 8192
+BAKE_FOLDER_NAME = "textures"
+
+# Channels whose network drives a single value rather than a colour, so the
+# bake is taken from the alpha output rather than the colour output.
+SCALAR_BAKE_CHANNELS = (
+    "roughness",
+    "metallic",
+    "specular",
+    "opacity",
+    "transmission",
+    "transmission_roughness",
+    "emission_strength",
+)
 
 # Cameras. Names and units measured on a live Maya 2023 camera: the film back
 # is stated in inches (1.41732 in is the 36 mm full frame width) and the clip

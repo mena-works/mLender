@@ -68,7 +68,14 @@ def load_image(texture_record, channel, warnings):
 
 
 def _is_non_color(texture_record, channel):
-    """Data channels are always Non-Color; colour channels follow Maya."""
+    """Data channels are always Non-Color; colour channels follow Maya.
+
+    A baked map is always Non-Color too. Measured on Maya 2023:
+    convertSolidTx writes linear values whatever the colour management
+    setting, so decoding one as sRGB would darken every bake.
+    """
+    if texture_record.get("linear") or texture_record.get("baked"):
+        return True
     if channel not in COLOR_CHANNELS:
         return True
     maya_color_space = str(texture_record.get("color_space") or "").lower()

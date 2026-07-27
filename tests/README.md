@@ -87,6 +87,10 @@ ağırlığının hiç aktarılmaması. Ayrıntı `light_calibration.md`.
 `.ass` export ederken `lightLinks=0, shadowLinks=0` şart; yoksa export boş bir
 ışık grubuna karşı `use_light_group on` yazar ve render simsiyah çıkar.
 
+Prosedürel bake de 2. ve 4. adımda sınanır: gerçek bir checker ve ramp
+ağı kurulur, bake edilir, Blender'da Non-Color yüklendiği doğrulanır, ve
+export'un sahneye `file` node bırakmadığı kontrol edilir.
+
 ## Ne doğrulanmıyor
 
 Bu üç test **render etmiyor**; sabitlerin tutarlı uygulandığını doğrularlar,

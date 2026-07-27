@@ -7,10 +7,14 @@ import io
 import json
 import os
 import re
+import shutil
 
 import maya.cmds as cmds
 
+from .bake import BakeContext
 from .constants import (
+    BAKE_FOLDER_NAME,
+    DEFAULT_BAKE_RESOLUTION,
     EXPORT_SCHEMA_VERSION,
     PACKAGE_PREFIX,
     TOOL_NAME,
@@ -28,7 +32,11 @@ PACKAGE_PATTERN = re.compile(
 )
 
 
-def export_lookdev(output_folder):
+def export_lookdev(
+    output_folder,
+    bake_procedurals=True,
+    bake_resolution=DEFAULT_BAKE_RESOLUTION,
+):
     """Write a numbered package folder holding the FBX and the lookdev JSON.
 
     Package creation is atomic: any failure removes both files and the folder
@@ -44,11 +52,21 @@ def export_lookdev(output_folder):
     fbx_path = os.path.join(package_folder, package_name + ".fbx")
     json_path = os.path.join(package_folder, package_name + "_lookdev.json")
 
+    warnings = []
+    bake_context = BakeContext(
+        os.path.join(package_folder, BAKE_FOLDER_NAME),
+        resolution=bake_resolution,
+        enabled=bake_procedurals,
+        warnings=warnings,
+    )
+
     try:
         mesh_shapes = scene_mesh_shapes()
         if not mesh_shapes:
             raise RuntimeError("The Maya scene contains no exportable mesh.")
-        mesh_records = [mesh_record(shape) for shape in mesh_shapes]
+        mesh_records = [
+            mesh_record(shape, bake_context) for shape in mesh_shapes
+        ]
         light_records = [light_record(shape) for shape in scene_light_shapes()]
         camera_records = [
             camera_record(shape) for shape in scene_camera_shapes()
@@ -70,6 +88,8 @@ def export_lookdev(output_folder):
             "lights": light_records,
             "camera_count": len(camera_records),
             "cameras": camera_records,
+            "baked_texture_count": len(bake_context.baked_files),
+            "export_warnings": warnings,
             "maya_linear_unit": maya_linear_unit(),
             "meters_per_maya_unit": meters_per_maya_unit(),
         }
@@ -78,7 +98,10 @@ def export_lookdev(output_folder):
         remove_file(fbx_path)
         remove_file(json_path)
         try:
-            os.rmdir(package_folder)
+            # rmtree rather than rmdir: baking may already have written
+            # textures into the package, and a half written package must
+            # not survive.
+            shutil.rmtree(package_folder, ignore_errors=True)
         except Exception:
             pass
         raise
@@ -92,6 +115,8 @@ def export_lookdev(output_folder):
         "mesh_count": len(mesh_records),
         "light_count": len(light_records),
         "camera_count": len(camera_records),
+        "baked_texture_count": len(bake_context.baked_files),
+        "warnings": warnings,
     }
 
 

@@ -28,6 +28,7 @@ za_lookdev_exporter/     # Maya (import sırası = bağımlılık sırası)
   constants.py           # sabitler, attribute alias tabloları
   mayautils.py           # maya.cmds sarmalayıcıları
   textures.py            # upstream texture arama
+  bake.py                # prosedürel ağları UV'ye bake etme
   shaders.py             # shader → kanal çıkarımı
   meshes.py              # mesh keşfi, material/face atamaları
   lights.py              # ışık keşfi ve kayıtları
@@ -447,6 +448,8 @@ Kullanıcının elle doğrulaması gereken adımlar:
 - ❌ Kaynak sahnenin istemediği bir şeyi bütün meshlere uygulama
 - ❌ Işık enerjisinden `position_scale²` terimini düşürme
 - ❌ Blender soket varsayılanını kaynaktan gelen değer sanma (speküler 0.5)
+- ❌ Baked map'i sRGB sanma; Maya lineer yazar
+- ❌ Sahneyi export sırasında kalıcı olarak değiştirme (convertSolidTx'in file node'unu temizle)
 
 ---
 
