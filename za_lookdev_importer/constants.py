@@ -8,7 +8,7 @@ message shape changes.
 
 import math
 
-BUILD_VERSION = "1.13.0"
+BUILD_VERSION = "1.14.0"
 
 LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
@@ -20,7 +20,7 @@ LIVELINK_EVENT = "lookdev_package_ready"
 # the scene, so an unreadable package must be rejected before anything is lost.
 # 3 added glass channels and 4 added UDIM on the main branch; 5 is this
 # branch with both, plus the Arnold channels.
-SUPPORTED_SCHEMA_VERSIONS = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+SUPPORTED_SCHEMA_VERSIONS = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
 
 MAX_MESSAGE_BYTES = 32 * 1024 * 1024
 SOCKET_POLL_SECONDS = 0.5
@@ -239,3 +239,15 @@ OPENPBR_EMISSION_SEMANTIC = "openpbr_emission_luminance"
 # A light's node tree is a multiplier on top of its energy. Nodes feeding
 # Emission Strength must stay at unit scale, otherwise energy is applied twice.
 NODE_TREE_UNIT_STRENGTH = 1.0
+
+# Rebuilt colour correction. A setting within this of its neutral value builds
+# no node at all, which keeps an untouched correction node out of the tree.
+CORRECTION_EPSILON = 1e-6
+
+# Arnold's contrast pivots on 0.18 and aiRange's on 0.5, so the pivot is always
+# passed explicitly rather than defaulted.
+ARNOLD_CONTRAST_PIVOT = 0.18
+
+# Horizontal gap between rebuilt correction nodes, so a chain stays readable
+# rather than stacking every node on the same spot.
+CORRECTION_NODE_SPACING = 200.0

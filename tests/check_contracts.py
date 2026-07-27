@@ -203,6 +203,33 @@ def main():
         == importer.constants.OPENPBR_EMISSION_SEMANTIC,
     )
 
+    print("\ncorrection node contract")
+    recorded = set(exporter_constants.CORRECTION_NODE_ATTRS)
+    rebuilt = set(importer.corrections.CORRECTION_BUILDERS)
+    check(
+        "every correction node the exporter records can be rebuilt",
+        recorded <= rebuilt,
+        "no builder for: {0}".format(sorted(recorded - rebuilt)),
+    )
+    check(
+        "no builder waits for a node the exporter never records",
+        rebuilt <= recorded,
+        "never recorded: {0}".format(sorted(rebuilt - recorded)),
+    )
+    check(
+        "the two input maths nodes name an operand the builders read",
+        all(
+            operand in ("multiply", "add")
+            for operand, _attrs
+            in exporter_constants.CORRECTION_OPERAND_INPUTS.values()
+        ),
+    )
+    check(
+        "the file node is never mistaken for a correction",
+        "file" in exporter_constants.CORRECTION_IGNORED_NODE_TYPES,
+    )
+    print("       correction nodes: {0}".format(", ".join(sorted(recorded))))
+
     print("\narea shape resolution")
     resolve = exporter.lights.resolve_area_shape
     # Redshift sends an enum label, Arnold sends a bare aiTranslator string.

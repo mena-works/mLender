@@ -96,7 +96,13 @@ export'un sahneye `file` node bırakmadığı kontrol edilir.
 Bu üç test **render etmiyor**; sabitlerin tutarlı uygulandığını doğrularlar,
 değerlerin doğru olduğunu değil.
 
-Değerlerin kendisi ayrıca ölçüldü, `light_calibration.md` içinde:
+Düzeltme node'larının matematiği ayrıca ölçüldü, `correction_nodes.md`
+içinde: Arnold `aiColorCorrect`/`aiRange` bir `aiFlat` üzerinden render
+edilerek, Blender node'ları da world background'a bağlanıp render edilerek.
+Üç sonuç sezginin tersi çıktı (gamma ters üs, hueShift tur cinsinden, contrast
+pivotlu) ve soket **isimleri** 4.1→5.2'de değişip indeksleri sabit kaldı.
+
+Işık değerleri de ölçüldü, `light_calibration.md` içinde:
 
 - Blender'ın light Power'ının toplam akı olduğu ve `normalize` kapalıyken
   alanla ölçeklendiği **render ile ölçüldü** (4.1 ve 5.2).

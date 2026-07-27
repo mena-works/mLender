@@ -107,6 +107,43 @@ def main():
         check("base colour driven by a texture",
               socket(std, "Base Color").is_linked)
 
+    print("\nrebuilt colour correction")
+    if std:
+        by_name = {node.name: node for node in std.node_tree.nodes}
+        gamma_nodes = [
+            node for node in std.node_tree.nodes
+            if node.bl_idname == "ShaderNodeGamma"
+        ]
+        # gammaCorrect 2.2 and aiColorCorrect 2.0, both reciprocated because
+        # Maya raises to 1/gamma while Blender's node raises to gamma.
+        exponents = sorted(
+            round(node.inputs[1].default_value, 5) for node in gamma_nodes
+        )
+        check("both gammas rebuilt as their reciprocal",
+              exponents == [round(1.0 / 2.2, 5), 0.5], exponents)
+
+        hue_sat = by_name.get("ZA_CC_Hue_Saturation")
+        check("saturation 0.5 rebuilt", hue_sat is not None
+              and abs(hue_sat.inputs[1].default_value - 0.5) < 1e-5)
+        check("hue left neutral at 0.5", hue_sat is not None
+              and abs(hue_sat.inputs[0].default_value - 0.5) < 1e-5)
+
+        # exposure 1 folds into multiply, so the red channel is 2 * 2 = 4.
+        multiply = by_name.get("ZA_CC_Multiply")
+        check("exposure folded into the multiply", multiply is not None
+              and abs(multiply.inputs[2].default_value[0] - 4.0) < 1e-5,
+              multiply.inputs[2].default_value[:] if multiply else None)
+        check("green channel carries exposure alone", multiply is not None
+              and abs(multiply.inputs[2].default_value[1] - 2.0) < 1e-5)
+
+        check("the corrected colour, not the raw image, reaches the socket",
+              socket(std, "Base Color").links[0].from_node.name.startswith("ZA_CC"),
+              socket(std, "Base Color").links[0].from_node.name)
+
+        check("the unrebuildable remapValue was reported",
+              any("remapValue" in warning for warning in result["warnings"]),
+              result["warnings"])
+
     print("\naiOpenPBRSurface")
     pbr = material_for("openPbrCube")
     check("material exists", pbr is not None)

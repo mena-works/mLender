@@ -17,7 +17,7 @@ LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
 LIVELINK_PROTOCOL = "za_lookdev_livelink"
 LIVELINK_VERSION = 1
-EXPORT_SCHEMA_VERSION = 10
+EXPORT_SCHEMA_VERSION = 11
 
 LIGHT_NODE_TYPES = (
     "RedshiftPhysicalLight",
@@ -290,6 +290,73 @@ PLACEMENT_NUMERIC_ATTRS = {
     "noise_u": "noiseU",
     "noise_v": "noiseV",
 }
+
+# Correction nodes sitting between a texture and a shader input. Both the
+# attribute names and the maths behind them were measured on Maya 2023 with
+# MtoA 5.4.8, by driving an unlit aiFlat and rendering it; see
+# tests/correction_nodes.md for the numbers.
+#
+# Two of the measurements contradict the obvious reading, so they are stated
+# here rather than left to the importer to rediscover:
+#   gamma      is applied as pow(input, 1/gamma), not pow(input, gamma)
+#   hueShift   is in turns (0..1), not degrees
+#
+# The order the values are applied in is part of the contract and is not the
+# order they appear in the attribute editor:
+#   gamma, hue, saturation, contrast, exposure, multiply, add, invert, mask
+CORRECTION_NODE_ATTRS = {
+    "aiColorCorrect": {
+        "gamma": "gamma",
+        "hue_shift": "hueShift",
+        "saturation": "saturation",
+        "contrast": "contrast",
+        "contrast_pivot": "contrastPivot",
+        "exposure": "exposure",
+        "multiply": "multiply",
+        "add": "add",
+        "invert": "invert",
+        "mask": "mask",
+    },
+    "gammaCorrect": {
+        "gamma": "gamma",
+    },
+    "aiRange": {
+        "input_min": "inputMin",
+        "input_max": "inputMax",
+        "output_min": "outputMin",
+        "output_max": "outputMax",
+        "smoothstep": "smoothstep",
+        "contrast": "contrast",
+        "contrast_pivot": "contrastPivot",
+        "bias": "bias",
+        "gain": "gain",
+    },
+    # Unconditional 1 - input, so it carries no parameters of its own.
+    "reverse": {},
+    "aiMultiply": {},
+    "aiAdd": {},
+}
+
+# aiMultiply and aiAdd take two interchangeable inputs, so which one holds the
+# constant depends on how the network was wired. The free input is the operand.
+CORRECTION_OPERAND_INPUTS = {
+    "aiMultiply": ("multiply", ("input1", "input2")),
+    "aiAdd": ("add", ("input1", "input2")),
+}
+
+# Nodes that legitimately appear in a texture chain and carry no correction of
+# their own. Anything else found there is reported to the importer so a value
+# that silently fails to survive the transfer is at least visible.
+CORRECTION_IGNORED_NODE_TYPES = (
+    "file",
+    "place2dTexture",
+    "place3dTexture",
+    "uvChooser",
+    "bump2d",
+    "shadingEngine",
+    "displacementShader",
+    "defaultColorMgtGlobals",
+)
 
 # bump2d sits between a texture and normalCamera and carries the strength that
 # would otherwise be lost when the walk steps past it to reach the file.

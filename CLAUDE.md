@@ -43,6 +43,7 @@ za_lookdev_importer/     # Blender multi-file add-on
   constants.py
   utils.py               # değer/isim normalizasyonu
   images.py              # texture yükleme, UDIM
+  corrections.py         # Maya düzeltme node'larını yeniden kurma
   materials.py           # node ağaçları
   lights.py              # Blender ışıkları, Dome World
   cameras.py             # Blender kameraları
@@ -450,6 +451,9 @@ Kullanıcının elle doğrulaması gereken adımlar:
 - ❌ Blender soket varsayılanını kaynaktan gelen değer sanma (speküler 0.5)
 - ❌ Baked map'i sRGB sanma; Maya lineer yazar
 - ❌ Soket bileşen sayısını varsayma; Subsurface Radius 3, renk soketleri 4
+- ❌ Düzeltme node'u soketlerine isimle erişme; isimler 4.1→5.2'de değişti
+  (`Fac`→`Factor`, `Bright`→`Brightness`), indeksler değişmedi
+- ❌ Gamma'yı iki tarafta aynı sanma; Maya `in^(1/g)`, Blender `in^g`
 - ❌ Sahneyi export sırasında kalıcı olarak değiştirme (convertSolidTx'in file node'unu temizle)
 
 ---

@@ -17,6 +17,9 @@ from .constants import (
     BUMP_DEPTH_ATTR,
     BUMP_INTERP_ATTR,
     BUMP_NODE_TYPES,
+    CORRECTION_IGNORED_NODE_TYPES,
+    CORRECTION_NODE_ATTRS,
+    CORRECTION_OPERAND_INPUTS,
     PLACEMENT_NODE_TYPE,
     PLACEMENT_NUMERIC_ATTRS,
     TEXTURE_PATH_ATTRS,
@@ -58,7 +61,10 @@ def texture_from_plug(plug):
     source_node = source_plug.split(".", 1)[0]
     candidates = [source_node]
     candidates.extend(cmds.listHistory(source_node, pruneDagObjects=True) or [])
-    for node in unique(candidates):
+    # listHistory repeats the node it started from, and a repeat would record
+    # the same correction node twice and apply its maths twice.
+    candidates = unique(candidates)
+    for node in candidates:
         path = texture_path_from_node(node)
         if path:
             udim = udim_texture_info(node, path)
@@ -80,6 +86,11 @@ def texture_from_plug(plug):
             bump = bump_info(candidates)
             if bump:
                 record["bump"] = bump
+            corrections, unsupported = correction_chain(candidates, node)
+            if corrections:
+                record["corrections"] = corrections
+            if unsupported:
+                record["unsupported_corrections"] = unsupported
             return record
     return {
         "path": "",
@@ -119,6 +130,73 @@ def placement_info(texture_node):
         return None
     values["node"] = node_label(placement)
     return values
+
+
+def correction_chain(candidates, texture_node):
+    """Correction nodes between the file node and the shader, in apply order.
+
+    Returns the rebuildable ones and, separately, the node types that have no
+    Blender equivalent. Reporting the second list matters: before this, a
+    remapValue or a colour blend between the file and the shader was stepped
+    straight past and the texture arrived uncorrected with nothing said.
+
+    ``candidates`` runs from the shader end towards the texture, so the result
+    is reversed; the importer rebuilds starting at the image.
+    """
+    chain = []
+    unsupported = []
+    for node in candidates:
+        if node == texture_node:
+            break
+        kind = node_type(node)
+        if kind in CORRECTION_NODE_ATTRS:
+            chain.append(correction_record(node, kind))
+        elif kind and kind not in CORRECTION_IGNORED_NODE_TYPES:
+            unsupported.append({"node": node_label(node), "node_type": kind})
+    chain.reverse()
+    return chain, unsupported
+
+
+def correction_record(node, kind):
+    """Read one correction node's settings into a JSON friendly record."""
+    parameters = {}
+    for semantic, attr in CORRECTION_NODE_ATTRS[kind].items():
+        if not attr_exists(node, attr):
+            continue
+        value = plug_value(node + "." + attr)
+        if value is not None:
+            parameters[semantic] = value
+
+    operand = CORRECTION_OPERAND_INPUTS.get(kind)
+    if operand:
+        semantic, attrs = operand
+        value = free_input_value(node, attrs)
+        if value is not None:
+            parameters[semantic] = value
+
+    return {
+        "type": kind,
+        "node": node_label(node),
+        "parameters": parameters,
+    }
+
+
+def free_input_value(node, attrs):
+    """Value of the first input carrying no upstream connection.
+
+    On a two input maths node the texture may be wired into either side, so
+    the operand is whichever one the artist left free.
+    """
+    for attr in attrs:
+        if not attr_exists(node, attr):
+            continue
+        connected = cmds.listConnections(
+            node + "." + attr, source=True, destination=False
+        )
+        if connected:
+            continue
+        return plug_value(node + "." + attr)
+    return None
 
 
 def bump_info(candidates):

@@ -224,9 +224,10 @@ upstream history tarar ve şu dosya alanlarını kontrol eder:
 - `file`
 
 Color correction, bump veya benzeri ara node'ların arkasındaki ilk bulunabilir
-texture yolu JSON'a yazılır. Çok katmanlı/prosedürel ağların matematiksel sonucu
-bake edilmez; bulunan kaynak texture ve material değeriyle mümkün olan en yakın
-Principled kurulum yapılır.
+texture yolu JSON'a yazılır. Ara node'lar artık **atlanmıyor**: tanınanlar
+Blender'da node olarak yeniden kuruluyor, tanınmayanlar uyarı olarak
+bildiriliyor (aşağıda "Renk düzeltme"). Çok katmanlı/prosedürel ağların
+matematiksel sonucu bu yolla ifade edilemiyorsa bake devreye girer.
 
 Base Color ve Emission textureleri renkli; Roughness, Metalness, Opacity ve
 Normal textureleri Blender'da Non-Color olarak açılır. Normal texture,
@@ -583,6 +584,51 @@ specularAnisotropy       -> Anisotropic
 - **`Subsurface Scale` varsayılanı sürümler arası farklı** (4.1'de 0.05,
   5.2'de 0.005). Bu yüzden değer açıkça set edilir; varsayılana güvenmek aynı
   paketi iki sürümde farklı gösterirdi.
+
+## Renk düzeltme
+
+Texture ile shader arasındaki düzeltme node'ları eskiden **sessizce
+atlanıyordu**: upstream taraması dosyayı bulmak için üzerlerinden geçiyor,
+gamma'sı ve doygunluğu değiştirilmiş bir texture Blender'a ham geliyordu.
+
+Artık tanınan node'lar Blender node'u olarak yeniden kuruluyor — bake'den
+hızlı ve sonradan elle düzenlenebilir:
+
+| Maya / Arnold    | Blender                                          |
+|------------------|--------------------------------------------------|
+| `aiColorCorrect` | Gamma + Hue/Saturation + Bright/Contrast + Mix   |
+| `gammaCorrect`   | Gamma                                            |
+| `aiRange`        | Mix (scale) + Mix (offset) + Bright/Contrast     |
+| `aiMultiply`     | Mix (Multiply)                                   |
+| `aiAdd`          | Mix (Add)                                        |
+| `reverse`        | Invert                                           |
+
+Node'lar `ZA_CC_` / `ZA_` önekiyle adlandırılır. Bir ayar nötr değerindeyse o
+node hiç kurulmaz, yani dokunulmamış bir düzeltme node'u ağacı kalabalıklaştırmaz.
+
+Üç dönüşüm ölçüldü ve sezginin tersi çıktı (ayrıntı: `tests/correction_nodes.md`):
+
+- **`gamma` ters üstür.** Maya `in^(1/g)` uygular, Blender'ın Gamma node'u
+  `in^g`. Değer bu yüzden tersine çevrilerek yazılır.
+- **`hueShift` tur cinsindendir**, derece değil. Blender'ın Hue'su ise 0.5'i
+  nötr alan bir ofsettir.
+- **`contrast` pivotludur.** Arnold `c*(in-pivot)+pivot`, Blender ise
+  `(1+C)*in + (B-C/2)`. İkisini eşitleyen çift ölçümle doğrulandı: aynı girdi
+  her iki tarafta da `0.820000` veriyor.
+
+`exposure` ayrı bir node kurmaz; multiply ile aynı node'a katlanır.
+
+**Kurulamayanlar bildirilir.** `remapValue`, `blendColors`, `aiComposite` gibi
+karşılığı olmayan node'lar için import sonrası uyarı yazılır (Blender System
+Console veya panel status satırı):
+
+```text
+Correction node "remapCoat" (remapValue) has no Blender equivalent,
+so the texture is used without it.
+```
+
+`aiRange`'in `smoothstep`, `bias` ve `gain` ayarları da kurulmaz ve ayrıca
+uyarılır; doğrusal remap ve contrast kurulur.
 
 ## Prosedürel bake
 

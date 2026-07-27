@@ -87,9 +87,24 @@ def build_scene():
         handle.write("only the path is exported, never the pixels")
     file_node = cmds.shadingNode("file", asTexture=True, name="baseTex")
     cmds.setAttr(file_node + ".fileTextureName", texture, type="string")
+    # Two corrections in series, so the exported chain has to come back in
+    # apply order rather than in the order the history walk found them.
+    gamma_node = cmds.shadingNode("gammaCorrect", asUtility=True, name="gc")
+    cmds.setAttr(gamma_node + ".gamma", 2.2, 2.2, 2.2, type="double3")
     correct = cmds.shadingNode("aiColorCorrect", asUtility=True, name="cc")
-    cmds.connectAttr(file_node + ".outColor", correct + ".input", force=True)
+    cmds.setAttr(correct + ".gamma", 2.0)
+    cmds.setAttr(correct + ".saturation", 0.5)
+    cmds.setAttr(correct + ".exposure", 1.0)
+    cmds.setAttr(correct + ".multiply", 2.0, 1.0, 1.0, type="double3")
+    cmds.connectAttr(file_node + ".outColor", gamma_node + ".value", force=True)
+    cmds.connectAttr(gamma_node + ".outValue", correct + ".input", force=True)
     cmds.connectAttr(correct + ".outColor", std + ".baseColor", force=True)
+
+    # remapValue has no Blender equivalent, so it must be reported rather than
+    # silently stepped over.
+    remap = cmds.shadingNode("remapValue", asUtility=True, name="remapCoat")
+    cmds.connectAttr(file_node + ".outAlpha", remap + ".inputValue", force=True)
+    cmds.connectAttr(remap + ".outValue", std + ".coat", force=True)
 
     # A UDIM set, driven through Maya's own tiling mode rather than a token in
     # the path, which is the case a naive path scan gets wrong.
@@ -277,6 +292,45 @@ def main():
     check("base colour texture found through aiColorCorrect",
           std.get("base_color", {}).get("texture", {}).get("path", "")
           .endswith(".tx"))
+
+    corrections = (
+        std.get("base_color", {}).get("texture", {}).get("corrections") or []
+    )
+    kinds = [entry.get("type") for entry in corrections]
+    check("both correction nodes recorded, nearest the texture first",
+          kinds == ["gammaCorrect", "aiColorCorrect"], kinds)
+    correct_params = next(
+        (entry.get("parameters", {}) for entry in corrections
+         if entry.get("type") == "aiColorCorrect"),
+        {},
+    )
+    check("aiColorCorrect gamma recorded",
+          abs(correct_params.get("gamma", 0.0) - 2.0) < 1e-6, correct_params)
+    check("aiColorCorrect saturation recorded",
+          abs(correct_params.get("saturation", 0.0) - 0.5) < 1e-6)
+    check("aiColorCorrect exposure recorded",
+          abs(correct_params.get("exposure", 0.0) - 1.0) < 1e-6)
+    check("aiColorCorrect multiply recorded per channel",
+          [round(value, 6) for value in correct_params.get("multiply", [])]
+          == [2.0, 1.0, 1.0], correct_params.get("multiply"))
+    gamma_params = next(
+        (entry.get("parameters", {}) for entry in corrections
+         if entry.get("type") == "gammaCorrect"),
+        {},
+    )
+    check("gammaCorrect keeps its three components",
+          [round(value, 5) for value in gamma_params.get("gamma", [])]
+          == [2.2, 2.2, 2.2], gamma_params.get("gamma"))
+
+    unsupported = [
+        entry.get("node_type")
+        for entry in (
+            std.get("coat", {}).get("texture", {})
+            .get("unsupported_corrections") or []
+        )
+    ]
+    check("remapValue reported as unrebuildable rather than dropped silently",
+          "remapValue" in unsupported, unsupported)
 
     print("\naiOpenPBRSurface")
     pbr = channels("openPbrCube")

@@ -35,6 +35,7 @@ from .constants import (
     TRANSMISSION_THRESHOLD,
     UNLIT_SHADER_TYPES,
 )
+from .corrections import apply_corrections
 from .images import load_image
 from .utils import (
     color4,
@@ -280,7 +281,16 @@ def _build_unlit(material, channels, warnings):
             image_node = nodes.new("ShaderNodeTexImage")
             image_node.name = "ZA_Unlit_Color"
             image_node.image = image
-            links.new(image_node.outputs["Color"], emission.inputs["Color"])
+            _apply_placement(material, image_node, emission_texture)
+            links.new(
+                apply_corrections(
+                    material,
+                    image_node.outputs["Color"],
+                    emission_texture,
+                    warnings,
+                ),
+                emission.inputs["Color"],
+            )
     elif "value" in emission_record:
         emission.inputs["Color"].default_value = color4(
             emission_record.get("value")
@@ -300,8 +310,17 @@ def _build_unlit(material, channels, warnings):
             image_node = nodes.new("ShaderNodeTexImage")
             image_node.name = "ZA_Unlit_Opacity"
             image_node.image = image
+            _apply_placement(material, image_node, opacity_texture)
             rgb_to_bw = nodes.new("ShaderNodeRGBToBW")
-            links.new(image_node.outputs["Color"], rgb_to_bw.inputs["Color"])
+            links.new(
+                apply_corrections(
+                    material,
+                    image_node.outputs["Color"],
+                    opacity_texture,
+                    warnings,
+                ),
+                rgb_to_bw.inputs["Color"],
+            )
             opacity_output = rgb_to_bw.outputs["Val"]
             if opacity_record.get("invert"):
                 opacity_output = _insert_value_invert(nodes, links, opacity_output)
@@ -347,6 +366,7 @@ def apply_record_to_socket(material, shader, target, channel, record, warnings):
                 image,
                 bool(record.get("invert")),
                 texture,
+                warnings,
             )
             return
 
@@ -376,7 +396,7 @@ def apply_record_to_socket(material, shader, target, channel, record, warnings):
 
 
 def connect_image_channel(material, bsdf, target, channel, image, invert,
-                         texture_record=None):
+                         texture_record=None, warnings=None):
     nodes = material.node_tree.nodes
     links = material.node_tree.links
     image_node = nodes.new("ShaderNodeTexImage")
@@ -385,13 +405,22 @@ def connect_image_channel(material, bsdf, target, channel, image, invert,
     image_node.image = image
     _apply_placement(material, image_node, texture_record)
 
+    # The Maya correction nodes the exporter walked past go back in here, so
+    # every channel sees the corrected colour rather than the raw file.
+    source = apply_corrections(
+        material,
+        image_node.outputs.get("Color"),
+        texture_record,
+        warnings if warnings is not None else [],
+    )
+
     if channel == "normal":
-        _connect_normal(material, image_node, target, texture_record)
+        _connect_normal(material, source, target, texture_record)
         return
 
     if channel == "opacity":
         rgb_to_bw = nodes.new("ShaderNodeRGBToBW")
-        links.new(image_node.outputs.get("Color"), rgb_to_bw.inputs.get("Color"))
+        links.new(source, rgb_to_bw.inputs.get("Color"))
         output = rgb_to_bw.outputs.get("Val")
         if invert:
             output = _insert_value_invert(nodes, links, output)
@@ -399,7 +428,7 @@ def connect_image_channel(material, bsdf, target, channel, image, invert,
         enable_alpha(material)
         return
 
-    output = image_node.outputs.get("Color")
+    output = source
     if invert:
         invert_node = nodes.new("ShaderNodeInvert")
         links.new(output, invert_node.inputs.get("Color"))
@@ -407,7 +436,7 @@ def connect_image_channel(material, bsdf, target, channel, image, invert,
     links.new(output, target)
 
 
-def _connect_normal(material, image_node, target, texture_record):
+def _connect_normal(material, source, target, texture_record):
     """Wire a normal or bump map, honouring the bump2d strength from Maya.
 
     Maya's bump2d can be interpreted as a height field or as tangent space
@@ -424,7 +453,7 @@ def _connect_normal(material, image_node, target, texture_record):
         # A height field rather than a normal map.
         node = nodes.new("ShaderNodeBump")
         node.name = "ZA_Bump"
-        links.new(image_node.outputs.get("Color"), node.inputs.get("Height"))
+        links.new(source, node.inputs.get("Height"))
         if node.inputs.get("Strength") is not None:
             node.inputs["Strength"].default_value = max(0.0, depth)
         links.new(node.outputs.get("Normal"), target)
@@ -439,7 +468,7 @@ def _connect_normal(material, image_node, target, texture_record):
             pass
     if normal_map.inputs.get("Strength") is not None:
         normal_map.inputs["Strength"].default_value = max(0.0, depth)
-    links.new(image_node.outputs.get("Color"), normal_map.inputs.get("Color"))
+    links.new(source, normal_map.inputs.get("Color"))
     links.new(normal_map.outputs.get("Normal"), target)
 
 
