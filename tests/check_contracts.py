@@ -203,6 +203,54 @@ def main():
         == importer.constants.OPENPBR_EMISSION_SEMANTIC,
     )
 
+    print("\nlivelink message")
+    validate = importer.livelink.validate_message
+    base = {
+        "protocol": importer.constants.LIVELINK_PROTOCOL,
+        "protocol_version": importer.constants.LIVELINK_VERSION,
+        "event": importer.constants.LIVELINK_EVENT,
+        "package_folder": "C:/packages/MTB_Z_A_01",
+    }
+
+    def rejects(label, message):
+        try:
+            validate(message)
+        except ValueError:
+            check(label, True)
+            return
+        check(label, False, "accepted {0!r}".format(message))
+
+    try:
+        validate(dict(base))
+        check("a protocol 2 message needs no embedded JSON", True)
+    except ValueError as error:
+        check("a protocol 2 message needs no embedded JSON", False, error)
+    try:
+        validate(dict(base, package_json={"schema_version": 1}))
+        check("an embedded JSON is still accepted", True)
+    except ValueError as error:
+        check("an embedded JSON is still accepted", False, error)
+
+    rejects("a message with no package folder is rejected",
+            {k: v for k, v in base.items() if k != "package_folder"})
+    rejects("an empty package folder is rejected",
+            dict(base, package_folder="   "))
+    rejects("a non-object package_json is rejected",
+            dict(base, package_json="not an object"))
+    rejects("the old protocol version is rejected",
+            dict(base, protocol_version=1))
+
+    # The whole point of protocol 2: the message no longer grows with the
+    # animation, so the importer's size ceiling stops being reachable.
+    import json as _json
+
+    wire = _json.dumps(base)
+    check(
+        "the message stays tiny regardless of scene size",
+        len(wire) < 1024,
+        "{0} bytes".format(len(wire)),
+    )
+
     print("\nanimation range")
     parse = exporter.ui.parse_frame_range
     check("plain range", parse("1-120") == (1.0, 120.0, None), parse("1-120"))

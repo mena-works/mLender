@@ -29,12 +29,20 @@ def send_package(result, host=None, port=None):
     except Exception:
         raise ValueError("Blender port must be a number.")
 
+    # Protocol 2 sends only the package location. The JSON is already on disk
+    # and the importer reads it from there, so putting a copy on the wire only
+    # duplicated it: measured at about 225 bytes per animation sample, a long
+    # range with many animated lights could approach the importer's 32 MB
+    # message ceiling for no reason.
+    #
+    # This assumes the listener can see the package folder, which was already
+    # true: the FBX and the textures are referenced by path too.
     message = {
         "protocol": LIVELINK_PROTOCOL,
         "protocol_version": LIVELINK_VERSION,
         "event": "lookdev_package_ready",
         "package_folder": maya_path(result["package_folder"]),
-        "package_json": result["package_json"],
+        "package_name": result.get("package_name") or "",
     }
     payload = (json.dumps(message, ensure_ascii=False) + "\n").encode("utf-8")
 

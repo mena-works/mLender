@@ -291,10 +291,17 @@ def find_mesh_record(obj, records, used_record_ids):
 
     A full-path match outranks a short-name match, because short names repeat
     across namespaces. Records already claimed by another object are skipped.
+
+    Names alone are not enough. Two meshes called "twin" under different Maya
+    groups is ordinary, and both records score identically on name, so an
+    arbitrary one used to win: the meshes arrived swapped, each carrying the
+    other's materials, visibility and group. The parent chain the FBX brought
+    in is what tells them apart, so it breaks the tie.
     """
     object_keys = name_keys(obj.name)
     if obj.data:
         object_keys.update(name_keys(obj.data.name))
+    ancestor_keys = ancestor_name_keys(obj)
 
     best = None
     best_score = -1
@@ -308,10 +315,42 @@ def find_mesh_record(obj, records, used_record_ids):
             score = 100
         elif object_keys.intersection(base_keys):
             score = 10
+        if score >= 0:
+            score += group_trail_score(ancestor_keys, record.get("groups"))
         if score > best_score:
             best = record
             best_score = score
     return best if best_score >= 0 else None
+
+
+def ancestor_name_keys(obj):
+    """Every spelling of an object's parent names, for group matching."""
+    keys = set()
+    parent = getattr(obj, "parent", None)
+    depth = 0
+    # Bounded rather than while-true: a corrupt file with a parent cycle
+    # should not hang the import.
+    while parent is not None and depth < 64:
+        keys.update(name_keys(parent.name))
+        parent = getattr(parent, "parent", None)
+        depth += 1
+    return keys
+
+
+def group_trail_score(ancestor_keys, groups):
+    """How much of a record's Maya group trail the object's parents confirm.
+
+    Deliberately capped well below the gap between a full-path match and a
+    name match, so a deep hierarchy can break a tie without ever outvoting a
+    genuine full-path match.
+    """
+    if not groups or not ancestor_keys:
+        return 0
+    matched = sum(
+        1 for group in groups
+        if name_keys(group).intersection(ancestor_keys)
+    )
+    return min(matched, 5) * 5
 
 
 def rename_mesh_from_record(obj, mesh_record):

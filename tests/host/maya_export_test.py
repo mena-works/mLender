@@ -171,6 +171,38 @@ def build_scene():
         pass
     cmds.connectAttr(udim_node + ".outColor", lam + ".KdColor", force=True)
 
+    # ---------------------------------------------------------- edge cases
+    # Two meshes sharing a short name under different groups. Maya allows it,
+    # and the importer matches records to objects by name, so this is where a
+    # silent mismatch would show up.
+    # They are moved apart so a swap is detectable: if the importer pairs the
+    # wrong record with the wrong object, the one in setA lands at -7.
+    twin_a = cmds.polyCube(name="twin")[0]
+    cmds.setAttr(twin_a + ".translateX", 7.0)
+    cmds.group(twin_a, name="setA")
+    twin_b = cmds.polyCube(name="twin")[0]
+    cmds.setAttr(twin_b + ".translateX", -7.0)
+    cmds.group(twin_b, name="setB")
+
+    # A non-ASCII name, which is ordinary in a Turkish or French scene.
+    accented = cmds.polyCube(name="kirmiziKup")[0]
+    try:
+        accented = cmds.rename(accented, u"kırmızıKüp")
+    except Exception:
+        pass
+    _, accented_shader = shaded_cube("accentedShaded", "aiStandardSurface")
+
+    # A texture that is referenced but does not exist on disk.
+    missing = cmds.shadingNode("file", asTexture=True, name="missingTex")
+    cmds.setAttr(
+        missing + ".fileTextureName",
+        os.path.join(OUT, "definitely_not_here.tx").replace("\\", "/"),
+        type="string",
+    )
+    cmds.connectAttr(
+        missing + ".outColor", accented_shader + ".baseColor", force=True
+    )
+
     # A shadow-only object: invisible to the camera but still casting. This is
     # the everyday lookdev case that used to arrive fully visible.
     cmds.setAttr("glassCubeShape.primaryVisibility", False)
@@ -370,7 +402,8 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("8 meshes exported", payload["mesh_count"] == 8, payload["mesh_count"])
+    check("12 meshes exported", payload["mesh_count"] == 12,
+          payload["mesh_count"])
 
     print("\naiStandardSurface")
     std = channels("stdSurfCube")
@@ -462,6 +495,39 @@ def main():
     )
     check("blendColors knows which input the texture arrived on",
           blend_params.get("connected_input") == "color1", blend_params)
+
+    print("\nedge cases")
+    names = [record.get("mesh") for record in payload["meshes"]]
+    twins = [
+        record for record in payload["meshes"] if record.get("mesh") == "twin"
+    ]
+    check("both same-named meshes were exported", len(twins) == 2, names)
+    check("their full paths tell them apart",
+          len({record.get("mesh_path") for record in twins}) == 2,
+          [record.get("mesh_path") for record in twins])
+    check("their groups tell them apart",
+          sorted(tuple(record.get("groups") or []) for record in twins)
+          == [("setA",), ("setB",)],
+          [record.get("groups") for record in twins])
+
+    accented_names = [name for name in names if name and not name.isascii()]
+    check("a non-ASCII mesh name survived export", accented_names,
+          accented_names)
+
+    accented_record = next(
+        (record for record in payload["meshes"]
+         for material in record["materials"]
+         if material.get("material", "").startswith("accentedShaded")),
+        None,
+    )
+    check("a missing texture is still referenced, not dropped",
+          accented_record is not None
+          and any(
+              (entry.get("texture") or {}).get("path", "").endswith(".tx")
+              for material in accented_record["materials"]
+              for entry in (material.get("channels") or {}).values()
+          ),
+          accented_record.get("mesh") if accented_record else None)
 
     print("\nselection scope")
     # Selecting the group is how an asset is normally picked, so the selection
@@ -555,10 +621,20 @@ def main():
                 path = (entry.get("texture") or {}).get("path") or ""
                 if path:
                     collected_paths.append(path)
-    check("every texture path now points inside the package",
+    # The deliberately missing texture is the one exception: collection
+    # reports it and leaves its path alone rather than failing the export.
+    outside = [
+        path for path in collected_paths
+        if "textures_collected" not in path
+    ]
+    check("every texture that exists now points inside the package",
           collected_paths
-          and all("textures_collected" in path for path in collected_paths),
-          [p for p in collected_paths if "textures_collected" not in p][:3])
+          and outside == [p for p in outside if "definitely_not_here" in p],
+          outside[:3])
+    check("the missing texture was reported",
+          any("definitely_not_here" in warning
+              for warning in collected_result["warnings"]),
+          collected_result["warnings"])
     check("the original Maya path is kept for reference",
           any(
               (entry.get("texture") or {}).get("original_path")

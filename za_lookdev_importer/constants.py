@@ -8,12 +8,12 @@ message shape changes.
 
 import math
 
-BUILD_VERSION = "1.22.0"
+BUILD_VERSION = "1.23.0"
 
 LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
 LIVELINK_PROTOCOL = "za_lookdev_livelink"
-LIVELINK_VERSION = 1
+LIVELINK_VERSION = 2
 LIVELINK_EVENT = "lookdev_package_ready"
 
 # Package JSON schema versions this build knows how to read. The import wipes

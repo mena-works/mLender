@@ -693,6 +693,22 @@ olurdu; onun yerine tanımlı bir transform kurulur.
 Maya'da renk yönetimi kapalıysa sahne ham lineer kabul edilir ve `Standard`
 kurulur.
 
+## Aynı isimli meshler
+
+Maya'da iki mesh'in farklı gruplar altında aynı kısa ismi taşıması (`|setA|twin`
+ve `|setB|twin`) tamamen normaldir. Importer kayıtları objelere **isimle**
+eşleştirdiği için ikisi de aynı puanı alıyor ve rastgele biri kazanıyordu:
+meshler **yer değiştiriyor**, her biri diğerinin materyalini, görünürlüğünü ve
+grubunu alıyordu.
+
+Artık FBX'in getirdiği **parent zinciri** beraberliği bozuyor: kaydın grup izi
+objenin ata isimleriyle karşılaştırılıyor. Katkı bilinçli olarak tam-yol
+eşleşmesinin altında tutuluyor, böylece derin bir hiyerarşi gerçek bir tam-yol
+eşleşmesini asla geçemez.
+
+Test bunu iki küpü zıt yönlere taşıyarak sınıyor; yer değiştirme olsa konumlar
+takas olurdu.
+
 ## Export kapsamı
 
 `Export Scope` kutusu işaretlenirse sahnenin tamamı yerine **yalnız seçili

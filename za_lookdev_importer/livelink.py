@@ -210,5 +210,12 @@ def validate_message(message):
         raise ValueError("Unsupported LiveLink protocol version.")
     if message.get("event") != LIVELINK_EVENT:
         raise ValueError("Unsupported LiveLink event.")
-    if not isinstance(message.get("package_json"), dict):
-        raise ValueError("LiveLink package JSON is missing.")
+    # Protocol 2 carries the package location rather than a copy of its JSON,
+    # which the importer reads from disk. An embedded package_json is still
+    # accepted and used when present, so a sender that wants to avoid the disk
+    # read can still send one.
+    if not str(message.get("package_folder") or "").strip():
+        raise ValueError("LiveLink package folder is missing.")
+    embedded = message.get("package_json")
+    if embedded is not None and not isinstance(embedded, dict):
+        raise ValueError("LiveLink package JSON must be an object.")

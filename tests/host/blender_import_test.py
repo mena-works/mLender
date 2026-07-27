@@ -103,8 +103,9 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("8 meshes imported", result["mesh_count"] == 8, result["mesh_count"])
-    check("8 materials built", result["material_count"] == 8,
+    check("12 meshes imported", result["mesh_count"] == 12,
+          result["mesh_count"])
+    check("10 materials built", result["material_count"] == 10,
           result["material_count"])
     # Four of the eight cubes asked for subdivision in Maya, the displaced one
     # among them; the rest must arrive unmodified.
@@ -154,8 +155,47 @@ def main():
           ungrouped is not None
           and scene_collections(ungrouped) == [result["root_collection"]],
           [c.name for c in ungrouped.users_collection] if ungrouped else None)
-    check("two collections were reported", result["group_collection_count"] == 2,
+    check("four collections were reported",
+          result["group_collection_count"] == 4,
           result["group_collection_count"])
+
+    print("\nedge cases")
+    # Two Maya meshes share the short name "twin" under different groups. The
+    # importer pairs records to objects by name, so this is exactly where a
+    # silent swap would happen. They sit at opposite x, so a swap is visible.
+    set_a = bpy.data.collections.get("setA")
+    set_b = bpy.data.collections.get("setB")
+    check("both same-named meshes got their own collection",
+          set_a is not None and set_b is not None
+          and len(set_a.objects) == 1 and len(set_b.objects) == 1,
+          (len(set_a.objects) if set_a else None,
+           len(set_b.objects) if set_b else None))
+    if set_a and set_b and set_a.objects and set_b.objects:
+        a_x = set_a.objects[0].matrix_world.translation.x
+        b_x = set_b.objects[0].matrix_world.translation.x
+        check("the mesh in setA is the one Maya had in setA",
+              a_x > 0.0 and b_x < 0.0, (round(a_x, 4), round(b_x, 4)))
+        check("they are two distinct objects",
+              set_a.objects[0] is not set_b.objects[0])
+
+    accented = next(
+        (obj for obj in bpy.data.objects
+         if obj.type == "MESH" and not obj.name.isascii()),
+        None,
+    )
+    check("a non-ASCII mesh name survived the round trip",
+          accented is not None,
+          [o.name for o in bpy.data.objects if o.type == "MESH"][:12])
+
+    missing_material = material_for("accentedShaded")
+    check("a material whose texture is missing is still built",
+          missing_material is not None)
+    check("the missing texture was reported, not swallowed",
+          any("definitely_not_here" in warning
+              for warning in result["warnings"]))
+    if missing_material:
+        check("its base colour socket still has a usable value",
+              socket(missing_material, "Base Color") is not None)
 
     print("\nrebuilt colour correction")
     if std:
