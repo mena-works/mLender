@@ -337,10 +337,18 @@ yolu var:
 `za_lookdev_importer` klasörünü zip'le, `Edit > Preferences > Add-ons > Install`
 ile seç.
 
-**3. Script dizini olarak tanıt**
+**3. Junction / symlink** (geliştirme için en iyisi)
 
-`Preferences > File Paths > Scripts` altına package'ın **üstündeki** klasörü
-ekle ve Blender'ı yeniden başlat.
+Kopyalamak yerine add-on klasörünü depoya bağla; `git pull` sonrası kopyalama
+derdi kalmaz:
+
+```bat
+mklink /J "%APPDATA%\Blender Foundation\Blender.2\scriptsddons\za_lookdev_importer" ^
+          "<depo>\za_lookdev_importer"
+```
+
+Windows'ta dizin junction'i yönetici hakkı istemez. Linux/macOS'ta
+`ln -s` aynı işi görür.
 
 Kurulumdan sonra `Edit > Preferences > Add-ons` içinde
 `Z-A Exporter - Lookdev` kaydını etkinleştir.

@@ -43,7 +43,7 @@ string'inden şekil çözümlemesi, `aiExposure` yazım farkı, `aiFlat`'ın
 ## 3. Blender add-on testi (gerçek Blender, ~15 sn)
 
 ```bash
-"C:\Program Files\Blender Foundation\Blender 5.2lender.exe" ^
+"C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" ^
     --background --factory-startup --python tests/blender_addon_test.py
 ```
 
