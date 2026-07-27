@@ -265,6 +265,43 @@ za.show_ui()
 `tool_path`, package klasörünün **içi değil, üstündeki** klasördür; yani
 `za_lookdev_exporter` klasörünü içeren dizin.
 
+### Kalıcı kurulum
+
+Her seferinde yolu yazmamak için iki yol var, ikisi de mevcut ayarlarına
+dokunmadan eklenebilir.
+
+**userSetup.py** — `Documents/maya/scripts/userSetup.py` dosyasının sonuna
+ekle. Dosya zaten varsa üzerine yazma, altına ekle:
+
+```python
+ZA_EXPORTER_ROOT = r"...\MayaToBlender_Exporter-main"
+
+
+def _register_za_exporter():
+    import os
+    import sys
+    try:
+        if not os.path.isdir(os.path.join(ZA_EXPORTER_ROOT,
+                                          "za_lookdev_exporter")):
+            return
+        if ZA_EXPORTER_ROOT not in sys.path:
+            sys.path.append(ZA_EXPORTER_ROOT)
+    except Exception as exc:
+        print("Z-A Exporter could not be registered: %s" % exc)
+
+
+maya.utils.executeDeferred(_register_za_exporter)
+```
+
+`import maya.utils` dosyanın başında olmalı. Blok baştan sona try ile
+sarılıdır; klasör taşınmış olsa bile Maya'nın açılışını bozmaz.
+
+**Shelf** — `Documents/maya/<sürüm>/prefs/shelves/` altına ayrı bir
+`shelf_ZA_Exporter.mel` koy. Yeni bir dosya olduğu için mevcut shelf'lerin
+etkilenmez; Maya açılışta yükler. İki buton önerilir: biri `za.show_ui()`,
+diğeri `za.reload_package()` ile yeniden yükleyip UI'yi açan geliştirme
+butonu.
+
 1. `Export Location` seç.
 2. Blender host/port değerlerini kontrol et. Varsayılan `127.0.0.1:50505`.
 3. `Send To Blender` butonuna bas.
