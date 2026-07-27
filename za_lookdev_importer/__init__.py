@@ -13,7 +13,7 @@ shows BUILD_VERSION and it is how a user confirms which build is loaded.
 bl_info = {
     "name": "Z-A Exporter - Lookdev",
     "author": "Z-A Exporter",
-    "version": (1, 8, 0),
+    "version": (1, 8, 1),
     "blender": (3, 6, 0),
     "location": "View3D > Sidebar > Z-A Exporter",
     "description": (

@@ -1,6 +1,6 @@
 # Testler
 
-Üç kademe var. Yukarıdan aşağıya doğru daha yavaş ama daha gerçek.
+Dört kademe var. Yukarıdan aşağıya doğru daha yavaş ama daha gerçek.
 
 ## 1. Sözleşme kontrolleri (host gerekmez, saniyeler)
 
@@ -40,7 +40,21 @@ gibi attribute isimleri, Arnold opacity'sinin ters çevrilmemesi, `aiTranslator`
 string'inden şekil çözümlemesi, `aiExposure` yazım farkı, `aiFlat`'ın
 `outColor` yerine `color` okuması, `aiLightPortal`'ın dışlanması.
 
-## 3. Blender import testi (gerçek Blender, ~30 sn)
+## 3. Blender add-on testi (gerçek Blender, ~15 sn)
+
+```bash
+"C:\Program Files\Blender Foundation\Blender 5.2lender.exe" ^
+    --background --factory-startup --python tests/blender_addon_test.py
+```
+
+Add-on'un kayıt olduğunu, operator'ların **çağrılabildiğini** ve arka arkaya
+`register()` çağrılarının çalışan bir add-on bıraktığını doğrular. Sonuncusu
+Blender'ın "Reload Scripts" davranışıdır ve bozuk bir register'ın butonları
+çalışmayan bir panel bırakarak saklandığı yerdir.
+
+Kurulum gerektirmez, package'ı doğrudan depodan import eder.
+
+## 4. Blender import testi (gerçek Blender, ~30 sn)
 
 ```bash
 "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" ^

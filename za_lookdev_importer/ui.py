@@ -127,17 +127,36 @@ def unregister_properties():
 
 
 def _safe_register(cls):
-    """Register, replacing a class left behind by a previous reload."""
-    old = getattr(bpy.types, cls.__name__, None)
-    if old:
+    """Register, replacing a class left behind by a previous reload.
+
+    is_registered is the signal that matters: Blender does not expose operator
+    classes on bpy.types by name, so a bpy.types lookup silently misses them
+    and the reload protection would only ever cover the panel. A failure is
+    reported rather than swallowed, because a half registered add-on shows a
+    panel whose buttons do nothing.
+    """
+    if getattr(cls, "is_registered", False):
         try:
-            bpy.utils.unregister_class(old)
+            bpy.utils.unregister_class(cls)
         except Exception:
             pass
+
+    stale = getattr(bpy.types, cls.__name__, None)
+    if stale is not None and stale is not cls:
+        try:
+            bpy.utils.unregister_class(stale)
+        except Exception:
+            pass
+
     try:
         bpy.utils.register_class(cls)
-    except ValueError:
-        pass
+    except Exception as exc:
+        print(
+            "Z-A Lookdev: could not register {0}: {1}".format(
+                cls.__name__,
+                exc,
+            )
+        )
 
 
 def _safe_unregister(cls):
