@@ -12,7 +12,6 @@ import math
 import os
 
 import bpy
-from mathutils import Matrix, Vector
 
 from .constants import (
     DEFAULT_LIGHT_POWER_SCALE,
@@ -22,6 +21,10 @@ from .constants import (
     WATTS_PER_INTENSITY,
 )
 from .images import load_image
+from .transforms import (
+    maya_matrix_to_blender,
+    source_scale as source_light_scale,
+)
 from .utils import color4, namespace_free_name, scalar
 
 
@@ -112,7 +115,7 @@ def create_light_object(
     data = bpy.data.lights.new(clean_name, blender_type)
     obj = bpy.data.objects.new(clean_name, data)
     collection.objects.link(obj)
-    obj.matrix_world = maya_light_matrix(
+    obj.matrix_world = maya_matrix_to_blender(
         record.get("transform") or {},
         position_scale,
     )
@@ -524,7 +527,7 @@ def _build_dome_environment(
     # The Mapping node rotates the lookup vector, not the image, so a rotated
     # dome may need the inverse of this. Unverified against a real Redshift
     # dome; if HDRs land mirrored or offset, this line is the place to look.
-    matrix = maya_light_matrix(record.get("transform") or {}, position_scale)
+    matrix = maya_matrix_to_blender(record.get("transform") or {}, position_scale)
     mapping.inputs["Rotation"].default_value = matrix.to_euler()
 
 
@@ -538,7 +541,7 @@ def _create_dome_metadata_empty(record, collection, position_scale):
     empty.empty_display_type = "SPHERE"
     empty.empty_display_size = 1.0
     collection.objects.link(empty)
-    empty.matrix_world = maya_light_matrix(
+    empty.matrix_world = maya_matrix_to_blender(
         record.get("transform") or {},
         position_scale,
     )
@@ -547,71 +550,8 @@ def _create_dome_metadata_empty(record, collection, position_scale):
     return empty
 
 
-def maya_light_matrix(transform_record, position_scale):
-    """Convert a Maya world matrix into a scaled, normalised Blender matrix.
-
-    Scale is removed from the basis because light size is applied through the
-    light data instead of the object transform.
-    """
-    values = transform_record.get("world_matrix") or []
-    if len(values) != 16:
-        translation = transform_record.get("translation") or (0.0, 0.0, 0.0)
-        matrix = Matrix.Identity(4)
-        matrix.translation = maya_vector_to_blender(translation) * position_scale
-        return matrix
-
-    x_axis = normalized_axis(
-        maya_vector_to_blender(values[0:3]),
-        Vector((1.0, 0.0, 0.0)),
-    )
-    y_axis = normalized_axis(
-        maya_vector_to_blender(values[4:7]),
-        Vector((0.0, 0.0, 1.0)),
-    )
-    z_axis = normalized_axis(
-        maya_vector_to_blender(values[8:11]),
-        Vector((0.0, -1.0, 0.0)),
-    )
-    translation = maya_vector_to_blender(values[12:15]) * position_scale
-    return Matrix(
-        (
-            (x_axis.x, y_axis.x, z_axis.x, translation.x),
-            (x_axis.y, y_axis.y, z_axis.y, translation.y),
-            (x_axis.z, y_axis.z, z_axis.z, translation.z),
-            (0.0, 0.0, 0.0, 1.0),
-        )
-    )
 
 
-def normalized_axis(axis, fallback):
-    if axis.length <= 0.000001:
-        return fallback.copy()
-    return axis.normalized()
-
-
-def maya_vector_to_blender(value):
-    """Maya Y-up to Blender Z-up: (x, y, z) becomes (x, -z, y)."""
-    values = list(value or (0.0, 0.0, 0.0))
-    while len(values) < 3:
-        values.append(0.0)
-    return Vector(
-        (
-            scalar(values[0], 0.0),
-            -scalar(values[2], 0.0),
-            scalar(values[1], 0.0),
-        )
-    )
-
-
-def source_light_scale(record):
-    transform = record.get("transform") or {}
-    values = [
-        abs(scalar(item, 1.0))
-        for item in list(transform.get("scale") or (1.0, 1.0, 1.0))[:3]
-    ]
-    while len(values) < 3:
-        values.append(1.0)
-    return values
 
 
 def store_light_metadata(obj, data, record):

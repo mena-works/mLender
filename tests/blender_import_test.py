@@ -183,6 +183,83 @@ def main():
         check("all three tiles registered", len(image.tiles) == 3,
               [tile.number for tile in image.tiles])
 
+    print("\nsubdivision")
+
+    def modifier_of(fragment):
+        obj = None
+        for candidate in bpy.data.objects:
+            if (candidate.type == "MESH"
+                    and fragment.lower() in candidate.name.lower()):
+                obj = candidate
+        return obj, (obj.modifiers.get("Z-A Subdivision") if obj else None)
+
+    plain_obj, plain_mod = modifier_of("stdSurfCube")
+    check("the plain cube has no subdivision modifier",
+          plain_obj is not None and plain_mod is None,
+          [m.name for m in plain_obj.modifiers] if plain_obj else None)
+
+    _pbr_obj, pbr_mod = modifier_of("openPbrCube")
+    check("the catclark cube has one", pbr_mod is not None)
+    if pbr_mod:
+        check("type is Catmull-Clark",
+              pbr_mod.subdivision_type == "CATMULL_CLARK",
+              pbr_mod.subdivision_type)
+        check("render levels follow Maya's 3",
+              pbr_mod.render_levels == 3, pbr_mod.render_levels)
+        check("uv smoothing mapped from pin_borders",
+              pbr_mod.uv_smooth == "PRESERVE_BOUNDARIES", pbr_mod.uv_smooth)
+
+    _flat_obj, flat_mod = modifier_of("flatCube")
+    check("the linear cube uses Simple",
+          flat_mod is not None and flat_mod.subdivision_type == "SIMPLE",
+          flat_mod.subdivision_type if flat_mod else None)
+
+    _lam_obj, lam_mod = modifier_of("aiLambertCube")
+    check("the smooth preview cube has one at level 1",
+          lam_mod is not None and lam_mod.levels == 1,
+          lam_mod.levels if lam_mod else None)
+
+    print("\ncameras")
+    cams = {o.name: o for o in bpy.data.objects if o.type == "CAMERA"}
+    check("both cameras imported", len(cams) == 2, sorted(cams))
+    shot = next((o for n, o in cams.items() if "shotCam" in n), None)
+    ortho = next((o for n, o in cams.items() if "orthoCam" in n), None)
+    check("shot camera exists", shot is not None)
+    if shot:
+        check("perspective", shot.data.type == "PERSP", shot.data.type)
+        check("lens 50 mm", abs(shot.data.lens - 50.0) < 1e-4, shot.data.lens)
+        check("sensor width 24 mm",
+              abs(shot.data.sensor_width - 24.0) < 0.01, shot.data.sensor_width)
+        check("sensor fit vertical from filmFit",
+              shot.data.sensor_fit == "VERTICAL", shot.data.sensor_fit)
+        check("shift_x 0.1", abs(shot.data.shift_x - 0.1) < 1e-3,
+              shot.data.shift_x)
+        # Maya states clip planes in scene units, Blender in metres: x0.01.
+        check("near clip scaled to 0.01",
+              abs(shot.data.clip_start - 0.01) < 1e-6, shot.data.clip_start)
+        check("far clip scaled to 50",
+              abs(shot.data.clip_end - 50.0) < 1e-4, shot.data.clip_end)
+        check("depth of field on", shot.data.dof.use_dof)
+        check("f-stop 2.8", abs(shot.data.dof.aperture_fstop - 2.8) < 1e-5)
+        check("focus distance scaled to 2.5",
+              abs(shot.data.dof.focus_distance - 2.5) < 1e-4,
+              shot.data.dof.focus_distance)
+        # Maya (0, 30, 120) becomes Blender (0, -1.2, 0.3) after the Y-up to
+        # Z-up swap and the centimetre to metre scale.
+        check("position converted and scaled",
+              abs(shot.matrix_world.translation.z - 0.3) < 1e-4
+              and abs(shot.matrix_world.translation.y + 1.2) < 1e-4,
+              tuple(round(v, 4) for v in shot.matrix_world.translation))
+        check("the renderable camera became the scene camera",
+              bpy.context.scene.camera is shot,
+              bpy.context.scene.camera.name if bpy.context.scene.camera else None)
+    if ortho:
+        check("orthographic type", ortho.data.type == "ORTHO", ortho.data.type)
+        check("ortho width 40 units becomes 0.4",
+              abs(ortho.data.ortho_scale - 0.4) < 1e-5, ortho.data.ortho_scale)
+    check("camera count reported", result["camera_count"] == 2,
+          result["camera_count"])
+
     print("\nlights")
     lights = {obj.data.get("za_source_node_type"): obj
               for obj in bpy.data.objects if obj.type == "LIGHT"}

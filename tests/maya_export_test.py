@@ -147,6 +147,30 @@ def build_scene():
     # Portals emit nothing and must not become black area lights.
     cmds.createNode("aiLightPortal", name="aiPortalShape")
 
+    # A shot camera with a non default lens, plus an orthographic one. Maya's
+    # startup cameras must not come along.
+    # cmds.camera ignores a name flag, so the transform is renamed explicitly
+    # and the shape re-read from it.
+    shot_tf = cmds.rename(cmds.camera()[0], "shotCam")
+    shot = cmds.listRelatives(shot_tf, shapes=True, fullPath=True)[0]
+    cmds.setAttr(shot + ".focalLength", 50.0)
+    cmds.setAttr(shot + ".horizontalFilmAperture", 0.9449)   # 24 mm
+    cmds.setAttr(shot + ".verticalFilmAperture", 0.5315)     # 13.5 mm
+    cmds.setAttr(shot + ".nearClipPlane", 1.0)
+    cmds.setAttr(shot + ".farClipPlane", 5000.0)
+    cmds.setAttr(shot + ".depthOfField", True)
+    cmds.setAttr(shot + ".fStop", 2.8)
+    cmds.setAttr(shot + ".focusDistance", 250.0)
+    cmds.setAttr(shot + ".filmFit", 2)                        # Vertical
+    cmds.setAttr(shot + ".horizontalFilmOffset", 0.09449)     # a tenth across
+    cmds.setAttr(shot + ".renderable", True)
+    cmds.setAttr(shot_tf + ".translate", 0.0, 30.0, 120.0, type="double3")
+
+    ortho_tf = cmds.rename(cmds.camera()[0], "orthoCam")
+    ortho = cmds.listRelatives(ortho_tf, shapes=True, fullPath=True)[0]
+    cmds.setAttr(ortho + ".orthographic", True)
+    cmds.setAttr(ortho + ".orthographicWidth", 40.0)
+
 
 def main():
     cmds.loadPlugin("mtoa", quiet=True)
@@ -258,6 +282,72 @@ def main():
           udim.get("original_path"))
     check("detection credited to Maya, not to path guessing",
           udim.get("udim_mode") == "maya_uv_tiling_mode", udim.get("udim_mode"))
+
+    print("\nsubdivision follows the Maya mesh")
+
+    def subdiv(name):
+        for mesh in payload["meshes"]:
+            if name in (mesh.get("mesh") or ""):
+                return mesh.get("subdivision") or {}
+        return {}
+
+    plain = subdiv("stdSurfCube")
+    check("a mesh that never asked is not subdivided",
+          plain.get("enabled") is False, plain)
+    catclark = subdiv("openPbrCube")
+    check("aiSubdivType catclark is picked up",
+          catclark.get("enabled") and catclark.get("scheme") == "CATMULL_CLARK",
+          catclark)
+    check("catclark iterations 3 carried",
+          catclark.get("render_iterations") == 3, catclark)
+    check("uv smoothing carried",
+          catclark.get("uv_smoothing") == "pin_borders",
+          catclark.get("uv_smoothing"))
+    check("credited to arnold", catclark.get("source") == "arnold",
+          catclark.get("source"))
+    check("aiSubdivType linear stays linear",
+          subdiv("flatCube").get("scheme") == "LINEAR", subdiv("flatCube"))
+    preview = subdiv("aiLambertCube")
+    check("maya smooth mesh preview is picked up",
+          preview.get("enabled")
+          and preview.get("source") == "maya_smooth_preview",
+          preview)
+    check("preview level 1 carried",
+          preview.get("viewport_iterations") == 1, preview)
+
+    print("\ncameras")
+    cameras = {c["name"]: c for c in payload.get("cameras") or []}
+    check("both authored cameras exported", len(cameras) == 2, sorted(cameras))
+    check("maya startup cameras excluded",
+          not any(n in cameras for n in ("persp", "top", "front", "side")),
+          sorted(cameras))
+
+    shot = cameras.get("shotCam", {})
+    check("focal length carried",
+          abs(shot.get("focal_length_mm", 0) - 50.0) < 1e-6,
+          shot.get("focal_length_mm"))
+    check("film back converted from inches to mm",
+          abs(shot.get("sensor_width_mm", 0) - 24.0) < 0.01,
+          shot.get("sensor_width_mm"))
+    check("film fit label carried", shot.get("film_fit") == "Vertical",
+          shot.get("film_fit"))
+    check("film offset became a sensor fraction",
+          abs(shot.get("shift_x", 0) - 0.1) < 1e-3, shot.get("shift_x"))
+    check("clip planes carried in scene units",
+          shot.get("near_clip") == 1.0 and shot.get("far_clip") == 5000.0,
+          (shot.get("near_clip"), shot.get("far_clip")))
+    check("depth of field carried",
+          shot.get("depth_of_field") and abs(shot.get("f_stop", 0) - 2.8) < 1e-6,
+          shot.get("f_stop"))
+    check("renderable flagged", shot.get("renderable") is True)
+
+    ortho = cameras.get("orthoCam", {})
+    check("orthographic flagged", ortho.get("orthographic") is True)
+    check("orthographic width carried",
+          abs(ortho.get("orthographic_width", 0) - 40.0) < 1e-6,
+          ortho.get("orthographic_width"))
+    check("orthographic camera is not renderable",
+          ortho.get("renderable") is False, ortho.get("renderable"))
 
     print("\nlights")
     area = lights.get("aiAreaLight", {})

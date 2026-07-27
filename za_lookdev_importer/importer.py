@@ -9,6 +9,7 @@ merge would leave stale materials and lights behind.
 import bpy
 
 from .constants import SUPPORTED_SCHEMA_VERSIONS
+from .cameras import import_cameras
 from .fbx import import_fbx, read_package_json, resolve_fbx_path
 from .lights import import_lights
 from .materials import apply_face_assignments, build_material
@@ -117,6 +118,13 @@ def import_lookdev_package(
         power_scale,
     )
 
+    camera_result = import_cameras(
+        package_data,
+        root_collection,
+        import_scale,
+        warnings,
+    )
+
     _remove_fbx_placeholder_materials(before_materials)
     purge_orphans()
 
@@ -131,6 +139,8 @@ def import_lookdev_package(
         "light_count": light_result["light_count"],
         "light_object_count": light_result["object_count"],
         "dome_count": light_result["dome_count"],
+        "camera_count": camera_result["camera_count"],
+        "active_camera": camera_result["active"],
         "assignments": assignments,
         "warnings": warnings,
     }

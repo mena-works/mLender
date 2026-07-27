@@ -183,12 +183,13 @@ def process_messages():
         )
         _status = (
             "Imported {0} mesh(es), {1} material(s), "
-            "{2} subdivision modifier(s), {3} light(s)."
+            "{2} subdivision modifier(s), {3} light(s), {4} camera(s)."
         ).format(
             result["mesh_count"],
             result["material_count"],
             result["subdivision_count"],
             result["light_count"],
+            result["camera_count"],
         )
         for warning in result.get("warnings") or []:
             print("Z-A Lookdev warning: {0}".format(warning))

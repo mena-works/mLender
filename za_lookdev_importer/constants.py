@@ -8,7 +8,7 @@ message shape changes.
 
 import math
 
-BUILD_VERSION = "1.9.0"
+BUILD_VERSION = "1.10.0"
 
 LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
@@ -20,7 +20,7 @@ LIVELINK_EVENT = "lookdev_package_ready"
 # the scene, so an unreadable package must be rejected before anything is lost.
 # 3 added glass channels and 4 added UDIM on the main branch; 5 is this
 # branch with both, plus the Arnold channels.
-SUPPORTED_SCHEMA_VERSIONS = (1, 2, 3, 4, 5, 6)
+SUPPORTED_SCHEMA_VERSIONS = (1, 2, 3, 4, 5, 6, 7)
 
 MAX_MESSAGE_BYTES = 32 * 1024 * 1024
 SOCKET_POLL_SECONDS = 0.5
@@ -28,6 +28,16 @@ TIMER_INTERVAL_SECONDS = 0.1
 
 ROOT_COLLECTION_NAME = "Z-A Lookdev Import"
 LIGHT_COLLECTION_NAME = "Z-A Lights"
+CAMERA_COLLECTION_NAME = "Z-A Cameras"
+
+# Maya filmFit onto Blender sensor_fit. Overscan has no Blender equivalent and
+# frames like Fill, so both fall back to AUTO.
+CAMERA_SENSOR_FIT = {
+    "fill": "AUTO",
+    "horizontal": "HORIZONTAL",
+    "vertical": "VERTICAL",
+    "overscan": "AUTO",
+}
 SUBDIVISION_MODIFIER_NAME = "Z-A Subdivision"
 
 # Principled BSDF socket names per channel. Later Blender versions renamed

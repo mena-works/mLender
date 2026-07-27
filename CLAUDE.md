@@ -31,6 +31,7 @@ za_lookdev_exporter/     # Maya (import sırası = bağımlılık sırası)
   shaders.py             # shader → kanal çıkarımı
   meshes.py              # mesh keşfi, material/face atamaları
   lights.py              # ışık keşfi ve kayıtları
+  cameras.py             # kamera keşfi ve lens kayıtları
   fbx.py                 # MEL FBXExport
   livelink.py            # TCP istemci
   package.py             # paket klasörü, JSON, atomik temizlik
@@ -43,6 +44,8 @@ za_lookdev_importer/     # Blender multi-file add-on
   images.py              # texture yükleme, UDIM
   materials.py           # node ağaçları
   lights.py              # Blender ışıkları, Dome World
+  cameras.py             # Blender kameraları
+  transforms.py          # Maya→Blender matris (ışık+kamera ortak)
   scene.py               # sahne temizleme, mesh eşleştirme, subdivision
   fbx.py                 # FBX import, paket dosyası çözümleme
   importer.py            # orkestrasyon + şema doğrulaması

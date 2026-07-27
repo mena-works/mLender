@@ -9,7 +9,6 @@ Bu sürümde:
 - Alembic yoktur.
 - UV bake yoktur.
 - Texture kopyalama yoktur.
-- Kamera exportu yoktur.
 - Lookdev `.blend` seçimi yoktur.
 - Shape key, parent veya constraint kurulumu yoktur.
 - Yeni paket geldiğinde Blender sahnesi tamamen temizlenir ve unused data purge
@@ -30,6 +29,7 @@ za_lookdev_exporter/        # Maya tarafı
   meshes.py                 # mesh keşfi, material ve face atamaları
   lights.py                 # ışık keşfi ve current-frame ışık kayıtları
   fbx.py                    # MEL FBXExport sarmalayıcısı
+  cameras.py                # kamera keşfi ve lens kayıtları
   livelink.py               # TCP gönderim istemcisi
   package.py                # paket klasörü, JSON yazımı, atomik temizlik
   ui.py                     # Maya penceresi
@@ -41,6 +41,8 @@ za_lookdev_importer/        # Blender tarafı (multi-file add-on)
   images.py                 # texture yükleme, UDIM çözümleme
   materials.py              # Principled ve Surface Shader node ağaçları
   lights.py                 # Blender ışıkları ve Dome World
+  cameras.py                # Blender kameraları
+  transforms.py             # Maya→Blender matris dönüşümü (ışık+kamera ortak)
   scene.py                  # sahne temizleme, mesh eşleştirme, subdivision
   fbx.py                    # FBX import, paket dosyası çözümleme
   importer.py               # import orkestrasyonu, şema doğrulaması
@@ -496,6 +498,7 @@ Yeni paket geldiğinde:
 9. Materialler Principled BSDF olarak yeniden kurulur.
 10. Textureler Maya'daki orijinal dosya konumlarından bağlanır.
 11. JSON ışıkları ve Dome World ortamı yeniden oluşturulur.
+12. JSON kameraları kurulur ve renderable olan aktif kamera yapılır.
 12. Bütün meshlerde Z-A Subdivision modifier ayarları kurulur.
 13. Import sonunda tekrar recursive orphan purge yapılır.
 
@@ -509,6 +512,32 @@ toplanır ve Blender System Console'a `Z-A Lookdev warning:` önekiyle yazılır
 
 Bir mesh birden fazla material kullanıyorsa Maya shadingEngine face membership
 bilgisi JSON'a yazılır ve Blender polygon material indexleri yeniden kurulur.
+
+## Kamera aktarımı
+
+Maya'nın startup kameraları (`persp`, `top`, `front`, `side`) viewport
+mobilyasıdır, aktarılmaz. Kullanıcının oluşturduğu kameralar
+`Z-A Lookdev Import > Z-A Cameras` altında yeniden kurulur.
+
+Maya ile Blender kameraları aynı yöne bakar (yerel -Z ileri, +Y yukarı), yani
+ışıklarla aynı matris dönüşümü geçerli. Fark lenste ve birimlerde:
+
+```text
+focalLength              -> lens (mm, dogrudan)
+horizontalFilmAperture   -> sensor_width   (inc x 25.4)
+verticalFilmAperture     -> sensor_height  (inc x 25.4)
+filmFit                  -> sensor_fit     (Fill/Overscan -> AUTO)
+horizontalFilmOffset     -> shift_x        (apertura bolunur, oran olur)
+nearClipPlane/farClip    -> clip_start/end (sahne birimi -> metre)
+orthographicWidth        -> ortho_scale    (sahne birimi -> metre)
+depthOfField/fStop       -> dof.use_dof / dof.aperture_fstop
+focusDistance            -> dof.focus_distance (sahne birimi -> metre)
+```
+
+Maya'da `renderable` işaretli kamera Blender'ın aktif sahne kamerası yapılır.
+Birden fazla renderable kamera varsa ilki seçilir ve uyarı verilir.
+
+Orijinal değerler camera data'sında `za_source_*` alanlarında saklanır.
 
 ## Subdivision
 

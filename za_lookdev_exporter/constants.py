@@ -17,7 +17,7 @@ LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
 LIVELINK_PROTOCOL = "za_lookdev_livelink"
 LIVELINK_VERSION = 1
-EXPORT_SCHEMA_VERSION = 6
+EXPORT_SCHEMA_VERSION = 7
 
 LIGHT_NODE_TYPES = (
     "RedshiftPhysicalLight",
@@ -230,6 +230,27 @@ UDIM_FIRST_TILE = 1001
 
 # File path attributes checked while walking a texture network upstream.
 TEXTURE_PATH_ATTRS = ("fileTextureName", "tex0", "filename", "file")
+
+# Cameras. Names and units measured on a live Maya 2023 camera: the film back
+# is stated in inches (1.41732 in is the 36 mm full frame width) and the clip
+# planes, focus distance and orthographic width are in scene linear units.
+CAMERA_INCHES_TO_MM = 25.4
+CAMERA_FILM_FIT_ATTR = "filmFit"  # Fill : Horizontal : Vertical : Overscan
+CAMERA_NUMERIC_ATTRS = {
+    "focal_length": "focalLength",
+    "film_aperture_horizontal": "horizontalFilmAperture",
+    "film_aperture_vertical": "verticalFilmAperture",
+    "film_offset_horizontal": "horizontalFilmOffset",
+    "film_offset_vertical": "verticalFilmOffset",
+    "near_clip": "nearClipPlane",
+    "far_clip": "farClipPlane",
+    "orthographic": "orthographic",
+    "orthographic_width": "orthographicWidth",
+    "depth_of_field": "depthOfField",
+    "f_stop": "fStop",
+    "focus_distance": "focusDistance",
+    "lens_squeeze": "lensSqueezeRatio",
+}
 
 # Subdivision. Attribute names read from a live Maya 2023 / MtoA 5.4.8 mesh.
 #

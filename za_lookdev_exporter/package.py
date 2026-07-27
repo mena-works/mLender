@@ -15,6 +15,7 @@ from .constants import (
     PACKAGE_PREFIX,
     TOOL_NAME,
 )
+from .cameras import camera_record, scene_camera_shapes
 from .fbx import export_fbx
 from .lights import light_record, scene_light_shapes
 from .mayautils import maya_linear_unit, maya_path, meters_per_maya_unit
@@ -49,6 +50,9 @@ def export_lookdev(output_folder):
             raise RuntimeError("The Maya scene contains no exportable mesh.")
         mesh_records = [mesh_record(shape) for shape in mesh_shapes]
         light_records = [light_record(shape) for shape in scene_light_shapes()]
+        camera_records = [
+            camera_record(shape) for shape in scene_camera_shapes()
+        ]
         export_fbx(mesh_transforms(mesh_shapes), fbx_path)
 
         payload = {
@@ -64,6 +68,8 @@ def export_lookdev(output_folder):
             "meshes": mesh_records,
             "light_count": len(light_records),
             "lights": light_records,
+            "camera_count": len(camera_records),
+            "cameras": camera_records,
             "maya_linear_unit": maya_linear_unit(),
             "meters_per_maya_unit": meters_per_maya_unit(),
         }
@@ -85,6 +91,7 @@ def export_lookdev(output_folder):
         "package_json": payload,
         "mesh_count": len(mesh_records),
         "light_count": len(light_records),
+        "camera_count": len(camera_records),
     }
 
 
