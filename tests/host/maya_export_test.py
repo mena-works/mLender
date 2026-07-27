@@ -152,6 +152,20 @@ def build_scene():
         pass
     cmds.connectAttr(udim_node + ".outColor", lam + ".KdColor", force=True)
 
+    # A turntable: the camera orbits a full 360 degrees while its focal length
+    # pulls in. A full turn is the case that exposes Euler decomposition
+    # flipping between frames, so the range deliberately closes the loop.
+    turntable = cmds.rename(cmds.camera()[0], "turntableCam")
+    turntable_shape = cmds.listRelatives(turntable, shapes=True, fullPath=True)[0]
+    cmds.setAttr(turntable_shape + ".renderable", True)
+    cmds.setAttr(turntable + ".translateZ", 20.0)
+    for frame, rotation, focal in ((1, 0.0, 35.0), (13, 180.0, 50.0),
+                                   (25, 360.0, 85.0)):
+        cmds.setKeyframe(turntable + ".rotateY", time=frame, value=rotation)
+        cmds.setKeyframe(turntable_shape + ".focalLength", time=frame,
+                         value=focal)
+    cmds.playbackOptions(minTime=1, maxTime=25)
+
     area = cmds.createNode("aiAreaLight", name="aiAreaShape")
     area_tf = cmds.listRelatives(area, parent=True, fullPath=True)[0]
     cmds.setAttr(area + ".aiTranslator", "disk", type="string")
@@ -288,7 +302,12 @@ def main():
     # Baking creates file nodes; the export must clean up after itself, so the
     # scene's own file nodes are recorded to compare against afterwards.
     file_nodes_before = set(cmds.ls(type="file") or [])
-    result = za.export_lookdev(OUT)
+    # Animation on, so the turntable is sampled rather than frozen. The frame
+    # is deliberately parked away from the range start, to prove sampling puts
+    # it back.
+    cmds.currentTime(7, edit=True)
+    result = za.export_lookdev(OUT, export_animation=True)
+    restored_frame = cmds.currentTime(query=True)
     with open(result["json_path"], "r") as handle:
         payload = json.load(handle)
 
@@ -360,6 +379,56 @@ def main():
     ]
     check("remapValue reported as unrebuildable rather than dropped silently",
           "remapValue" in unsupported, unsupported)
+
+    print("\nanimation")
+    animation = payload.get("animation") or {}
+    check("animation reported as enabled", animation.get("enabled") is True,
+          animation)
+    check("playback range picked up, 1 to 25",
+          (animation.get("start"), animation.get("end")) == (1.0, 25.0),
+          (animation.get("start"), animation.get("end")))
+    check("25 frames", animation.get("frame_count") == 25,
+          animation.get("frame_count"))
+    check("fps read from the scene, film is 24",
+          abs(animation.get("fps", 0.0) - 24.0) < 1e-6, animation.get("fps"))
+    check("sampling put the current frame back",
+          abs(restored_frame - 7.0) < 1e-6, restored_frame)
+
+    turntable = next(
+        (camera for camera in payload["cameras"]
+         if camera.get("name") == "turntableCam"),
+        {},
+    )
+    samples = turntable.get("samples") or []
+    check("camera sampled once per frame", len(samples) == 25, len(samples))
+    if samples:
+        check("samples carry the frame number",
+              samples[0].get("frame") == 1.0 and samples[-1].get("frame") == 25.0,
+              (samples[0].get("frame"), samples[-1].get("frame")))
+        check("focal length animates across the range",
+              abs(samples[0].get("focal_length_mm", 0) - 35.0) < 1e-4
+              and abs(samples[-1].get("focal_length_mm", 0) - 85.0) < 1e-4,
+              (samples[0].get("focal_length_mm"),
+               samples[-1].get("focal_length_mm")))
+        # A full turn returns to the start, so the matrices must match again.
+        first = samples[0].get("matrix") or []
+        last = samples[-1].get("matrix") or []
+        check("a full turn returns to where it started",
+              len(first) == 16 and len(last) == 16
+              and all(abs(a - b) < 1e-4 for a, b in zip(first, last)),
+              (first[:4], last[:4]))
+        middle = samples[12].get("matrix") or []
+        check("the halfway sample is genuinely rotated",
+              len(middle) == 16 and abs(middle[0] - first[0]) > 1.0,
+              (first[0], middle[0]))
+
+    still = next(
+        (light for light in payload["lights"]
+         if light.get("name", "").startswith("aiArea")),
+        {},
+    )
+    check("lights are sampled too", len(still.get("samples") or []) == 25,
+          len(still.get("samples") or []))
 
     print("\ndisplacement")
     disp = next(
@@ -563,7 +632,8 @@ def main():
 
     print("\ncameras")
     cameras = {c["name"]: c for c in payload.get("cameras") or []}
-    check("both authored cameras exported", len(cameras) == 2, sorted(cameras))
+    check("all three authored cameras exported", len(cameras) == 3,
+          sorted(cameras))
     check("maya startup cameras excluded",
           not any(n in cameras for n in ("persp", "top", "front", "side")),
           sorted(cameras))

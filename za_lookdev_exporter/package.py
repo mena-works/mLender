@@ -19,9 +19,10 @@ from .constants import (
     PACKAGE_PREFIX,
     TOOL_NAME,
 )
-from .cameras import camera_record, scene_camera_shapes
+from .animation import animation_info, sample_records
+from .cameras import camera_record, camera_sample, scene_camera_shapes
 from .fbx import export_fbx
-from .lights import light_record, scene_light_shapes
+from .lights import light_record, light_sample, scene_light_shapes
 from .mayautils import maya_linear_unit, maya_path, meters_per_maya_unit
 from .meshes import mesh_record, mesh_transforms, scene_mesh_shapes
 
@@ -36,6 +37,10 @@ def export_lookdev(
     output_folder,
     bake_procedurals=True,
     bake_resolution=DEFAULT_BAKE_RESOLUTION,
+    export_animation=False,
+    frame_start=None,
+    frame_end=None,
+    frame_step=None,
 ):
     """Write a numbered package folder holding the FBX and the lookdev JSON.
 
@@ -67,11 +72,34 @@ def export_lookdev(
         mesh_records = [
             mesh_record(shape, bake_context) for shape in mesh_shapes
         ]
-        light_records = [light_record(shape) for shape in scene_light_shapes()]
-        camera_records = [
-            camera_record(shape) for shape in scene_camera_shapes()
-        ]
-        export_fbx(mesh_transforms(mesh_shapes), fbx_path)
+        light_shapes = scene_light_shapes()
+        camera_shapes = scene_camera_shapes()
+        light_records = [light_record(shape) for shape in light_shapes]
+        camera_records = [camera_record(shape) for shape in camera_shapes]
+
+        animation = animation_info(
+            export_animation, frame_start, frame_end, frame_step
+        )
+        if animation["truncated"]:
+            warnings.append(
+                "Frame range clamped to {0} frames, ending at {1:g}.".format(
+                    animation["frame_count"], animation["end"]
+                )
+            )
+        # Sampling steps the timeline, so it runs after the static records are
+        # read and before the FBX, which bakes its own animation.
+        sample_records(
+            animation,
+            [
+                (record, _sampler(light_sample, shape))
+                for record, shape in zip(light_records, light_shapes)
+            ]
+            + [
+                (record, _sampler(camera_sample, shape))
+                for record, shape in zip(camera_records, camera_shapes)
+            ],
+        )
+        export_fbx(mesh_transforms(mesh_shapes), fbx_path, animation)
 
         payload = {
             "schema_version": EXPORT_SCHEMA_VERSION,
@@ -92,6 +120,7 @@ def export_lookdev(
             "export_warnings": warnings,
             "maya_linear_unit": maya_linear_unit(),
             "meters_per_maya_unit": meters_per_maya_unit(),
+            "animation": animation,
         }
         write_json(json_path, payload)
     except Exception:
@@ -116,8 +145,17 @@ def export_lookdev(
         "light_count": len(light_records),
         "camera_count": len(camera_records),
         "baked_texture_count": len(bake_context.baked_files),
+        "frame_count": animation["frame_count"],
+        "animated": animation["enabled"],
         "warnings": warnings,
     }
+
+
+def _sampler(function, shape):
+    """Bind a shape to a sampler so the timeline loop can stay generic."""
+    def sample():
+        return function(shape)
+    return sample
 
 
 def next_package_name(folder):

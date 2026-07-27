@@ -17,7 +17,7 @@ LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
 LIVELINK_PROTOCOL = "za_lookdev_livelink"
 LIVELINK_VERSION = 1
-EXPORT_SCHEMA_VERSION = 13
+EXPORT_SCHEMA_VERSION = 14
 
 LIGHT_NODE_TYPES = (
     "RedshiftPhysicalLight",
@@ -289,6 +289,43 @@ PLACEMENT_NUMERIC_ATTRS = {
     "stagger": "stagger",
     "noise_u": "noiseU",
     "noise_v": "noiseV",
+}
+
+# Animation.
+#
+# Meshes travel as animation baked into the FBX, which is what the FBX exchange
+# is for and what carries deformers correctly. Lights and cameras are rebuilt
+# from JSON instead, so their animation has to be sampled here.
+#
+# currentTimeUnitToFPS was probed on Maya 2023 and returns exact rates,
+# including the NTSC fractions, so it is preferred. The table is the fallback
+# for builds where the MEL global is missing.
+TIME_UNIT_FPS = {
+    "game": 15.0,
+    "film": 24.0,
+    "pal": 25.0,
+    "ntsc": 30.0,
+    "show": 48.0,
+    "palf": 50.0,
+    "ntscf": 60.0,
+    "23.976fps": 24000.0 / 1001.0,
+    "29.97fps": 30000.0 / 1001.0,
+    "59.94fps": 60000.0 / 1001.0,
+}
+DEFAULT_FPS = 24.0
+
+# A guard, not a preference. Sampling every light and camera over a very long
+# range writes a large JSON and takes real time, so the range is clamped and
+# the package says it was clamped rather than quietly shipping less.
+MAX_ANIMATION_FRAMES = 2000
+
+# Scalars worth sampling per frame. Anything else on a light or camera is
+# lookdev state that does not animate in practice.
+ANIMATED_CAMERA_ATTRS = {
+    "focal_length_mm": "focalLength",
+    "focus_distance": "focusDistance",
+    "f_stop": "fStop",
+    "orthographic_width": "orthographicWidth",
 }
 
 # Displacement, read from a live Maya 2023 / MtoA 5.4.8 session.

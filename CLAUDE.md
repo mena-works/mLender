@@ -27,6 +27,7 @@ bir modül yalnızca kendinden önce listelenenleri import edebilir.
 za_lookdev_exporter/     # Maya (import sırası = bağımlılık sırası)
   constants.py           # sabitler, attribute alias tabloları
   mayautils.py           # maya.cmds sarmalayıcıları
+  animation.py           # frame aralığı ve zaman çizgisi örnekleme
   textures.py            # upstream texture arama
   bake.py                # prosedürel ağları UV'ye bake etme
   shaders.py             # shader → kanal çıkarımı
@@ -48,6 +49,7 @@ za_lookdev_importer/     # Blender multi-file add-on
   lights.py              # Blender ışıkları, Dome World
   cameras.py             # Blender kameraları
   transforms.py          # Maya→Blender matris (ışık+kamera ortak)
+  animation.py           # örneklenen animasyonu keyframe olarak kurma
   scene.py               # sahne temizleme, mesh eşleştirme, subdivision
   fbx.py                 # FBX import, paket dosyası çözümleme
   importer.py            # orkestrasyon + şema doğrulaması
@@ -468,6 +470,11 @@ Kullanıcının elle doğrulaması gereken adımlar:
 - ❌ Displacement'a birim ölçeği ekleme; FBX birim dönüşümünü obje scale'ine
   koyar, vertex'ler Maya biriminde kalır, object space displacement zaten doğru
 - ❌ Displacement'ı shader'da arama; Maya onu shadingEngine'de tutar
+- ❌ Her frame'in matrisini bağımsız Euler'e çözme; tam turda sıçrar,
+  `make_compatible` ile bir öncekine uyumlu hale getir
+- ❌ Bake edilmiş anahtarları Bezier bırakma; `LINEAR` olmalı
+- ❌ `Action.fcurves` kullanma; 5.0'da kalktı, `action_fcurves()` kullan
+- ❌ Zaman çizgisini örnekleyip kullanıcının frame'ini geri koymamak
 - ❌ Blender soket varsayılanını kaynaktan gelen değer sanma (speküler 0.5)
 - ❌ Baked map'i sRGB sanma; Maya lineer yazar
 - ❌ Soket bileşen sayısını varsayma; Subsurface Radius 3, renk soketleri 4

@@ -11,6 +11,7 @@ import bpy
 from .constants import SUPPORTED_SCHEMA_VERSIONS
 from .cameras import import_cameras
 from .fbx import import_fbx, read_package_json, resolve_fbx_path
+from .animation import apply_scene_range
 from .lights import import_lights
 from .materials import apply_face_assignments, build_material
 from .scene import (
@@ -82,6 +83,9 @@ def import_lookdev_package(
     if not imported_meshes:
         raise RuntimeError("FBX import produced no mesh objects.")
 
+    # The frame range is set before anything is keyed, so the keys land inside
+    # a range the user can actually scrub.
+    animated = apply_scene_range(package_data)
     root_collection = organize_imported_objects(imported_objects)
     material_cache = {}
     assignments = []
@@ -140,6 +144,10 @@ def import_lookdev_package(
         "object_count": len(imported_objects),
         "mesh_count": len(imported_meshes),
         "material_count": len(material_cache),
+        "animated": animated,
+        "frame_count": int((package_data.get("animation") or {}).get(
+            "frame_count", 1
+        )),
         "group_collection_count": len(group_cache),
         "grouped_mesh_count": grouped_count,
         "subdivision_count": subdivision_count,

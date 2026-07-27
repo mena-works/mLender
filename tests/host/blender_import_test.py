@@ -47,6 +47,13 @@ def find_package():
     return packages[-1]
 
 
+def fcurves_of(action):
+    """Actions became slotted in 4.4 and Action.fcurves went away in 5.0."""
+    from za_lookdev_importer.animation import action_fcurves
+
+    return action_fcurves(action)
+
+
 def object_named(fragment):
     for obj in bpy.data.objects:
         if fragment.lower() in obj.name.lower():
@@ -180,6 +187,67 @@ def main():
         check("the unrebuildable remapValue was reported",
               any("remapValue" in warning for warning in result["warnings"]),
               result["warnings"])
+
+    print("\nanimation")
+    scene = bpy.context.scene
+    check("import reports it animated", result["animated"] is True)
+    check("scene range set to 1-25",
+          (scene.frame_start, scene.frame_end) == (1, 25),
+          (scene.frame_start, scene.frame_end))
+    check("fps 24 with a base of 1",
+          scene.render.fps == 24 and abs(scene.render.fps_base - 1.0) < 1e-6,
+          (scene.render.fps, scene.render.fps_base))
+
+    turntable = object_named("turntableCam")
+    check("turntable camera imported", turntable is not None)
+    if turntable:
+        action = getattr(
+            getattr(turntable, "animation_data", None), "action", None
+        )
+        check("the camera object is keyed", action is not None)
+        if action:
+            rot_z = next(
+                (c for c in fcurves_of(action)
+                 if c.data_path == "rotation_euler" and c.array_index == 2),
+                None,
+            )
+            check("rotation is keyed on every frame",
+                  rot_z is not None and len(rot_z.keyframe_points) == 25,
+                  len(rot_z.keyframe_points) if rot_z else None)
+            if rot_z:
+                values = [p.co[1] for p in rot_z.keyframe_points]
+                # A full turn decomposed per frame would wrap at pi and read
+                # as a sudden jump back; compatible Eulers keep it monotonic.
+                steps = [abs(b - a) for a, b in zip(values, values[1:])]
+                check("no Euler flip across the full turn",
+                      max(steps) < math.pi / 2.0,
+                      "largest step {0:.4f} rad".format(max(steps)))
+                check("the turn actually spans a full circle",
+                      abs(abs(values[-1] - values[0]) - 2.0 * math.pi) < 1e-3,
+                      abs(values[-1] - values[0]))
+                check("baked samples use linear interpolation",
+                      all(p.interpolation == "LINEAR"
+                          for p in rot_z.keyframe_points),
+                      {p.interpolation for p in rot_z.keyframe_points})
+
+        lens_action = getattr(
+            getattr(turntable.data, "animation_data", None), "action", None
+        )
+        lens_curve = None
+        if lens_action:
+            lens_curve = next(
+                (c for c in fcurves_of(lens_action) if c.data_path == "lens"),
+                None,
+            )
+        check("focal length is keyed on the camera data",
+              lens_curve is not None and len(lens_curve.keyframe_points) == 25,
+              len(lens_curve.keyframe_points) if lens_curve else None)
+        if lens_curve:
+            first = lens_curve.keyframe_points[0].co[1]
+            last = lens_curve.keyframe_points[-1].co[1]
+            check("focal length runs 35 to 85",
+                  abs(first - 35.0) < 1e-3 and abs(last - 85.0) < 1e-3,
+                  (first, last))
 
     print("\ndisplacement")
     displaced = material_for("dispCube")
@@ -399,7 +467,7 @@ def main():
 
     print("\ncameras")
     cams = {o.name: o for o in bpy.data.objects if o.type == "CAMERA"}
-    check("both cameras imported", len(cams) == 2, sorted(cams))
+    check("all three cameras imported", len(cams) == 3, sorted(cams))
     shot = next((o for n, o in cams.items() if "shotCam" in n), None)
     ortho = next((o for n, o in cams.items() if "orthoCam" in n), None)
     check("shot camera exists", shot is not None)
@@ -435,7 +503,7 @@ def main():
         check("orthographic type", ortho.data.type == "ORTHO", ortho.data.type)
         check("ortho width 40 units becomes 0.4",
               abs(ortho.data.ortho_scale - 0.4) < 1e-5, ortho.data.ortho_scale)
-    check("camera count reported", result["camera_count"] == 2,
+    check("camera count reported", result["camera_count"] == 3,
           result["camera_count"])
 
     print("\nlights")

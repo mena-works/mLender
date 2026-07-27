@@ -592,6 +592,48 @@ specularAnisotropy       -> Anisotropic
   5.2'de 0.005). Bu yüzden değer açıkça set edilir; varsayılana güvenmek aynı
   paketi iki sürümde farklı gösterirdi.
 
+## Animasyon (turntable)
+
+Varsayılan olarak **kapalı** — araç tek frame gönderir. Maya penceresindeki
+`Export Animation` kutusu işaretlenirse frame aralığı aktarılır.
+
+Aracın turntable üreten bir modu **yok**: sahnede ne animasyonluysa o gelir.
+Kamera dönüyorsa kamera döner, obje dönüyorsa obje döner.
+
+```text
+Frame Range   bos     -> Maya'nin playback range'i (minTime - maxTime)
+              1-120   -> acikca aralik
+              1-120x2 -> iki frame'de bir ornekle
+```
+
+İki farklı yol kullanılır ve bu bilinçlidir:
+
+- **Meshler FBX'in içinde gelir.** FBX zaten animasyon taşır ve deformer'ları
+  doğru aktaran tek yol odur; `FBXExportBakeComplexAnimation` aralıkla birlikte
+  açılır.
+- **Kamera ve ışıklar JSON'da örneklenir**, çünkü onlar Blender'da sıfırdan
+  kuruluyor. Her frame için world matrix, kamera lensi, ışık şiddeti ve rengi
+  yazılır.
+
+Işık enerjisi frame başına **yeniden hesaplanır**, interpolate edilmez —
+böylece her frame ölçülmüş dönüşümden geçer.
+
+FPS Maya'dan okunur (`currentTimeUnitToFPS`) ve NTSC kesirleri Blender'ın
+`fps` / `fps_base` çiftiyle tam olarak kurulur (23.976 → 24 / 1.001).
+
+### İki tuzak, ikisi de turntable'ı bozardı
+
+- **Euler sıçraması.** Her frame'in matrisi bağımsız çözülürse açılar iki
+  frame arasında tam tur atlayabilir; 360° dönen bir kamera ansızın geri
+  dönüyormuş gibi görünür. Her frame bir öncekiyle uyumlu hale getirilir
+  (`make_compatible`). Test bunu tam tur üzerinde sınıyor.
+- **Interpolasyon.** Bake edilmiş örnekler doğrusaldır. Blender'ın varsayılan
+  Bezier'i her iki anahtar arasında yavaşlatıp hızlandırır ve sabit bir dönüşü
+  kesik kesik gösterir. Anahtarlar `LINEAR` yapılır.
+
+Frame sayısı üst sınırı **2000**; aşılırsa aralık kırpılır ve pakete "kırpıldı"
+yazılır, sessizce eksik gönderilmez.
+
 ## Displacement
 
 Maya displacement'ı **shader'da değil, shadingEngine'de** durur —

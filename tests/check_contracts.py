@@ -203,6 +203,42 @@ def main():
         == importer.constants.OPENPBR_EMISSION_SEMANTIC,
     )
 
+    print("\nanimation range")
+    parse = exporter.ui.parse_frame_range
+    check("plain range", parse("1-120") == (1.0, 120.0, None), parse("1-120"))
+    check("range with a step", parse("1-120x2") == (1.0, 120.0, 2.0),
+          parse("1-120x2"))
+    check("spaces tolerated", parse(" 10 - 20 ") == (10.0, 20.0, None),
+          parse(" 10 - 20 "))
+    check("blank means the playback range", parse("") == (None, None, None))
+    # A half typed range must not silently export the wrong frames.
+    for text in ("120", "1-", "abc", "1-2-3"):
+        check("{0!r} rejected".format(text), parse(text) == (None, None, None),
+              parse(text))
+
+    info = exporter.animation.animation_info
+    single = info(False)
+    check("animation off reports a single frame",
+          single["enabled"] is False and single["frame_count"] == 1, single)
+    ranged = info(True, 1, 10)
+    check("inclusive frame count, 1 to 10 is 10 frames",
+          ranged["frame_count"] == 10, ranged["frame_count"])
+    stepped = info(True, 1, 11, 2)
+    check("a step of 2 over 1 to 11 is 6 frames",
+          stepped["frame_count"] == 6, stepped["frame_count"])
+    check("frame list matches the count",
+          exporter.animation.frame_list(stepped) == [1, 3, 5, 7, 9, 11],
+          exporter.animation.frame_list(stepped))
+    reversed_range = info(True, 20, 5)
+    check("a backwards range is put the right way round",
+          (reversed_range["start"], reversed_range["end"]) == (5.0, 20.0),
+          (reversed_range["start"], reversed_range["end"]))
+    huge = info(True, 1, 100000)
+    check("a runaway range is clamped and says so",
+          huge["truncated"] is True
+          and huge["frame_count"] == exporter.constants.MAX_ANIMATION_FRAMES,
+          (huge["truncated"], huge["frame_count"]))
+
     print("\ncorrection node contract")
     recorded = set(exporter_constants.CORRECTION_NODE_ATTRS)
     rebuilt = set(importer.corrections.CORRECTION_BUILDERS)

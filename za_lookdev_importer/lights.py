@@ -21,6 +21,7 @@ from .constants import (
     NODE_TREE_UNIT_STRENGTH,
     WATTS_PER_INTENSITY,
 )
+from .animation import animate_object, key_data_value
 from .images import load_image
 from .transforms import (
     maya_matrix_to_blender,
@@ -175,8 +176,51 @@ def create_light_object(
         data.angle = min(math.pi, softness)
 
     configure_light_texture_nodes(data, record, warnings)
+    _animate_light(obj, data, record, blender_type, position_scale, power_scale)
     store_light_metadata(obj, data, record)
     return obj
+
+
+def _animate_light(obj, data, record, blender_type, position_scale, power_scale):
+    """Key the transform, and the energy and colour that move with it.
+
+    Energy is re-derived per sample through light_energy rather than
+    interpolated, so every frame goes through the same measured conversion the
+    static record does.
+    """
+    if not bool(record.get("enabled", True)):
+        return 0
+
+    parameters = record.get("parameters") or {}
+    mode = str((record.get("enum_labels") or {}).get("color_mode") or "").lower()
+    temperature_driven = (
+        bool(parameters.get("use_temperature", False)) or "temperature" in mode
+    )
+
+    def apply_sample(sample, frame):
+        if "effective_intensity" in sample:
+            frame_record = dict(record)
+            frame_record["effective_intensity"] = sample["effective_intensity"]
+            frame_record["intensity"] = sample.get(
+                "intensity", record.get("intensity")
+            )
+            frame_record["exposure"] = sample.get(
+                "exposure", record.get("exposure")
+            )
+            key_data_value(
+                data,
+                "energy",
+                light_energy(
+                    frame_record, blender_type, position_scale, power_scale
+                ),
+                frame,
+            )
+        # A temperature driven light takes its colour from the temperature
+        # input, so keying the swatch would fight it.
+        if "color" in sample and not temperature_driven:
+            key_data_value(data, "color", light_color(sample), frame)
+
+    return animate_object(obj, record, position_scale, apply_sample)
 
 
 def configure_area_light(

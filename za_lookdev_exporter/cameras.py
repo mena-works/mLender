@@ -11,6 +11,7 @@ from __future__ import absolute_import
 import maya.cmds as cmds
 
 from .constants import (
+    ANIMATED_CAMERA_ATTRS,
     CAMERA_FILM_FIT_ATTR,
     CAMERA_INCHES_TO_MM,
     CAMERA_NUMERIC_ATTRS,
@@ -99,6 +100,22 @@ def camera_record(camera_shape):
         },
         "frame": current_frame(),
     }
+
+
+def camera_sample(camera_shape):
+    """The values worth capturing per frame: where it is and what lens it has.
+
+    Read at whatever frame the timeline is parked on; the caller steps it.
+    """
+    transform = parent_of(camera_shape)
+    sample = {"matrix": world_matrix(transform)}
+    for semantic, attr in ANIMATED_CAMERA_ATTRS.items():
+        if not attr_exists(camera_shape, attr):
+            continue
+        value = plug_value(camera_shape + "." + attr)
+        if value is not None:
+            sample[semantic] = value
+    return sample
 
 
 def _renderable(camera_shape):

@@ -10,6 +10,7 @@ already converted or carried explicitly.
 
 import bpy
 
+from .animation import animate_object, key_data_value
 from .constants import CAMERA_COLLECTION_NAME, CAMERA_SENSOR_FIT
 from .transforms import maya_matrix_to_blender
 from .utils import namespace_free_name, scalar
@@ -88,8 +89,44 @@ def create_camera_object(record, collection, position_scale):
     data.clip_end = max(data.clip_start * 1.0001, far)
 
     _apply_depth_of_field(data, record, position_scale)
+    _animate_camera(obj, data, record, position_scale)
     _store_camera_metadata(obj, data, record)
     return obj
+
+
+def _animate_camera(obj, data, record, position_scale):
+    """Key the transform and whatever lens values move with it."""
+    def apply_sample(sample, frame):
+        if "focal_length_mm" in sample and data.type != "ORTHO":
+            key_data_value(
+                data, "lens", max(1.0, scalar(sample["focal_length_mm"], 35.0)),
+                frame,
+            )
+        if "orthographic_width" in sample and data.type == "ORTHO":
+            key_data_value(
+                data,
+                "ortho_scale",
+                max(
+                    0.000001,
+                    scalar(sample["orthographic_width"], 10.0) * position_scale,
+                ),
+                frame,
+            )
+        dof = getattr(data, "dof", None)
+        if dof is not None and "focus_distance" in sample:
+            key_data_value(
+                dof,
+                "focus_distance",
+                max(0.0, scalar(sample["focus_distance"], 5.0) * position_scale),
+                frame,
+            )
+        if dof is not None and "f_stop" in sample:
+            key_data_value(
+                dof, "aperture_fstop", max(0.01, scalar(sample["f_stop"], 5.6)),
+                frame,
+            )
+
+    return animate_object(obj, record, position_scale, apply_sample)
 
 
 def _apply_depth_of_field(data, record, position_scale):

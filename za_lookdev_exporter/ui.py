@@ -2,6 +2,8 @@
 """Maya window for the lookdev exporter."""
 from __future__ import absolute_import
 
+import re
+
 import maya.cmds as cmds
 
 from .constants import (
@@ -78,6 +80,23 @@ def show_ui():
         adjustableColumn=2,
         columnWidth2=(120, 120),
     )
+    animation_field = cmds.checkBoxGrp(
+        label="Export Animation",
+        label1="Bake the frame range instead of the current frame",
+        value1=False,
+        columnWidth2=(120, 400),
+    )
+    # Blank means the playback range, which is what the artist is looking at.
+    frame_range_field = cmds.textFieldGrp(
+        label="Frame Range",
+        text="",
+        annotation=(
+            "Blank uses the playback range. Otherwise start-end, "
+            "optionally with a step: 1-120 or 1-120x2"
+        ),
+        adjustableColumn=2,
+        columnWidth2=(120, 200),
+    )
     cmds.text(
         label="Packages: {0}01, {0}02, {0}03...".format(PACKAGE_PREFIX),
         align="left",
@@ -91,10 +110,38 @@ def show_ui():
             port_field,
             bake_field,
             bake_resolution_field,
+            animation_field,
+            frame_range_field,
         ),
     )
     cmds.showWindow(window)
     return window
+
+
+def parse_frame_range(text):
+    """Read "1-120" or "1-120x2" into start, end and step.
+
+    Anything unparseable returns all None, which means the playback range;
+    guessing at a half typed range would silently export the wrong frames.
+    """
+    text = str(text or "").strip().lower().replace(" ", "")
+    if not text:
+        return None, None, None
+    step = None
+    if "x" in text:
+        text, _sep, step_text = text.partition("x")
+        try:
+            step = float(step_text)
+        except ValueError:
+            step = None
+    # Split on the last '-' that is not a leading sign, so -10--5 works.
+    match = re.match(r"^(-?[\d.]+)[-:](-?[\d.]+)$", text)
+    if not match:
+        return None, None, None
+    try:
+        return float(match.group(1)), float(match.group(2)), step
+    except ValueError:
+        return None, None, None
 
 
 def export_from_ui(
@@ -103,6 +150,8 @@ def export_from_ui(
     port_field,
     bake_field=None,
     bake_resolution_field=None,
+    animation_field=None,
+    frame_range_field=None,
 ):
     """Export, then notify Blender, reporting each failure mode separately.
 
@@ -125,11 +174,26 @@ def export_from_ui(
             bake_resolution_field, query=True, value1=True
         )
 
+    export_animation = False
+    if animation_field is not None:
+        export_animation = bool(
+            cmds.checkBoxGrp(animation_field, query=True, value1=True)
+        )
+    frame_start = frame_end = frame_step = None
+    if frame_range_field is not None:
+        frame_start, frame_end, frame_step = parse_frame_range(
+            cmds.textFieldGrp(frame_range_field, query=True, text=True)
+        )
+
     try:
         result = export_lookdev(
             output_folder,
             bake_procedurals=bake,
             bake_resolution=bake_resolution,
+            export_animation=export_animation,
+            frame_start=frame_start,
+            frame_end=frame_end,
+            frame_step=frame_step,
         )
     except Exception as exc:
         cmds.warning("Z-A Lookdev export failed: {0}".format(exc))
@@ -159,7 +223,8 @@ def export_from_ui(
     cmds.confirmDialog(
         title="Z-A Lookdev Export Complete",
         message=(
-            "Meshes: {0}\nLights: {1}\nCameras: {2}\nBaked textures: {3}\n\nPackage:\n{4}\n\nFBX:\n{5}{6}"
+            "Meshes: {0}\nLights: {1}\nCameras: {2}\nBaked textures: {3}\n"
+            "Frames: {7}\n\nPackage:\n{4}\n\nFBX:\n{5}{6}"
         ).format(
             result["mesh_count"],
             result["light_count"],
@@ -168,6 +233,7 @@ def export_from_ui(
             result["package_folder"],
             result["fbx_path"],
             _warning_summary(result.get("warnings")),
+            result.get("frame_count", 1),
         ),
         button=["OK"],
         icon="information",

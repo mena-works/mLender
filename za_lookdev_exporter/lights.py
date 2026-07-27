@@ -148,6 +148,39 @@ def light_record(light_shape):
     }
 
 
+def light_sample(light_shape):
+    """The values worth capturing per frame: where it is and how bright.
+
+    ``effective_intensity`` is folded here exactly as the static record folds
+    it, so the importer runs the same measured energy conversion on a sample
+    as it does on the record.
+    """
+    transform = parent_of(light_shape)
+    intensity, _attr, _label = first_existing_attr(
+        light_shape, LIGHT_ATTR_ALIASES["intensity"]
+    )
+    exposure, _e_attr, _e_label = first_existing_attr(
+        light_shape, LIGHT_ATTR_ALIASES["exposure"]
+    )
+    color, _c_attr, _c_label = first_existing_attr(
+        light_shape, LIGHT_ATTR_ALIASES["color"]
+    )
+    intensity = number(intensity, 1.0)
+    exposure = number(exposure, 0.0)
+    if not isinstance(color, (list, tuple)):
+        color = [1.0, 1.0, 1.0]
+    return {
+        "matrix": world_matrix(transform),
+        "scale": xform_vector(
+            transform, scale=True, default=(1.0, 1.0, 1.0)
+        ),
+        "intensity": intensity,
+        "exposure": exposure,
+        "effective_intensity": intensity * (2.0 ** exposure),
+        "color": [float(item) for item in color[:3]],
+    }
+
+
 def resolve_light_kind(light_node_type, value, enum_label):
     """Reduce a Maya/Redshift light to one of the kinds Blender can rebuild.
 
