@@ -137,16 +137,22 @@ def main():
           and props.name in {c.name for c in set_dressing.children})
     grouped = object_named("stdSurfCube")
     ungrouped = object_named("flatCube")
+    # Light linking receiver collections are a mechanism, not scene
+    # organisation, so a mesh can legitimately be in one of those as well.
+    def scene_collections(obj):
+        return [
+            c.name for c in obj.users_collection
+            if not c.name.startswith("ZA_Link_")
+        ]
+
     check("the mesh sits in the innermost collection only",
-          grouped is not None
-          and [c.name for c in grouped.users_collection] == ["props"],
+          grouped is not None and scene_collections(grouped) == ["props"],
           [c.name for c in grouped.users_collection] if grouped else None)
     check("collections are marked as ours",
           props is not None and props.get("za_generated") is True)
     check("an ungrouped mesh stays at the root",
           ungrouped is not None
-          and [c.name for c in ungrouped.users_collection]
-          == [result["root_collection"]],
+          and scene_collections(ungrouped) == [result["root_collection"]],
           [c.name for c in ungrouped.users_collection] if ungrouped else None)
     check("two collections were reported", result["group_collection_count"] == 2,
           result["group_collection_count"])
@@ -187,6 +193,37 @@ def main():
         check("the unrebuildable remapValue was reported",
               any("remapValue" in warning for warning in result["warnings"]),
               result["warnings"])
+
+    print("\nlight linking")
+    area_light = object_named("aiArea")
+    check("the restricted light imported", area_light is not None)
+    if area_light is not None:
+        linking = getattr(area_light, "light_linking", None)
+        check("this Blender has light linking", linking is not None)
+        if linking is not None:
+            receivers = linking.receiver_collection
+            check("a receiver collection was built", receivers is not None,
+                  receivers)
+            if receivers:
+                names = {obj.name for obj in receivers.objects}
+                check("the unlinked meshes are not receivers",
+                      not any(n.startswith(("flatCube", "glassCube"))
+                              for n in names),
+                      sorted(names))
+                check("the linked meshes are receivers",
+                      any(n.startswith("stdSurfCube") for n in names),
+                      sorted(names))
+                check("the receiver collection stays out of the scene tree",
+                      receivers.name not in
+                      {c.name for c in bpy.context.scene.collection.children},
+                      receivers.name)
+
+    ies_light = object_named("aiIes")
+    if ies_light is not None:
+        linking = getattr(ies_light, "light_linking", None)
+        check("an unrestricted light gets no receiver collection",
+              linking is None or linking.receiver_collection is None,
+              linking.receiver_collection if linking else None)
 
     print("\ncolour management")
     # Blender's stock config has no ACES view transform on any installed

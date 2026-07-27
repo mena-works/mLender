@@ -189,6 +189,15 @@ def build_scene():
     cmds.setAttr(area_tf + ".scaleX", 3.0)
     cmds.setAttr(area_tf + ".scaleY", 3.0)
 
+    # Light linking. The query only means anything once the light is in
+    # defaultLightSet, which Maya does itself for lights made in a scene.
+    try:
+        cmds.sets(area_tf, edit=True, forceElement="defaultLightSet")
+    except Exception:
+        pass
+    cmds.lightlink(b=True, light=area_tf, object="flatCube")
+    cmds.lightlink(b=True, light=area_tf, object="glassCube")
+
     dome = cmds.createNode("aiSkyDomeLight", name="aiDomeShape")
     cmds.setAttr(dome + ".intensity", 2.0)
     cmds.setAttr(dome + ".aiExposure", 1.0)
@@ -391,6 +400,32 @@ def main():
     ]
     check("remapValue reported as unrebuildable rather than dropped silently",
           "remapValue" in unsupported, unsupported)
+
+    print("\nlight linking")
+    lights_by_name = {light.get("name"): light for light in payload["lights"]}
+    area_light = next(
+        (light for name, light in lights_by_name.items()
+         if str(name).startswith("aiArea")),
+        {},
+    )
+    linked = area_light.get("linked_meshes")
+    check("the restricted light lists its meshes", linked is not None, linked)
+    if linked is not None:
+        check("the two unlinked meshes are excluded",
+              "flatCube" not in linked and "glassCube" not in linked, linked)
+        check("everything else is still lit",
+              "stdSurfCube" in linked and "dispCube" in linked, linked)
+    unrestricted = next(
+        (light for name, light in lights_by_name.items()
+         if str(name).startswith("aiIes")),
+        {},
+    )
+    # This light was never added to defaultLightSet, so Maya answers nothing
+    # for it. That must read as "no restriction", never as "lights nothing",
+    # which would black the light out in Blender.
+    check("an unanswerable light gets no restriction rather than an empty one",
+          "linked_meshes" not in unrestricted,
+          unrestricted.get("linked_meshes"))
 
     print("\ncollected textures")
     # A second export with collection on, into its own folder so the package

@@ -472,6 +472,9 @@ Kullanıcının elle doğrulaması gereken adımlar:
 - ❌ Displacement'a birim ölçeği ekleme; FBX birim dönüşümünü obje scale'ine
   koyar, vertex'ler Maya biriminde kalır, object space displacement zaten doğru
 - ❌ Displacement'ı shader'da arama; Maya onu shadingEngine'de tutar
+- ❌ Boş bir `lightlink` cevabını "hiçbir şeyi aydınlatmıyor" sanma;
+  `defaultLightSet` dışındaki ışık böyle cevap verir ve kısıtlama yazmak onu
+  Blender'da karartır
 - ❌ Blender'da ACES view transform olduğunu varsayma; stok OCIO config'de
   yok, sadece özel config yüklüyse var
 - ❌ Görünürlük bayraklarını varsayılanlarıyla birlikte yazma; yalnız

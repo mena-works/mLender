@@ -36,6 +36,7 @@ def import_lights(
     import_scale,
     warnings,
     power_scale=None,
+    mesh_objects=None,
 ):
     records = list(package_data.get("lights") or [])
     if not records:
@@ -64,6 +65,7 @@ def import_lights(
                 position_scale,
                 warnings,
                 power_scale,
+                mesh_objects,
             )
             object_count += 1
         except Exception as exc:
@@ -104,6 +106,7 @@ def create_light_object(
     position_scale,
     warnings,
     power_scale=None,
+    mesh_objects=None,
 ):
     source_kind = str(record.get("light_kind") or "AREA").upper()
     area_shape = str(record.get("area_shape") or "RECTANGLE").upper()
@@ -176,6 +179,7 @@ def create_light_object(
         data.angle = min(math.pi, softness)
 
     configure_light_texture_nodes(data, record, warnings)
+    apply_light_linking(obj, record, mesh_objects, warnings)
     _animate_light(obj, data, record, blender_type, position_scale, power_scale)
     store_light_metadata(obj, data, record)
     return obj
@@ -221,6 +225,60 @@ def _animate_light(obj, data, record, blender_type, position_scale, power_scale)
             key_data_value(data, "color", light_color(sample), frame)
 
     return animate_object(obj, record, position_scale, apply_sample)
+
+
+def apply_light_linking(obj, record, mesh_objects, warnings):
+    """Restrict a light to the meshes Maya linked it to.
+
+    The exporter only writes ``linked_meshes`` when the light lights some but
+    not all of the exported meshes, so an absent field means no restriction
+    and nothing is built. Blender expresses the restriction as a receiver
+    collection, which deliberately is not linked into the scene.
+    """
+    names = record.get("linked_meshes")
+    if names is None:
+        return False
+    linking = getattr(obj, "light_linking", None)
+    if linking is None:
+        warnings.append(
+            'Light linking on "{0}" was dropped; this Blender version has no '
+            "light linking.".format(obj.name)
+        )
+        return False
+
+    receivers = bpy.data.collections.new("ZA_Link_" + obj.name)
+    receivers["za_generated"] = True
+    found = 0
+    for name in names:
+        target = (mesh_objects or {}).get(name)
+        if target is None:
+            continue
+        try:
+            receivers.objects.link(target)
+            found += 1
+        except Exception:
+            continue
+
+    if not found and names:
+        warnings.append(
+            'Light "{0}" is linked to {1} mesh(es) in Maya but none of them '
+            "were found, so the restriction was not applied.".format(
+                obj.name, len(names)
+            )
+        )
+        bpy.data.collections.remove(receivers)
+        return False
+
+    try:
+        linking.receiver_collection = receivers
+    except Exception as error:
+        warnings.append(
+            'Could not restrict "{0}": {1}'.format(obj.name, error)
+        )
+        bpy.data.collections.remove(receivers)
+        return False
+    obj["za_linked_mesh_count"] = found
+    return True
 
 
 def configure_area_light(

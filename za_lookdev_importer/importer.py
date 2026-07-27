@@ -124,12 +124,18 @@ def import_lookdev_package(
     # Only meshes that matched a Maya record can say whether they want to be
     # subdivided, so unmatched objects are deliberately left alone.
     subdivision_count = add_subdivision_modifiers(matched_meshes, warnings)
+    # Lights are built after the meshes are named, so light linking can
+    # resolve its receivers by name.
+    mesh_objects = {
+        (record.get("mesh") or ""): obj for obj, record in matched_meshes
+    }
     light_result = import_lights(
         package_data,
         root_collection,
         import_scale,
         warnings,
         power_scale,
+        mesh_objects,
     )
 
     camera_result = import_cameras(

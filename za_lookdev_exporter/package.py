@@ -23,12 +23,19 @@ from .animation import animation_info, sample_records
 from .cameras import camera_record, camera_sample, scene_camera_shapes
 from .collect import collect_textures
 from .fbx import export_fbx
-from .lights import light_record, light_sample, scene_light_shapes
+from .lights import (
+    light_record,
+    light_sample,
+    linked_mesh_names,
+    scene_light_shapes,
+    scene_uses_light_linking,
+)
 from .mayautils import (
     color_management_info,
     maya_linear_unit,
     maya_path,
     meters_per_maya_unit,
+    parent_of,
 )
 from .meshes import mesh_record, mesh_transforms, scene_mesh_shapes
 
@@ -83,6 +90,8 @@ def export_lookdev(
         camera_shapes = scene_camera_shapes()
         light_records = [light_record(shape) for shape in light_shapes]
         camera_records = [camera_record(shape) for shape in camera_shapes]
+
+        _apply_light_linking(light_records, light_shapes, mesh_records)
 
         animation = animation_info(
             export_animation, frame_start, frame_end, frame_step
@@ -164,6 +173,41 @@ def export_lookdev(
         "animated": animation["enabled"],
         "warnings": warnings,
     }
+
+
+def _apply_light_linking(light_records, light_shapes, mesh_records):
+    """Record which meshes each light lights, when that is not all of them.
+
+    Nothing is written for a scene that never broke a link, and nothing is
+    written for a light that still lights everything: the importer's job is
+    only to reproduce restrictions, and an absent field means no restriction.
+    """
+    if not scene_uses_light_linking():
+        return 0
+
+    lookup = {}
+    every_mesh = set()
+    for record in mesh_records:
+        name = record.get("mesh") or ""
+        if not name:
+            continue
+        every_mesh.add(name)
+        for key in (
+            record.get("mesh_full_name"),
+            record.get("shape"),
+            name,
+        ):
+            if key:
+                lookup[str(key)] = name
+
+    restricted = 0
+    for record, shape in zip(light_records, light_shapes):
+        linked = linked_mesh_names(parent_of(shape), lookup)
+        if linked is None or set(linked) == every_mesh:
+            continue
+        record["linked_meshes"] = linked
+        restricted += 1
+    return restricted
 
 
 def _sampler(function, shape):

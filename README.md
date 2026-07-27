@@ -620,6 +620,35 @@ specularAnisotropy       -> Anisotropic
   5.2'de 0.005). Bu yüzden değer açıkça set edilir; varsayılana güvenmek aynı
   paketi iki sürümde farklı gösterirdi.
 
+## Işık linking
+
+Maya'da bir ışığın yalnız belli objeleri aydınlatması (light linking) artık
+aktarılıyor. Blender'da karşılığı **receiver collection**'dır:
+
+```text
+Maya      lightA -> cubeA (cubeB'nin bağlantısı kırılmış)
+Blender   lightA.light_linking.receiver_collection = ZA_Link_lightA
+          ZA_Link_lightA içinde: cubeA
+```
+
+Bu collection sahne ağacına **bağlanmaz**; bir organizasyon klasörü değil,
+linking mekanizmasıdır. Bu yüzden bir mesh hem kendi grup collection'ında hem
+bir receiver collection'da olabilir, bu normaldir.
+
+Üç karar:
+
+- **Sahnede hiç kırılmış bağlantı yoksa hiçbir sorgu yapılmaz.** Maya kırılmaları
+  `lightLinker.ignore` dizisinde tutar; dizi boşsa her ışık her şeyi aydınlatıyor
+  demektir ve per-ışık sorgu (büyük sahnelerde pahalı) atlanır.
+- **Her şeyi aydınlatan bir ışık için hiçbir şey yazılmaz.** Alanın olmaması
+  "kısıtlama yok" demektir.
+- **Cevapsız kalan sorgu "hiçbir şeyi aydınlatmıyor" olarak okunmaz.** Maya,
+  `defaultLightSet` dışındaki bir ışık için boş cevap verir; bunu kısıtlama sanmak
+  ışığı Blender'da tamamen karartırdı. İki hata eşit değil: yanlış kısıtlamak ışığı
+  yok eder, kısıtlamamak sadece muhtemelen olmayan bir kısıtlamayı kaçırır.
+
+Gölge linking (shadow linking) aktarılmıyor.
+
 ## Renk yönetimi
 
 Aktarım doğru olduğu halde görüntünün "bir tuhaf" görünmesinin en sık sebebi

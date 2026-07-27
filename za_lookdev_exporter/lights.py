@@ -181,6 +181,51 @@ def light_sample(light_shape):
     }
 
 
+def scene_uses_light_linking():
+    """Whether any light link has been broken anywhere in the scene.
+
+    Maya records breaks in the lightLinker's ``ignore`` array, so an empty
+    array means every light lights everything and the per-light query can be
+    skipped entirely. That query is not cheap on a large scene.
+    """
+    for linker in cmds.ls(type="lightLinker") or []:
+        try:
+            if cmds.getAttr(linker + ".ignore", multiIndices=True):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def linked_mesh_names(light_transform, mesh_lookup):
+    """Exported meshes this light actually lights, or None if unanswerable.
+
+    Maya answers with a mix of shapes, transforms and shading groups, so the
+    result is filtered through a lookup of the meshes actually being exported
+    and reported using the names the importer will see.
+
+    The lights must be in defaultLightSet for this query to mean anything;
+    Maya puts them there itself when they are created in a scene.
+    """
+    try:
+        linked = cmds.lightlink(query=True, light=light_transform) or []
+    except Exception:
+        return None
+    if not linked:
+        # The query answers nothing for a light outside defaultLightSet. Read
+        # that as unanswerable, not as "lights nothing": a light that really
+        # lights nothing is vanishingly rare, and the two mistakes are not
+        # equally bad. Restricting wrongly makes the light vanish in Blender;
+        # not restricting only misses a restriction that was probably absent.
+        return None
+    names = set()
+    for item in linked:
+        mesh = mesh_lookup.get(node_label(item))
+        if mesh:
+            names.add(mesh)
+    return sorted(names)
+
+
 def resolve_light_kind(light_node_type, value, enum_label):
     """Reduce a Maya/Redshift light to one of the kinds Blender can rebuild.
 
