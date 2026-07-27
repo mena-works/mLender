@@ -592,6 +592,50 @@ specularAnisotropy       -> Anisotropic
   5.2'de 0.005). Bu yüzden değer açıkça set edilir; varsayılana güvenmek aynı
   paketi iki sürümde farklı gösterirdi.
 
+## Displacement
+
+Maya displacement'ı **shader'da değil, shadingEngine'de** durur —
+`aiStandardSurface`'in displacement attribute'u yoktur. Bu yüzden mesh ile
+shading engine birlikte okunur: harita engine'den, yükseklik ve sıfır değeri
+mesh'ten gelir.
+
+İki kablolama da tanınır, ikisi de gerçek sahnelerde görülüyor:
+
+```text
+file -> displacementShader -> SG.displacementShader     (yaygın olan)
+file --------------------->  SG.displacementShader      (Arnold bunu da render eder)
+```
+
+Blender'da bir **Displacement** node kurulur ve material output'un
+`Displacement` girişine bağlanır. Eşleme birebir, çünkü iki taraf da aynı
+formülü hesaplıyor — `(harita - midlevel) * scale`:
+
+```text
+aiDispHeight * displacementShader.scale  ->  Scale
+aiDispZeroValue                          ->  Midlevel
+harita                                   ->  Height
+aiDispAutobump                           ->  displacement_method = BOTH
+                                             (kapalıysa DISPLACEMENT)
+```
+
+**Birim ölçeği bilerek eklenmiyor.** Ölçtüm: FBX import'unda birim dönüşümü
+obje scale'ine biniyor, vertex koordinatları Maya biriminde kalıyor. Yani
+object space'te 1 birimlik displacement zaten 1 Maya birimidir. Bu, ışık
+enerjisi kuralının **tersidir** (orada `position_scale²` zorunlu); buraya da
+eklemek santimetre sahnelerde 100 kat fazla displacement verirdi.
+
+İki sınır:
+
+- **Vector displacement kurulmuyor**, uyarı yazılıyor. Yalnız skaler yükseklik
+  aktarılıyor.
+- Mesh subdivision istemiyorsa uyarı yazılıyor: displacement'ın kıpırdatacak
+  geometrisi olmaz. (Arnold'da da aynı şey geçerli.)
+
+Displacement bir **Cycles** özelliğidir; EEVEE onu yok sayar.
+
+`Scale` soketinin varsayılanı sürümler arası farklı (4.1'de 1.0, 5.2'de 0.01),
+bu yüzden değer her zaman açıkça set edilir.
+
 ## Grup hiyerarşisi → Collection
 
 Maya'daki grup yapısı Blender'da **iç içe collection** olarak yeniden kurulur.

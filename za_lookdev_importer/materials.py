@@ -70,13 +70,16 @@ def build_material(material_record, warnings):
     channels = material_record.get("channels") or {}
     if material_record.get("shader_type") in UNLIT_SHADER_TYPES:
         _build_unlit(material, channels, warnings)
+        apply_displacement(material, material_record, warnings)
         return material
 
     if channel_is_active(channels.get("transmission")):
         _build_glass(material, channels, warnings)
+        apply_displacement(material, material_record, warnings)
         return material
 
     _build_principled(material, channels, warnings)
+    apply_displacement(material, material_record, warnings)
     if not material_record.get("supported", True):
         warnings.append(
             'Unsupported Maya shader "{0}" on "{1}"; available channels were '
@@ -86,6 +89,88 @@ def build_material(material_record, warnings):
             )
         )
     return material
+
+
+def apply_displacement(material, material_record, warnings):
+    """Rebuild Maya displacement as a Displacement node on the material output.
+
+    Maya's height and zero value map straight onto Blender's Scale and
+    Midlevel, because both compute (map - midlevel) * scale.
+
+    The node is left in OBJECT space deliberately, and the scene unit scale is
+    deliberately *not* folded in. Measured on the imported FBX: the unit
+    conversion lands on the object's scale while the vertex coordinates stay in
+    Maya units, so an object space displacement of one is already one Maya
+    unit. This is the opposite of the light energy rule, where the unit scale
+    must be applied; adding it here would displace by a factor of a hundred.
+    """
+    displacement = material_record.get("displacement") or {}
+    if not displacement.get("enabled"):
+        return False
+
+    if displacement.get("vector"):
+        warnings.append(
+            'Vector displacement on "{0}" was not rebuilt; only scalar height '
+            "displacement is transferred.".format(
+                material_record.get("material") or ""
+            )
+        )
+        return False
+
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+    output = next(
+        (n for n in nodes if n.bl_idname == "ShaderNodeOutputMaterial"), None
+    )
+    if output is None:
+        return False
+    target = output.inputs.get("Displacement")
+    if target is None:
+        return False
+
+    node = nodes.new("ShaderNodeDisplacement")
+    node.name = "ZA_Displacement"
+    node.label = "Maya Displacement"
+    if hasattr(node, "space"):
+        try:
+            node.space = "OBJECT"
+        except Exception:
+            pass
+
+    # Sockets by index: Height, Midlevel, Scale, Normal.
+    apply_record_to_socket(
+        material, node, node.inputs[0], "displacement", displacement, warnings
+    )
+    node.inputs[1].default_value = scalar(displacement.get("zero_value"), 0.0)
+    # Set explicitly: the Scale default is 1.0 on 4.1 and 0.01 on 5.2, so
+    # leaving it alone would displace the same package differently per version.
+    node.inputs[2].default_value = (
+        scalar(displacement.get("height"), 1.0)
+        * scalar(displacement.get("scale"), 1.0)
+    )
+    links.new(node.outputs[0], target)
+
+    # Autobump is Arnold shading the fine detail as bump rather than geometry,
+    # which is what Blender's BOTH does.
+    method = "BOTH" if displacement.get("autobump") else "DISPLACEMENT"
+    if hasattr(material, "displacement_method"):
+        try:
+            material.displacement_method = method
+        except Exception:
+            pass
+
+    material["za_displacement"] = method
+    material["za_source_displacement_height"] = scalar(
+        displacement.get("height"), 1.0
+    )
+    if not displacement.get("subdivision_enabled"):
+        warnings.append(
+            'Material "{0}" is displaced but its Maya mesh asks for no '
+            "subdivision, so the displacement has no geometry to move.".format(
+                material_record.get("material") or ""
+            )
+        )
+    return True
 
 
 def _build_principled(material, channels, warnings):

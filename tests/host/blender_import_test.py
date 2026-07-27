@@ -96,13 +96,13 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("7 meshes imported", result["mesh_count"] == 7, result["mesh_count"])
-    check("7 materials built", result["material_count"] == 7,
+    check("8 meshes imported", result["mesh_count"] == 8, result["mesh_count"])
+    check("8 materials built", result["material_count"] == 8,
           result["material_count"])
-    # Three of the five cubes asked for subdivision in Maya; the other two
-    # must arrive unmodified.
+    # Four of the eight cubes asked for subdivision in Maya, the displaced one
+    # among them; the rest must arrive unmodified.
     check("only the meshes that asked are subdivided",
-          result["subdivision_count"] == 3, result["subdivision_count"])
+          result["subdivision_count"] == 4, result["subdivision_count"])
 
     print("\naiStandardSurface")
     std = material_for("stdSurfCube")
@@ -180,6 +180,43 @@ def main():
         check("the unrebuildable remapValue was reported",
               any("remapValue" in warning for warning in result["warnings"]),
               result["warnings"])
+
+    print("\ndisplacement")
+    displaced = material_for("dispCube")
+    check("displaced material exists", displaced is not None)
+    if displaced:
+        node = next(
+            (n for n in displaced.node_tree.nodes
+             if n.bl_idname == "ShaderNodeDisplacement"),
+            None,
+        )
+        check("Displacement node built", node is not None)
+        if node:
+            check("height map drives the Height socket", node.inputs[0].is_linked)
+            check("Maya zero value became Midlevel 0.5",
+                  abs(node.inputs[1].default_value - 0.5) < 1e-5,
+                  node.inputs[1].default_value)
+            # aiDispHeight 0.25 times displacementShader scale 2.0. Set
+            # explicitly because the socket default is 1.0 on 4.1 and 0.01
+            # on 5.2.
+            check("scale is height times node scale = 0.5",
+                  abs(node.inputs[2].default_value - 0.5) < 1e-5,
+                  node.inputs[2].default_value)
+            check("object space, so no unit scale is folded in",
+                  getattr(node, "space", "OBJECT") == "OBJECT",
+                  getattr(node, "space", None))
+            check("wired into the material output",
+                  node.outputs[0].is_linked
+                  and node.outputs[0].links[0].to_socket.name == "Displacement")
+        check("autobump became the BOTH method",
+              getattr(displaced, "displacement_method", None) == "BOTH",
+              getattr(displaced, "displacement_method", None))
+
+    undisplaced = material_for("flatCube")
+    check("an undisplaced material builds no Displacement node",
+          undisplaced is not None
+          and not any(n.bl_idname == "ShaderNodeDisplacement"
+                      for n in undisplaced.node_tree.nodes))
 
     print("\naiOpenPBRSurface")
     pbr = material_for("openPbrCube")

@@ -5,6 +5,14 @@ from __future__ import absolute_import
 import maya.cmds as cmds
 
 from .constants import (
+    DISPLACEMENT_ENGINE_PLUG,
+    DISPLACEMENT_MESH_ATTRS,
+    DISPLACEMENT_NODE_INPUT,
+    DISPLACEMENT_NODE_SCALE,
+    DISPLACEMENT_NODE_TYPES,
+    DISPLACEMENT_NODE_VECTOR,
+    DISPLACEMENT_REDSHIFT_ENABLE,
+    DISPLACEMENT_REDSHIFT_SCALE,
     MAX_SUBDIV_ITERATIONS,
     SUBDIV_ARNOLD_ITERATIONS,
     SUBDIV_ARNOLD_TYPE,
@@ -29,7 +37,9 @@ from .mayautils import (
     unique,
     without_namespace,
 )
+from .bake import bake_channel
 from .shaders import shader_channels
+from .textures import texture_from_plug
 
 
 def scene_mesh_shapes():
@@ -259,9 +269,112 @@ def mesh_materials(mesh_shape, bake_context=None):
                         shader_type,
                         bake_context,
                     ),
+                    "displacement": displacement_info(
+                        mesh_shape,
+                        shading_engine,
+                        bake_context,
+                    ),
                 }
             )
     return result
+
+
+def displacement_info(mesh_shape, shading_engine, bake_context=None):
+    """Displacement hanging off a shading engine, with its mesh settings.
+
+    Maya keeps displacement on the shadingEngine rather than on the surface
+    shader, so it is read here where both the engine and the mesh are known:
+    the map comes from the engine, the height and zero value from the mesh.
+
+    Both wirings are accepted. A displacementShader node in between is the
+    usual one, but a texture connected straight to the engine plug renders
+    identically in Arnold and has to be recognised too.
+    """
+    if not attr_exists(shading_engine, DISPLACEMENT_ENGINE_PLUG):
+        return {"enabled": False}
+    plug = shading_engine + "." + DISPLACEMENT_ENGINE_PLUG
+    sources = cmds.listConnections(
+        plug, source=True, destination=False
+    ) or []
+    if not sources:
+        return {"enabled": False}
+
+    source = sources[0]
+    scale = 1.0
+    vector = False
+    node_label_name = node_label(source)
+
+    if node_type(source) in DISPLACEMENT_NODE_TYPES:
+        scale = _number_or(plug_value(source + "." + DISPLACEMENT_NODE_SCALE), 1.0)
+        vector = _vector_displacement_connected(source)
+        height_plug = source + "." + DISPLACEMENT_NODE_INPUT
+    else:
+        # A texture straight into the engine plug; the engine plug itself is
+        # what carries the map.
+        height_plug = plug
+
+    texture = texture_from_plug(height_plug)
+    if texture and not texture.get("path"):
+        baked = bake_channel(
+            bake_context,
+            shading_engine,
+            "displacement",
+            texture.get("source_plug") or "",
+        )
+        if baked:
+            texture = baked
+
+    record = {
+        "enabled": True,
+        "node": node_label_name,
+        "node_type": node_type(source),
+        "scale": scale,
+        "vector": vector,
+        "subdivision_enabled": bool(
+            subdivision_info(mesh_shape).get("enabled")
+        ),
+    }
+    if texture:
+        record["texture"] = texture
+    value = plug_value(height_plug)
+    if value is not None:
+        record["value"] = value
+
+    for semantic, attrs in DISPLACEMENT_MESH_ATTRS.items():
+        found, attr, _label = first_existing_attr(mesh_shape, attrs)
+        if attr:
+            record[semantic] = found
+
+    enabled_value, enabled_attr, _label = first_existing_attr(
+        mesh_shape, DISPLACEMENT_REDSHIFT_ENABLE
+    )
+    if enabled_attr:
+        record["redshift_enabled"] = bool(enabled_value)
+        rs_scale, rs_attr, _rs_label = first_existing_attr(
+            mesh_shape, DISPLACEMENT_REDSHIFT_SCALE
+        )
+        if rs_attr:
+            record["redshift_scale"] = rs_scale
+    return record
+
+
+def _vector_displacement_connected(node):
+    """Whether the vector input drives the node instead of the scalar one."""
+    if not attr_exists(node, DISPLACEMENT_NODE_VECTOR):
+        return False
+    return bool(
+        cmds.listConnections(
+            node + "." + DISPLACEMENT_NODE_VECTOR,
+            source=True,
+            destination=False,
+        )
+    )
+
+
+def _number_or(value, default):
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return float(default)
 
 
 def face_assignment(mesh_shape, shading_engine):

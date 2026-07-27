@@ -465,6 +465,9 @@ Kullanıcının elle doğrulaması gereken adımlar:
 - ❌ Yeni davranışı teste assertion eklemeden bırakma
 - ❌ Kaynak sahnenin istemediği bir şeyi bütün meshlere uygulama
 - ❌ Işık enerjisinden `position_scale²` terimini düşürme
+- ❌ Displacement'a birim ölçeği ekleme; FBX birim dönüşümünü obje scale'ine
+  koyar, vertex'ler Maya biriminde kalır, object space displacement zaten doğru
+- ❌ Displacement'ı shader'da arama; Maya onu shadingEngine'de tutar
 - ❌ Blender soket varsayılanını kaynaktan gelen değer sanma (speküler 0.5)
 - ❌ Baked map'i sRGB sanma; Maya lineer yazar
 - ❌ Soket bileşen sayısını varsayma; Subsurface Radius 3, renk soketleri 4

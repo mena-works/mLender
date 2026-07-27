@@ -107,6 +107,28 @@ def build_scene():
     cmds.connectAttr(gamma_node + ".outValue", correct + ".input", force=True)
     cmds.connectAttr(correct + ".outColor", std + ".baseColor", force=True)
 
+    # Displacement, which Maya hangs off the shadingEngine rather than the
+    # shader. The cube subdivides, so the displacement has geometry to move.
+    _, disp_shader = shaded_cube("dispCube", "aiStandardSurface")
+    disp_shape = cmds.listRelatives("dispCube", shapes=True, fullPath=True)[0]
+    cmds.setAttr(disp_shape + ".aiSubdivType", 1)
+    cmds.setAttr(disp_shape + ".aiSubdivIterations", 3)
+    cmds.setAttr(disp_shape + ".aiDispHeight", 0.25)
+    cmds.setAttr(disp_shape + ".aiDispZeroValue", 0.5)
+    cmds.setAttr(disp_shape + ".aiDispAutobump", True)
+    height_path = os.path.join(OUT, "fake_height.tx").replace("\\", "/")
+    with open(height_path, "w") as handle:
+        handle.write("only the path is exported")
+    height_tex = cmds.shadingNode("file", asTexture=True, name="heightTex")
+    cmds.setAttr(height_tex + ".fileTextureName", height_path, type="string")
+    disp_node = cmds.shadingNode("displacementShader", asShader=True,
+                                 name="cubeDisp")
+    cmds.setAttr(disp_node + ".scale", 2.0)
+    cmds.connectAttr(height_tex + ".outAlpha", disp_node + ".displacement",
+                     force=True)
+    cmds.connectAttr(disp_node + ".displacement", "dispCube_SG.displacementShader",
+                     force=True)
+
     # remapValue has no Blender equivalent, so it must be reported rather than
     # silently stepped over.
     remap = cmds.shadingNode("remapValue", asUtility=True, name="remapCoat")
@@ -286,7 +308,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("7 meshes exported", payload["mesh_count"] == 7, payload["mesh_count"])
+    check("8 meshes exported", payload["mesh_count"] == 8, payload["mesh_count"])
 
     print("\naiStandardSurface")
     std = channels("stdSurfCube")
@@ -338,6 +360,36 @@ def main():
     ]
     check("remapValue reported as unrebuildable rather than dropped silently",
           "remapValue" in unsupported, unsupported)
+
+    print("\ndisplacement")
+    disp = next(
+        (material.get("displacement") or {})
+        for mesh in payload["meshes"] if mesh.get("mesh") == "dispCube"
+        for material in mesh["materials"]
+    )
+    check("displacement found on the shading engine", disp.get("enabled"),
+          disp)
+    check("height map path exported",
+          disp.get("texture", {}).get("path", "").endswith(".tx"),
+          disp.get("texture"))
+    check("mesh aiDispHeight 0.25 exported",
+          abs(disp.get("height", 0.0) - 0.25) < 1e-6, disp.get("height"))
+    check("mesh aiDispZeroValue 0.5 exported",
+          abs(disp.get("zero_value", -1.0) - 0.5) < 1e-6, disp.get("zero_value"))
+    check("displacementShader scale 2.0 exported",
+          abs(disp.get("scale", 0.0) - 2.0) < 1e-6, disp.get("scale"))
+    check("autobump exported", disp.get("autobump") is True, disp.get("autobump"))
+    check("scalar, not vector displacement", disp.get("vector") is False)
+    check("subdivision presence reported alongside it",
+          disp.get("subdivision_enabled") is True)
+
+    undisplaced = next(
+        (material.get("displacement") or {})
+        for mesh in payload["meshes"] if mesh.get("mesh") == "flatCube"
+        for material in mesh["materials"]
+    )
+    check("a mesh with no displacement says so",
+          undisplaced.get("enabled") is False, undisplaced)
 
     print("\ngroup hierarchy")
     by_mesh = {record.get("mesh"): record for record in payload["meshes"]}

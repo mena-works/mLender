@@ -17,7 +17,7 @@ LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
 LIVELINK_PROTOCOL = "za_lookdev_livelink"
 LIVELINK_VERSION = 1
-EXPORT_SCHEMA_VERSION = 12
+EXPORT_SCHEMA_VERSION = 13
 
 LIGHT_NODE_TYPES = (
     "RedshiftPhysicalLight",
@@ -290,6 +290,34 @@ PLACEMENT_NUMERIC_ATTRS = {
     "noise_u": "noiseU",
     "noise_v": "noiseV",
 }
+
+# Displacement, read from a live Maya 2023 / MtoA 5.4.8 session.
+#
+# It hangs off the shadingEngine, not the surface shader: aiStandardSurface has
+# no displacement attribute at all. Two wirings are both valid and both turn up
+# in real scenes, so both are handled: a displacementShader node in between, or
+# a texture wired straight into the engine plug.
+DISPLACEMENT_ENGINE_PLUG = "displacementShader"
+DISPLACEMENT_NODE_TYPES = ("displacementShader",)
+DISPLACEMENT_NODE_INPUT = "displacement"
+DISPLACEMENT_NODE_SCALE = "scale"
+DISPLACEMENT_NODE_VECTOR = "vectorDisplacement"
+
+# Mesh level Arnold settings. The height is the multiplier and the zero value
+# is the map level that means "no displacement", which is exactly what
+# Blender's Displacement node calls Midlevel.
+DISPLACEMENT_MESH_ATTRS = {
+    "height": ("aiDispHeight",),
+    "zero_value": ("aiDispZeroValue",),
+    "padding": ("aiDispPadding",),
+    "autobump": ("aiDispAutobump",),
+}
+
+# Redshift is not installed on the development machine, so these names come
+# from its documentation rather than from a probe. They are read defensively
+# and simply miss if a build spells them differently.
+DISPLACEMENT_REDSHIFT_ENABLE = ("rsEnableDisplacement", "rsEnableDisp")
+DISPLACEMENT_REDSHIFT_SCALE = ("rsDisplacementScale", "rsDispScale")
 
 # Correction nodes sitting between a texture and a shader input. Both the
 # attribute names and the maths behind them were measured on Maya 2023 with
