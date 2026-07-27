@@ -91,6 +91,33 @@ Prosedürel bake de 2. ve 4. adımda sınanır: gerçek bir checker ve ramp
 ağı kurulur, bake edilir, Blender'da Non-Color yüklendiği doğrulanır, ve
 export'un sahneye `file` node bırakmadığı kontrol edilir.
 
+## Performans ölçümü (gerçek Maya + gerçek Blender, ~1 dk)
+
+```bash
+"C:\Program Files\Autodesk\Maya2023in\mayapy.exe" ^
+    tests/calibration/benchmark_export.py 1600 60
+"C:\Program Files\Blender Foundation\Blender 5.2lender.exe" ^
+    --background --factory-startup --python tests/calibration/benchmark_import.py
+```
+
+Test değil, **ölçüm rig'i**: sentetik büyük bir sahne kurar, export ve import'u
+cProfile altında çalıştırır ve en pahalı fonksiyonları yazdırır.
+
+İlk çalıştırması iki gerçek darboğaz buldu, ikisi de karesel:
+
+```text
+export  face_assignment her mesh için shading engine'in bütün üyelerinde
+        cmds.ls çağırıyordu.  800 mesh / 2 materyal: 7.1s -> 5.8s
+        (200/400/800 eğrisi 1.0/2.4/7.1 idi, artık doğrusal)
+
+import  find_mesh_record her obje için bütün kayıtları tarıyor ve isim
+        anahtarlarını her seferinde regex'le yeniden üretiyordu.
+        1600 mesh: 60.8s -> 2.0s
+```
+
+Ayrıca aynı materyal her mesh için baştan okunuyordu; artık shader başına bir
+kez okunuyor (400 mesh / 60 materyal: `shader_channels` 400 → 60 çağrı).
+
 ## Ne doğrulanmıyor
 
 Bu üç test **render etmiyor**; sabitlerin tutarlı uygulandığını doğrularlar,

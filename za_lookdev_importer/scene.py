@@ -286,7 +286,30 @@ def _verify_subdivision(modifier, settings):
             )
 
 
-def find_mesh_record(obj, records, used_record_ids):
+def build_record_index(records):
+    """Index mesh records by every name they might be matched on.
+
+    Built once for the whole import. Scanning every record for every object,
+    and re-deriving each record's name keys on every scan, was quadratic:
+    measured at 1600 meshes, matching alone took 58 of the import's 61
+    seconds. Indexing turns the scan into a dictionary lookup.
+    """
+    index = {}
+    for record in records:
+        entry = {
+            "record": record,
+            "full": name_keys(record.get("mesh_full_name") or ""),
+            "base": name_keys(record.get("mesh") or ""),
+            "groups": [
+                name_keys(group) for group in record.get("groups") or []
+            ],
+        }
+        for key in entry["full"] | entry["base"]:
+            index.setdefault(key, []).append(entry)
+    return index
+
+
+def find_mesh_record(obj, index, used_record_ids):
     """Match an imported object to its Maya mesh record.
 
     A full-path match outranks a short-name match, because short names repeat
@@ -301,26 +324,32 @@ def find_mesh_record(obj, records, used_record_ids):
     object_keys = name_keys(obj.name)
     if obj.data:
         object_keys.update(name_keys(obj.data.name))
-    ancestor_keys = ancestor_name_keys(obj)
 
+    candidates = []
+    seen = set()
+    for key in object_keys:
+        for entry in index.get(key, ()):
+            if id(entry) in seen or id(entry["record"]) in used_record_ids:
+                continue
+            seen.add(id(entry))
+            candidates.append(entry)
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]["record"]
+
+    # Only an ambiguous name needs the parent chain, which is the expensive
+    # part; the overwhelmingly common case is a single candidate.
+    ancestor_keys = ancestor_name_keys(obj)
     best = None
     best_score = -1
-    for record in records:
-        if id(record) in used_record_ids:
-            continue
-        full_keys = name_keys(record.get("mesh_full_name") or "")
-        base_keys = name_keys(record.get("mesh") or "")
-        score = -1
-        if object_keys.intersection(full_keys):
-            score = 100
-        elif object_keys.intersection(base_keys):
-            score = 10
-        if score >= 0:
-            score += group_trail_score(ancestor_keys, record.get("groups"))
+    for entry in candidates:
+        score = 100 if object_keys & entry["full"] else 10
+        score += group_trail_score(ancestor_keys, entry["groups"])
         if score > best_score:
-            best = record
+            best = entry["record"]
             best_score = score
-    return best if best_score >= 0 else None
+    return best
 
 
 def ancestor_name_keys(obj):
@@ -337,18 +366,20 @@ def ancestor_name_keys(obj):
     return keys
 
 
-def group_trail_score(ancestor_keys, groups):
+def group_trail_score(ancestor_keys, group_key_sets):
     """How much of a record's Maya group trail the object's parents confirm.
+
+    ``group_key_sets`` is the record's group names already turned into key
+    sets by build_record_index, so this stays out of the hot path.
 
     Deliberately capped well below the gap between a full-path match and a
     name match, so a deep hierarchy can break a tie without ever outvoting a
     genuine full-path match.
     """
-    if not groups or not ancestor_keys:
+    if not group_key_sets or not ancestor_keys:
         return 0
     matched = sum(
-        1 for group in groups
-        if name_keys(group).intersection(ancestor_keys)
+        1 for keys in group_key_sets if keys & ancestor_keys
     )
     return min(matched, 5) * 5
 

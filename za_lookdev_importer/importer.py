@@ -18,6 +18,7 @@ from .materials import apply_face_assignments, build_material
 from .scene import (
     add_subdivision_modifiers,
     apply_visibility,
+    build_record_index,
     clear_scene_and_purge,
     find_mesh_record,
     organize_imported_objects,
@@ -93,6 +94,9 @@ def import_lookdev_package(
     assignments = []
     warnings = []
     mesh_records = list(package_data.get("meshes") or [])
+    # Indexed once: matching every object against every record, and
+    # re-deriving each record's name keys each time, was quadratic.
+    record_index = build_record_index(mesh_records)
     used_record_ids = set()
     matched_meshes = []
     group_cache = {}
@@ -100,7 +104,7 @@ def import_lookdev_package(
     visibility_count = 0
 
     for obj in imported_meshes:
-        mesh_record = find_mesh_record(obj, mesh_records, used_record_ids)
+        mesh_record = find_mesh_record(obj, record_index, used_record_ids)
         if not mesh_record:
             warnings.append('No Maya mesh record matched "{0}".'.format(obj.name))
             obj.data.materials.clear()

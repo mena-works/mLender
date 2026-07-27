@@ -62,7 +62,7 @@ za_lookdev_importer/     # Blender multi-file add-on
 tests/                   # amaca göre ayrılmış, ayrıntı tests/README.md
   check_contracts.py     # host gerekmez, saniyeler — en sık çalıştırılan
   host/                  # gerçek Maya ve gerçek Blender testleri
-  calibration/           # render eşleşmesi ve ölçek probları
+  calibration/           # render eşleşmesi, ölçek probları, performans rig'i
   docs/                  # ölçüm kayıtları (ışık, düzeltme node'ları)
 
 README.md                # Kullanıcı dokümantasyonu (Türkçe)
@@ -472,6 +472,8 @@ Kullanıcının elle doğrulaması gereken adımlar:
 - ❌ Displacement'a birim ölçeği ekleme; FBX birim dönüşümünü obje scale'ine
   koyar, vertex'ler Maya biriminde kalır, object space displacement zaten doğru
 - ❌ Displacement'ı shader'da arama; Maya onu shadingEngine'de tutar
+- ❌ Mesh başına bütün kayıtları tarama veya materyali her mesh için yeniden
+  okuma; ikisi de karesel, `benchmark_*.py` ile ölçüldü
 - ❌ Mesh eşleştirmesini yalnız isme dayandırma; aynı kısa isim farklı
   gruplarda tekrar eder ve meshler yer değiştirir, grup izi tie-breaker'dır
 - ❌ `blendColors`'ı Blender'ın Mix'iyle aynı sanma; faktör ters

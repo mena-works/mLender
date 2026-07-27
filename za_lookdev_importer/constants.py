@@ -8,7 +8,7 @@ message shape changes.
 
 import math
 
-BUILD_VERSION = "1.23.0"
+BUILD_VERSION = "1.24.0"
 
 LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505

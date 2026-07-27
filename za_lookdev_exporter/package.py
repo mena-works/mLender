@@ -104,8 +104,13 @@ def export_lookdev(
                         lights_in_selection
                     )
                 )
+        # One material usually covers many meshes, so its channels are read
+        # once and shared. A shader that baked is deliberately not cached:
+        # a bake belongs to the mesh whose UVs it was made against.
+        export_cache = {}
         mesh_records = [
-            mesh_record(shape, bake_context) for shape in mesh_shapes
+            mesh_record(shape, bake_context, export_cache)
+            for shape in mesh_shapes
         ]
         light_shapes = scene_light_shapes()
         camera_shapes = scene_camera_shapes()
