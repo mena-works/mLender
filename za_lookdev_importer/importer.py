@@ -12,6 +12,7 @@ from .constants import SUPPORTED_SCHEMA_VERSIONS
 from .cameras import import_cameras
 from .fbx import import_fbx, read_package_json, resolve_fbx_path
 from .animation import apply_scene_range
+from .colormanagement import apply_color_management
 from .lights import import_lights
 from .materials import apply_face_assignments, build_material
 from .scene import (
@@ -138,6 +139,8 @@ def import_lookdev_package(
         warnings,
     )
 
+    view_transform = apply_color_management(package_data, warnings)
+
     _remove_fbx_placeholder_materials(before_materials)
     purge_orphans()
 
@@ -154,6 +157,7 @@ def import_lookdev_package(
         )),
         "group_collection_count": len(group_cache),
         "visibility_count": visibility_count,
+        "view_transform": view_transform,
         "grouped_mesh_count": grouped_count,
         "subdivision_count": subdivision_count,
         "light_count": light_result["light_count"],

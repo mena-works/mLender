@@ -188,6 +188,31 @@ def main():
               any("remapValue" in warning for warning in result["warnings"]),
               result["warnings"])
 
+    print("\ncolour management")
+    # Blender's stock config has no ACES view transform on any installed
+    # version, so on this machine the honest outcome is a fallback plus a
+    # warning naming the config. A build with an ACES OCIO config would match
+    # exactly instead, and both are correct behaviour.
+    view_settings = bpy.context.scene.view_settings
+    applied = result["view_transform"]
+    check("some view transform was applied", bool(applied), applied)
+    check("the applied transform is one Blender actually has",
+          view_settings.view_transform == applied,
+          (view_settings.view_transform, applied))
+    matched = applied.startswith("ACES")
+    if matched:
+        check("this Blender has an ACES config, so it matched exactly", True)
+    else:
+        check("a mismatch is reported rather than left silent",
+              any("view transform" in warning for warning in result["warnings"]),
+              result["warnings"])
+        check("the warning names the OCIO config to point Blender at",
+              any(".ocio" in warning for warning in result["warnings"]),
+              [w for w in result["warnings"] if "view transform" in w])
+        check("AgX was not left in place pretending to match",
+              view_settings.view_transform != "AgX",
+              view_settings.view_transform)
+
     print("\nvisibility flags")
     shadow_only = object_named("glassCube")
     check("shadow-only object is hidden from the camera",

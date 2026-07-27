@@ -592,6 +592,48 @@ specularAnisotropy       -> Anisotropic
   5.2'de 0.005). Bu yüzden değer açıkça set edilir; varsayılana güvenmek aynı
   paketi iki sürümde farklı gösterirdi.
 
+## Renk yönetimi
+
+Aktarım doğru olduğu halde görüntünün "bir tuhaf" görünmesinin en sık sebebi
+budur: geometri, material ve ışıklar tutar, ama iki uygulama farklı tone
+mapping yapar.
+
+Maya'nın renk yönetimi ayarı artık pakete yazılıyor ve Blender'da kurulmaya
+çalışılıyor:
+
+```text
+renderingSpaceName    ACEScg
+viewTransformName     ACES 1.0 SDR-video (sRGB)
+displayName           sRGB
+configFilePath        ...\OCIO-configs\Maya2022-default\config.ocio
+```
+
+**Önemli sınır, ölçüldü:** Blender'ın kendi OCIO config'inde **hiçbir sürümde
+ACES view transform yok** (4.1, 4.5 ve 5.2'de tek tek denendi; sadece
+Standard, Raw, Filmic, Filmic Log, False Color, AgX ve 4.5'ten itibaren
+Khronos PBR Neutral var).
+
+Bu yüzden davranış şu:
+
+- Blender'da Maya'nın istediği transform **varsa** aynen kurulur. ACES config
+  yüklü bir Blender'da bu birebir eşleşir.
+- **Yoksa** en yakın karşılığı kurulur ve **uyarı yazılır** — hangi
+  transform'un istendiğini ve hangi OCIO config'e işaret edilmesi gerektiğini
+  söyleyerek:
+
+```text
+Maya was using the "ACES 1.0 SDR-video (sRGB)" view transform, which this
+Blender's colour config does not have; "Standard" was used instead. To match
+exactly, point Blender at the same OCIO config through the OCIO environment
+variable: C:/Program Files/Autodesk/Maya2023/resources/OCIO-configs/...
+```
+
+AgX'i olduğu gibi bırakıp "eşleşti" demek tek gerçekten yanıltıcı sonuç
+olurdu; onun yerine tanımlı bir transform kurulur.
+
+Maya'da renk yönetimi kapalıysa sahne ham lineer kabul edilir ve `Standard`
+kurulur.
+
 ## Görünürlük ve render bayrakları
 
 Maya'da kameraya gizlenmiş ama gölge bırakan bir obje eskiden Blender'a

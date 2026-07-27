@@ -23,7 +23,12 @@ from .animation import animation_info, sample_records
 from .cameras import camera_record, camera_sample, scene_camera_shapes
 from .fbx import export_fbx
 from .lights import light_record, light_sample, scene_light_shapes
-from .mayautils import maya_linear_unit, maya_path, meters_per_maya_unit
+from .mayautils import (
+    color_management_info,
+    maya_linear_unit,
+    maya_path,
+    meters_per_maya_unit,
+)
 from .meshes import mesh_record, mesh_transforms, scene_mesh_shapes
 
 
@@ -121,6 +126,7 @@ def export_lookdev(
             "maya_linear_unit": maya_linear_unit(),
             "meters_per_maya_unit": meters_per_maya_unit(),
             "animation": animation,
+            "color_management": color_management_info(),
         }
         write_json(json_path, payload)
     except Exception:

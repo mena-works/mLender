@@ -17,7 +17,7 @@ LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
 LIVELINK_PROTOCOL = "za_lookdev_livelink"
 LIVELINK_VERSION = 1
-EXPORT_SCHEMA_VERSION = 15
+EXPORT_SCHEMA_VERSION = 16
 
 LIGHT_NODE_TYPES = (
     "RedshiftPhysicalLight",
@@ -290,6 +290,26 @@ PLACEMENT_NUMERIC_ATTRS = {
     "noise_u": "noiseU",
     "noise_v": "noiseV",
 }
+
+# Colour management. Flag names read from a live Maya 2023 session, where the
+# defaults are the ACES config: renderingSpaceName "ACEScg" and
+# viewTransformName "ACES 1.0 SDR-video (sRGB)".
+#
+# The config path comes back with a <MAYA_RESOURCES> token rather than expanded,
+# so it is resolved before it goes in the package; the importer only has the
+# string to work with.
+COLOR_MANAGEMENT_FLAGS = {
+    "enabled": "cmEnabled",
+    "config_enabled": "cmConfigFileEnabled",
+    "config_path": "configFilePath",
+    "rendering_space": "renderingSpaceName",
+    "view_transform": "viewTransformName",
+    "view_name": "viewName",
+    "display": "displayName",
+    "output_transform": "outputTransformName",
+    "output_transform_enabled": "outputTransformEnabled",
+}
+MAYA_RESOURCES_TOKEN = "<MAYA_RESOURCES>"
 
 # Visibility and render flags, read from a live Maya 2023 / MtoA 5.4.8 mesh.
 #

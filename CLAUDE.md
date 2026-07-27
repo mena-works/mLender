@@ -49,6 +49,7 @@ za_lookdev_importer/     # Blender multi-file add-on
   lights.py              # Blender ışıkları, Dome World
   cameras.py             # Blender kameraları
   transforms.py          # Maya→Blender matris (ışık+kamera ortak)
+  colormanagement.py     # Maya OCIO ayarı → Blender view transform
   animation.py           # örneklenen animasyonu keyframe olarak kurma
   scene.py               # sahne temizleme, mesh eşleştirme, subdivision
   fbx.py                 # FBX import, paket dosyası çözümleme
@@ -470,6 +471,8 @@ Kullanıcının elle doğrulaması gereken adımlar:
 - ❌ Displacement'a birim ölçeği ekleme; FBX birim dönüşümünü obje scale'ine
   koyar, vertex'ler Maya biriminde kalır, object space displacement zaten doğru
 - ❌ Displacement'ı shader'da arama; Maya onu shadingEngine'de tutar
+- ❌ Blender'da ACES view transform olduğunu varsayma; stok OCIO config'de
+  yok, sadece özel config yüklüyse var
 - ❌ Görünürlük bayraklarını varsayılanlarıyla birlikte yazma; yalnız
   varsayılandan farklı olanı yaz, yoksa sahnenin istemediği bir şeyi
   bütün meshlere uygularsın

@@ -392,6 +392,21 @@ def main():
     check("remapValue reported as unrebuildable rather than dropped silently",
           "remapValue" in unsupported, unsupported)
 
+    print("\ncolour management")
+    color = payload.get("color_management") or {}
+    check("colour management exported", bool(color), color)
+    check("Maya 2023 defaults to the ACES config",
+          color.get("rendering_space") == "ACEScg", color.get("rendering_space"))
+    check("view transform name carried",
+          "ACES" in str(color.get("view_transform") or ""),
+          color.get("view_transform"))
+    check("display carried", color.get("display") == "sRGB",
+          color.get("display"))
+    check("the <MAYA_RESOURCES> token was resolved to a real path",
+          "<MAYA_RESOURCES>" not in str(color.get("config_path") or "")
+          and str(color.get("config_path") or "").endswith(".ocio"),
+          color.get("config_path"))
+
     print("\nvisibility flags")
     by_name = {record.get("mesh"): record for record in payload["meshes"]}
     glass_vis = (by_name.get("glassCube") or {}).get("visibility") or {}

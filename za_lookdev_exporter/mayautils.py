@@ -12,7 +12,11 @@ import os
 import maya.cmds as cmds
 import maya.mel as mel
 
-from .constants import METERS_PER_LINEAR_UNIT
+from .constants import (
+    COLOR_MANAGEMENT_FLAGS,
+    MAYA_RESOURCES_TOKEN,
+    METERS_PER_LINEAR_UNIT,
+)
 
 
 def attr_exists(node, attr):
@@ -241,6 +245,41 @@ def maya_path(path):
 
 def mel_path(path):
     return os.path.abspath(path).replace("\\", "/").replace('"', '\\"')
+
+
+def color_management_info():
+    """Maya's colour management settings, with the config path resolved.
+
+    Maya hands the config path back with a <MAYA_RESOURCES> token in it, which
+    means nothing outside Maya. It is expanded here so the importer can name a
+    real file when it has to tell the user their Blender config cannot supply
+    the same view transform.
+    """
+    result = {}
+    for semantic, flag in COLOR_MANAGEMENT_FLAGS.items():
+        try:
+            value = cmds.colorManagementPrefs(query=True, **{flag: True})
+        except Exception:
+            continue
+        if isinstance(value, bool):
+            result[semantic] = bool(value)
+        elif isinstance(value, (str, bytes)):
+            result[semantic] = str(value)
+    result["config_path"] = _resolve_maya_resources(
+        result.get("config_path", "")
+    )
+    return result
+
+
+def _resolve_maya_resources(path):
+    path = str(path or "")
+    if MAYA_RESOURCES_TOKEN not in path:
+        return path.replace("\\", "/")
+    root = os.environ.get("MAYA_LOCATION", "")
+    if not root:
+        return path.replace("\\", "/")
+    resolved = path.replace(MAYA_RESOURCES_TOKEN, os.path.join(root, "resources"))
+    return resolved.replace("\\", "/")
 
 
 def mel_eval_safe(command):
