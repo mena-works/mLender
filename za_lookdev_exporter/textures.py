@@ -17,9 +17,14 @@ from .constants import (
     BUMP_DEPTH_ATTR,
     BUMP_INTERP_ATTR,
     BUMP_NODE_TYPES,
+    CORRECTION_CONNECTED_INPUTS,
     CORRECTION_IGNORED_NODE_TYPES,
     CORRECTION_NODE_ATTRS,
     CORRECTION_OPERAND_INPUTS,
+    MULTIPLY_DIVIDE_OPERATIONS,
+    REMAP_INTERPOLATIONS,
+    REMAP_RAMP_ATTR,
+    REMAP_RAMP_CHILDREN,
     PLACEMENT_NODE_TYPE,
     PLACEMENT_NUMERIC_ATTRS,
     TEXTURE_PATH_ATTRS,
@@ -174,11 +179,74 @@ def correction_record(node, kind):
         if value is not None:
             parameters[semantic] = value
 
+    connected = CORRECTION_CONNECTED_INPUTS.get(kind)
+    if connected:
+        semantic, attrs = connected
+        name = connected_input_name(node, attrs)
+        if name:
+            parameters[semantic] = name
+
+    if kind == "multiplyDivide":
+        parameters["operation_name"] = MULTIPLY_DIVIDE_OPERATIONS.get(
+            int(parameters.get("operation") or 0), "none"
+        )
+
+    if kind == "remapValue":
+        ramp = remap_ramp(node)
+        if ramp:
+            parameters["ramp"] = ramp
+
     return {
         "type": kind,
         "node": node_label(node),
         "parameters": parameters,
     }
+
+
+def connected_input_name(node, attrs):
+    """Which of a node's inputs the upstream network actually arrived on.
+
+    blendColors is not symmetric, so rebuilding it needs to know whether the
+    texture came in on color1 or color2.
+    """
+    for attr in attrs:
+        if not attr_exists(node, attr):
+            continue
+        if cmds.listConnections(
+            node + "." + attr, source=True, destination=False
+        ):
+            return attr
+    return ""
+
+
+def remap_ramp(node):
+    """Read a remapValue curve into a plain list of stops.
+
+    The ramp is the whole point of the node; without it the transfer can only
+    reproduce a linear remap. Each stop carries its own interpolation in Maya,
+    which Blender states once for the whole ramp, so both are exported and the
+    importer decides.
+    """
+    try:
+        indices = cmds.getAttr(node + "." + REMAP_RAMP_ATTR, multiIndices=True)
+    except Exception:
+        return []
+    stops = []
+    for index in indices or []:
+        base = "{0}.{1}[{2}]".format(node, REMAP_RAMP_ATTR, index)
+        stop = {}
+        for semantic, child in REMAP_RAMP_CHILDREN.items():
+            value = plug_value(base + "." + child)
+            if value is None:
+                continue
+            if semantic == "interpolation":
+                stop[semantic] = REMAP_INTERPOLATIONS.get(int(value), "linear")
+            else:
+                stop[semantic] = float(value)
+        if "position" in stop and "value" in stop:
+            stops.append(stop)
+    stops.sort(key=lambda item: item["position"])
+    return stops
 
 
 def free_input_value(node, attrs):

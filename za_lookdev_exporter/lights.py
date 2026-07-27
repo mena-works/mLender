@@ -197,6 +197,40 @@ def scene_uses_light_linking():
     return False
 
 
+def shadow_linked_mesh_names(light_transform, mesh_lookup):
+    """Meshes that still cast this light's shadow, or None if unanswerable.
+
+    Maya keeps shadow linking in its own arrays, so a scene can restrict
+    shadows without restricting light. Same reasoning as the light side: an
+    empty answer means the question could not be answered, not that nothing
+    casts.
+    """
+    try:
+        linked = cmds.lightlink(
+            query=True, shadow=True, light=light_transform
+        ) or []
+    except Exception:
+        return None
+    if not linked:
+        return None
+    names = set()
+    for item in linked:
+        mesh = mesh_lookup.get(node_label(item))
+        if mesh:
+            names.add(mesh)
+    return sorted(names)
+
+
+def scene_uses_shadow_linking():
+    for linker in cmds.ls(type="lightLinker") or []:
+        try:
+            if cmds.getAttr(linker + ".shadowIgnore", multiIndices=True):
+                return True
+        except Exception:
+            continue
+    return False
+
+
 def linked_mesh_names(light_transform, mesh_lookup):
     """Exported meshes this light actually lights, or None if unanswerable.
 

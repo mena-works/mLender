@@ -253,12 +253,21 @@ def main():
         "never recorded: {0}".format(sorted(rebuilt - recorded)),
     )
     check(
-        "the two input maths nodes name an operand the builders read",
+        "every two input node names an operand the builders read",
         all(
-            operand in ("multiply", "add")
+            operand in ("multiply", "add", "operand", "other_color")
             for operand, _attrs
             in exporter_constants.CORRECTION_OPERAND_INPUTS.values()
         ),
+        sorted(
+            operand for operand, _attrs
+            in exporter_constants.CORRECTION_OPERAND_INPUTS.values()
+        ),
+    )
+    check(
+        "every node with an operand has a builder",
+        set(exporter_constants.CORRECTION_OPERAND_INPUTS)
+        <= set(importer.corrections.CORRECTION_BUILDERS),
     )
     check(
         "the file node is never mistaken for a correction",

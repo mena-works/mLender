@@ -137,12 +137,12 @@ def main():
           and props.name in {c.name for c in set_dressing.children})
     grouped = object_named("stdSurfCube")
     ungrouped = object_named("flatCube")
-    # Light linking receiver collections are a mechanism, not scene
-    # organisation, so a mesh can legitimately be in one of those as well.
+    # Light linking collections are a mechanism, not scene organisation, so a
+    # mesh can legitimately be in a receiver or a blocker collection too.
     def scene_collections(obj):
         return [
             c.name for c in obj.users_collection
-            if not c.name.startswith("ZA_Link_")
+            if not c.name.startswith(("ZA_Link_", "ZA_Shadow_"))
         ]
 
     check("the mesh sits in the innermost collection only",
@@ -190,9 +190,48 @@ def main():
               socket(std, "Base Color").links[0].from_node.name.startswith("ZA_CC"),
               socket(std, "Base Color").links[0].from_node.name)
 
-        check("the unrebuildable remapValue was reported",
-              any("remapValue" in warning for warning in result["warnings"]),
+        check("a node with no builder is still reported",
+              any("aiComposite" in warning for warning in result["warnings"]),
               result["warnings"])
+
+        ramp_node = by_name.get("ZA_Remap_Ramp")
+        check("the remapValue curve became a Colour Ramp",
+              ramp_node is not None, sorted(by_name))
+        if ramp_node:
+            stops = [
+                (round(e.position, 3), round(e.color[0], 3))
+                for e in ramp_node.color_ramp.elements
+            ]
+            check("all three stops rebuilt with their values",
+                  stops == [(0.0, 0.0), (0.4, 0.9), (1.0, 1.0)], stops)
+            check("Maya's Linear interpolation became Blender's LINEAR",
+                  ramp_node.color_ramp.interpolation == "LINEAR",
+                  ramp_node.color_ramp.interpolation)
+
+        check("clamp rebuilt as a max then a min",
+              by_name.get("ZA_Clamp_Min") is not None
+              and by_name.get("ZA_Clamp_Max") is not None,
+              sorted(n for n in by_name if "Clamp" in n))
+        clamp_max = by_name.get("ZA_Clamp_Max")
+        if clamp_max:
+            check("the ceiling is a per-channel minimum",
+                  clamp_max.blend_type == "DARKEN"
+                  and abs(clamp_max.inputs[2].default_value[0] - 0.75) < 1e-5,
+                  (clamp_max.blend_type,
+                   clamp_max.inputs[2].default_value[0]))
+
+        blend_node = by_name.get("ZA_Blend_Colors")
+        check("blendColors rebuilt", blend_node is not None)
+        if blend_node:
+            # Maya blender 0.25 keeps a quarter of color1, and Blender's
+            # Factor runs the other way, so it must be 0.75.
+            check("the blend factor was inverted for Blender",
+                  abs(blend_node.inputs[0].default_value - 0.75) < 1e-5,
+                  blend_node.inputs[0].default_value)
+            check("the texture stayed on the side Maya had it",
+                  blend_node.inputs[1].is_linked,
+                  (blend_node.inputs[1].is_linked,
+                   blend_node.inputs[2].is_linked))
 
     print("\nlight linking")
     area_light = object_named("aiArea")
@@ -217,6 +256,24 @@ def main():
                       receivers.name not in
                       {c.name for c in bpy.context.scene.collection.children},
                       receivers.name)
+
+    if area_light is not None:
+        linking = getattr(area_light, "light_linking", None)
+        blockers = getattr(linking, "blocker_collection", None) if linking else None
+        check("shadow linking became a blocker collection", blockers is not None,
+              blockers)
+        if blockers:
+            blocked = {obj.name for obj in blockers.objects}
+            check("the shadow-unlinked mesh is not a blocker",
+                  not any(n.startswith("openPbrCube") for n in blocked),
+                  sorted(blocked))
+            receivers = linking.receiver_collection
+            receiver_names = (
+                {o.name for o in receivers.objects} if receivers else set()
+            )
+            check("blockers and receivers are genuinely different sets",
+                  blocked != receiver_names,
+                  (sorted(blocked), sorted(receiver_names)))
 
     ies_light = object_named("aiIes")
     if ies_light is not None:

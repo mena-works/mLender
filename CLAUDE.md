@@ -472,6 +472,8 @@ Kullanıcının elle doğrulaması gereken adımlar:
 - ❌ Displacement'a birim ölçeği ekleme; FBX birim dönüşümünü obje scale'ine
   koyar, vertex'ler Maya biriminde kalır, object space displacement zaten doğru
 - ❌ Displacement'ı shader'da arama; Maya onu shadingEngine'de tutar
+- ❌ `blendColors`'ı Blender'ın Mix'iyle aynı sanma; faktör ters
+- ❌ `remapValue`'yu doğrusal sanma; rampası asıl işidir
 - ❌ Boş bir `lightlink` cevabını "hiçbir şeyi aydınlatmıyor" sanma;
   `defaultLightSet` dışındaki ışık böyle cevap verir ve kısıtlama yazmak onu
   Blender'da karartır

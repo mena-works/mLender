@@ -23,6 +23,7 @@ import bpy
 
 from .constants import (
     COLOUR_VALUED_CHANNELS,
+    DISPLACEMENT_SPACES,
     DEFAULT_EMISSION_STRENGTH,
     OPENPBR_EMISSION_LUMINANCE_SCALE,
     OPENPBR_EMISSION_SEMANTIC,
@@ -108,15 +109,6 @@ def apply_displacement(material, material_record, warnings):
     if not displacement.get("enabled"):
         return False
 
-    if displacement.get("vector"):
-        warnings.append(
-            'Vector displacement on "{0}" was not rebuilt; only scalar height '
-            "displacement is transferred.".format(
-                material_record.get("material") or ""
-            )
-        )
-        return False
-
     nodes = material.node_tree.nodes
     links = material.node_tree.links
     output = next(
@@ -128,16 +120,26 @@ def apply_displacement(material, material_record, warnings):
     if target is None:
         return False
 
-    node = nodes.new("ShaderNodeDisplacement")
+    is_vector = bool(displacement.get("vector"))
+    node = nodes.new(
+        "ShaderNodeVectorDisplacement" if is_vector else "ShaderNodeDisplacement"
+    )
     node.name = "ZA_Displacement"
     node.label = "Maya Displacement"
+    # Object space unless Maya said otherwise. Measured on the imported FBX:
+    # the unit conversion lands on the object's scale while vertex coordinates
+    # stay in Maya units, so object space needs no unit term.
+    space = DISPLACEMENT_SPACES.get(
+        str(displacement.get("vector_space") or "").lower(), "OBJECT"
+    )
     if hasattr(node, "space"):
         try:
-            node.space = "OBJECT"
+            node.space = space
         except Exception:
             pass
 
-    # Sockets by index: Height, Midlevel, Scale, Normal.
+    # Sockets by index on both nodes: the map, Midlevel, Scale. The scalar
+    # node adds a Normal input the vector one does not have.
     apply_record_to_socket(
         material, node, node.inputs[0], "displacement", displacement, warnings
     )

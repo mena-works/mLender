@@ -8,7 +8,7 @@ message shape changes.
 
 import math
 
-BUILD_VERSION = "1.21.0"
+BUILD_VERSION = "1.22.0"
 
 LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
@@ -21,7 +21,7 @@ LIVELINK_EVENT = "lookdev_package_ready"
 # 3 added glass channels and 4 added UDIM on the main branch; 5 is this
 # branch with both, plus the Arnold channels.
 SUPPORTED_SCHEMA_VERSIONS = (
-    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
 )
 
 MAX_MESSAGE_BYTES = 32 * 1024 * 1024
@@ -294,6 +294,24 @@ HOLDOUT_ATTR = "is_holdout"
 # turn a constant orbit into a stuttering one.
 ANIMATION_INTERPOLATION = "LINEAR"
 DEFAULT_FPS = 24.0
+
+# Maya's vector displacement space onto Blender's. Both applications offer the
+# same three, so this is a straight rename rather than an approximation.
+DISPLACEMENT_SPACES = {
+    "": "OBJECT",
+    "object": "OBJECT",
+    "world": "WORLD",
+    "tangent": "TANGENT",
+}
+
+# Maya states ramp interpolation per stop, Blender once for the whole ramp.
+# Maya's enum was measured as None:Linear:Smooth:Spline.
+RAMP_INTERPOLATIONS = {
+    "none": "CONSTANT",
+    "linear": "LINEAR",
+    "smooth": "EASE",
+    "spline": "B_SPLINE",
+}
 
 # Rebuilt colour correction. A setting within this of its neutral value builds
 # no node at all, which keeps an untouched correction node out of the tree.

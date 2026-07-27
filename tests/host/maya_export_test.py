@@ -129,11 +129,30 @@ def build_scene():
     cmds.connectAttr(disp_node + ".displacement", "dispCube_SG.displacementShader",
                      force=True)
 
-    # remapValue has no Blender equivalent, so it must be reported rather than
-    # silently stepped over.
+    # remapValue with a real curve, which is the whole point of the node: the
+    # two default stops plus one that bends it away from a straight line.
     remap = cmds.shadingNode("remapValue", asUtility=True, name="remapCoat")
+    cmds.setAttr(remap + ".value[2].value_Position", 0.4)
+    cmds.setAttr(remap + ".value[2].value_FloatValue", 0.9)
+    cmds.setAttr(remap + ".value[2].value_Interp", 1)
     cmds.connectAttr(file_node + ".outAlpha", remap + ".inputValue", force=True)
     cmds.connectAttr(remap + ".outValue", std + ".coat", force=True)
+
+    # A clamp and a blendColors on another channel, so both new builders run.
+    clamp_node = cmds.shadingNode("clamp", asUtility=True, name="clampSheen")
+    cmds.setAttr(clamp_node + ".max", 0.75, 0.75, 0.75, type="double3")
+    cmds.setAttr(clamp_node + ".min", 0.1, 0.1, 0.1, type="double3")
+    cmds.connectAttr(file_node + ".outColor", clamp_node + ".input", force=True)
+    blend_node = cmds.shadingNode("blendColors", asUtility=True, name="blendTint")
+    cmds.setAttr(blend_node + ".blender", 0.25)
+    cmds.setAttr(blend_node + ".color2", 1.0, 0.0, 0.0, type="double3")
+    cmds.connectAttr(clamp_node + ".output", blend_node + ".color1", force=True)
+    cmds.connectAttr(blend_node + ".output", std + ".sheenColor", force=True)
+
+    # aiComposite still has no builder, so the reporting path stays covered.
+    composite = cmds.shadingNode("aiComposite", asUtility=True, name="compProbe")
+    cmds.connectAttr(file_node + ".outColor", composite + ".A", force=True)
+    cmds.connectAttr(composite + ".outColor", std + ".coatColor", force=True)
 
     # A UDIM set, driven through Maya's own tiling mode rather than a token in
     # the path, which is the case a naive path scan gets wrong.
@@ -197,6 +216,9 @@ def build_scene():
         pass
     cmds.lightlink(b=True, light=area_tf, object="flatCube")
     cmds.lightlink(b=True, light=area_tf, object="glassCube")
+    # Shadow linking is stored separately from light linking, so it is broken
+    # on a different mesh to prove the two are carried independently.
+    cmds.lightlink(b=True, shadow=True, light=area_tf, object="openPbrCube")
 
     dome = cmds.createNode("aiSkyDomeLight", name="aiDomeShape")
     cmds.setAttr(dome + ".intensity", 2.0)
@@ -394,12 +416,87 @@ def main():
     unsupported = [
         entry.get("node_type")
         for entry in (
-            std.get("coat", {}).get("texture", {})
+            std.get("coat_tint", {}).get("texture", {})
             .get("unsupported_corrections") or []
         )
     ]
-    check("remapValue reported as unrebuildable rather than dropped silently",
-          "remapValue" in unsupported, unsupported)
+    check("a node with no builder is still reported, not dropped silently",
+          "aiComposite" in unsupported, unsupported)
+
+    coat_corrections = [
+        entry.get("type")
+        for entry in ((std.get("coat", {}).get("texture") or {})
+                      .get("corrections") or [])
+    ]
+    check("remapValue is rebuilt now rather than reported",
+          "remapValue" in coat_corrections, coat_corrections)
+    remap_params = next(
+        (entry.get("parameters", {})
+         for entry in ((std.get("coat", {}).get("texture") or {})
+                       .get("corrections") or [])
+         if entry.get("type") == "remapValue"),
+        {},
+    )
+    ramp = remap_params.get("ramp") or []
+    check("the ramp curve was read", len(ramp) == 3, ramp)
+    check("ramp stops arrive sorted by position",
+          [round(stop["position"], 3) for stop in ramp] == [0.0, 0.4, 1.0],
+          [stop.get("position") for stop in ramp])
+    check("the bent stop kept its value",
+          len(ramp) > 1 and abs(ramp[1]["value"] - 0.9) < 1e-4,
+          ramp[1] if len(ramp) > 1 else None)
+
+    sheen_corrections = [
+        entry.get("type")
+        for entry in ((std.get("sheen_tint", {}).get("texture") or {})
+                      .get("corrections") or [])
+    ]
+    check("clamp and blendColors recorded, nearest the texture first",
+          sheen_corrections == ["clamp", "blendColors"], sheen_corrections)
+    blend_params = next(
+        (entry.get("parameters", {})
+         for entry in ((std.get("sheen_tint", {}).get("texture") or {})
+                       .get("corrections") or [])
+         if entry.get("type") == "blendColors"),
+        {},
+    )
+    check("blendColors knows which input the texture arrived on",
+          blend_params.get("connected_input") == "color1", blend_params)
+
+    print("\nselection scope")
+    # Selecting the group is how an asset is normally picked, so the selection
+    # must expand to its descendants rather than be read literally.
+    cmds.select("setDressing", replace=True)
+    selected_result = za.export_lookdev(
+        os.path.join(OUT, "selected"), selected_only=True
+    )
+    with open(selected_result["json_path"], "r") as handle:
+        selected_payload = json.load(handle)
+    selected_names = {
+        record.get("mesh") for record in selected_payload["meshes"]
+    }
+    check("only the selected group's mesh was exported",
+          selected_names == {"stdSurfCube"}, sorted(selected_names))
+    check("the package says it was a selection",
+          selected_payload.get("selected_only") is True)
+    check("lighting still travels whole",
+          selected_payload["light_count"] == payload["light_count"],
+          (selected_payload["light_count"], payload["light_count"]))
+    check("cameras still travel whole",
+          selected_payload["camera_count"] == payload["camera_count"])
+
+    cmds.select(clear=True)
+    failed = False
+    try:
+        za.export_lookdev(os.path.join(OUT, "empty"), selected_only=True)
+    except RuntimeError:
+        failed = True
+    check("an empty selection fails loudly rather than exporting nothing",
+          failed)
+    check("the failed export left no package folder behind",
+          not os.path.isdir(os.path.join(OUT, "empty", "MTB_Z_A_01")),
+          os.listdir(os.path.join(OUT, "empty"))
+          if os.path.isdir(os.path.join(OUT, "empty")) else "no folder")
 
     print("\nlight linking")
     lights_by_name = {light.get("name"): light for light in payload["lights"]}
@@ -423,6 +520,12 @@ def main():
     # This light was never added to defaultLightSet, so Maya answers nothing
     # for it. That must read as "no restriction", never as "lights nothing",
     # which would black the light out in Blender.
+    shadow = area_light.get("shadow_meshes")
+    check("shadow linking carried separately from light linking",
+          shadow is not None and "openPbrCube" not in shadow, shadow)
+    check("the two restrictions are genuinely different sets",
+          shadow != linked, (shadow, linked))
+
     check("an unanswerable light gets no restriction rather than an empty one",
           "linked_meshes" not in unrestricted,
           unrestricted.get("linked_meshes"))

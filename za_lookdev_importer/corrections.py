@@ -33,6 +33,7 @@ from .constants import (
     ARNOLD_CONTRAST_PIVOT,
     CORRECTION_EPSILON,
     CORRECTION_NODE_SPACING,
+    RAMP_INTERPOLATIONS,
 )
 from .utils import scalar
 
@@ -281,6 +282,166 @@ def _build_range(material, output, params, warnings):
     return output
 
 
+def _build_clamp(material, output, params, warnings):
+    """Maya's clamp, as a max against the floor then a min against the ceiling.
+
+    Mix's LIGHTEN is a per-channel max and DARKEN a per-channel min, so the
+    pair is exactly a clamp and needs no Separate/Combine detour.
+
+    A freshly made clamp node has both bounds at zero, which really does clamp
+    everything to black in Maya. That is reproduced rather than second-guessed.
+    """
+    low = _rgb(params.get("clamp_min"), 0.0)
+    high = _rgb(params.get("clamp_max"), 0.0)
+    if any(abs(c) > CORRECTION_EPSILON for c in low):
+        output = _mix_rgb(material, output, "LIGHTEN", low, "ZA_Clamp_Min")
+    output = _mix_rgb(material, output, "DARKEN", high, "ZA_Clamp_Max")
+    return output
+
+
+def _build_blend_colors(material, output, params, warnings):
+    """blendColors, with Maya's blend the reverse of Blender's.
+
+    Measured on both sides: Maya's blender of 1 returns color1, while Blender's
+    Factor of 1 returns the second colour. The factor is therefore inverted,
+    and which side the texture arrived on decides which slot it takes.
+    """
+    blend = scalar(params.get("blender"), 0.5)
+    other = _rgb(params.get("other_color"), 0.0)
+    connected = str(params.get("connected_input") or "color1")
+
+    node = _chain_node(material, output, "ShaderNodeMixRGB", "ZA_Blend_Colors")
+    node.blend_type = "MIX"
+    if connected == "color2":
+        # The texture is Maya's color2, which is the side blender fades out.
+        node.inputs[0].default_value = max(0.0, min(1.0, blend))
+        node.inputs[1].default_value = (other[0], other[1], other[2], 1.0)
+        material.node_tree.links.new(output, node.inputs[2])
+    else:
+        node.inputs[0].default_value = max(0.0, min(1.0, 1.0 - blend))
+        material.node_tree.links.new(output, node.inputs[1])
+        node.inputs[2].default_value = (other[0], other[1], other[2], 1.0)
+    return node.outputs[0]
+
+
+def _build_multiply_divide(material, output, params, warnings):
+    """multiplyDivide, for the two operations Mix can express."""
+    operation = str(params.get("operation_name") or "none")
+    operand = _rgb(params.get("operand"), 1.0)
+    if operation == "none":
+        return output
+    if operation == "multiply":
+        if all(abs(c - 1.0) <= CORRECTION_EPSILON for c in operand):
+            return output
+        return _mix_rgb(material, output, "MULTIPLY", operand, "ZA_Multiply")
+    if operation == "divide":
+        return _mix_rgb(material, output, "DIVIDE", operand, "ZA_Divide")
+    warnings.append(
+        'multiplyDivide "{0}" was not rebuilt; Mix has no such blend '
+        "type.".format(operation)
+    )
+    return output
+
+
+def _build_remap_value(material, output, params, warnings):
+    """remapValue, curve included, as a Map Range into a Colour Ramp.
+
+    The ramp is the point of the node. Rebuilding only the linear part, which
+    is all the previous version could do, silently dropped whatever curve the
+    artist actually drew.
+
+    Maya states interpolation per stop and Blender states it once for the whole
+    ramp, so the first stop's setting is used and a mixed ramp is reported.
+    """
+    input_min = scalar(params.get("input_min"), 0.0)
+    input_max = scalar(params.get("input_max"), 1.0)
+    output_min = scalar(params.get("output_min"), 0.0)
+    output_max = scalar(params.get("output_max"), 1.0)
+    stops = params.get("ramp") or []
+
+    # Normalise into the ramp's 0..1 domain first.
+    span = input_max - input_min
+    if abs(span) > CORRECTION_EPSILON and (
+        abs(input_min) > CORRECTION_EPSILON
+        or abs(input_max - 1.0) > CORRECTION_EPSILON
+    ):
+        gain = 1.0 / span
+        output = _mix_rgb(
+            material, output, "MULTIPLY", [gain] * 3, "ZA_Remap_Normalise"
+        )
+        offset = -input_min * gain
+        if abs(offset) > CORRECTION_EPSILON:
+            output = _mix_rgb(
+                material, output, "ADD", [offset] * 3, "ZA_Remap_Offset"
+            )
+
+    if _ramp_is_meaningful(stops):
+        output = _build_ramp(material, output, stops, warnings)
+
+    out_span = output_max - output_min
+    if abs(out_span - 1.0) > CORRECTION_EPSILON:
+        output = _mix_rgb(
+            material, output, "MULTIPLY", [out_span] * 3, "ZA_Remap_Scale"
+        )
+    if abs(output_min) > CORRECTION_EPSILON:
+        output = _mix_rgb(
+            material, output, "ADD", [output_min] * 3, "ZA_Remap_Output"
+        )
+    return output
+
+
+def _ramp_is_meaningful(stops):
+    """Whether a ramp does anything a straight line would not.
+
+    A fresh remapValue holds (0, 0) and (1, 1), which is the identity; building
+    a Colour Ramp for it would only clutter the tree.
+    """
+    if len(stops) < 2:
+        return False
+    for stop in stops:
+        position = scalar(stop.get("position"), 0.0)
+        value = scalar(stop.get("value"), 0.0)
+        if abs(position - value) > 1e-4:
+            return True
+    return len(stops) > 2
+
+
+def _build_ramp(material, output, stops, warnings):
+    node = _chain_node(material, output, "ShaderNodeValToRGB", "ZA_Remap_Ramp")
+    ramp = node.color_ramp
+
+    modes = set(str(stop.get("interpolation") or "linear") for stop in stops)
+    if len(modes) > 1:
+        warnings.append(
+            "remapValue stops use more than one interpolation ({0}); Blender "
+            "sets it once for the whole ramp, so the first was used.".format(
+                ", ".join(sorted(modes))
+            )
+        )
+    interpolation = RAMP_INTERPOLATIONS.get(
+        str(stops[0].get("interpolation") or "linear"), "LINEAR"
+    )
+    try:
+        ramp.interpolation = interpolation
+    except Exception:
+        pass
+
+    # A new ramp already holds two elements and the first cannot be removed,
+    # so they are reused and the rest appended.
+    while len(ramp.elements) > len(stops):
+        ramp.elements.remove(ramp.elements[-1])
+    while len(ramp.elements) < len(stops):
+        ramp.elements.new(1.0)
+
+    for element, stop in zip(ramp.elements, stops):
+        value = scalar(stop.get("value"), 0.0)
+        element.position = max(0.0, min(1.0, scalar(stop.get("position"), 0.0)))
+        element.color = (value, value, value, 1.0)
+
+    material.node_tree.links.new(output, node.inputs[0])
+    return node.outputs[0]
+
+
 CORRECTION_BUILDERS = {
     "aiColorCorrect": _build_color_correct,
     "gammaCorrect": _build_gamma_correct,
@@ -288,4 +449,8 @@ CORRECTION_BUILDERS = {
     "aiAdd": _build_add,
     "reverse": _build_reverse,
     "aiRange": _build_range,
+    "clamp": _build_clamp,
+    "blendColors": _build_blend_colors,
+    "multiplyDivide": _build_multiply_divide,
+    "remapValue": _build_remap_value,
 }

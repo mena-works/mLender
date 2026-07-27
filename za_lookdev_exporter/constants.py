@@ -17,7 +17,7 @@ LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
 LIVELINK_PROTOCOL = "za_lookdev_livelink"
 LIVELINK_VERSION = 1
-EXPORT_SCHEMA_VERSION = 18
+EXPORT_SCHEMA_VERSION = 19
 
 LIGHT_NODE_TYPES = (
     "RedshiftPhysicalLight",
@@ -395,6 +395,23 @@ DISPLACEMENT_NODE_TYPES = ("displacementShader",)
 DISPLACEMENT_NODE_INPUT = "displacement"
 DISPLACEMENT_NODE_SCALE = "scale"
 DISPLACEMENT_NODE_VECTOR = "vectorDisplacement"
+DISPLACEMENT_MODE_ATTR = "displacementMode"
+DISPLACEMENT_SPACE_ATTR = "vectorSpace"
+
+# Measured enums. displacementMode is the authoritative flag for vector
+# displacement, and it carries the space, so the separate vectorSpace is
+# only the fallback for a network that set it the older way.
+DISPLACEMENT_MODES = {
+    0: "scalar",
+    1: "vector_tangent",
+    2: "vector_object",
+    3: "vector_world",
+}
+DISPLACEMENT_SPACES = {
+    0: "world",
+    1: "object",
+    2: "tangent",
+}
 
 # Mesh level Arnold settings. The height is the multiplier and the zero value
 # is the map level that means "no displacement", which is exactly what
@@ -456,13 +473,67 @@ CORRECTION_NODE_ATTRS = {
     "reverse": {},
     "aiMultiply": {},
     "aiAdd": {},
+    "clamp": {
+        "clamp_min": "min",
+        "clamp_max": "max",
+    },
+    "blendColors": {
+        "blender": "blender",
+    },
+    "multiplyDivide": {
+        "operation": "operation",
+    },
+    "remapValue": {
+        "input_min": "inputMin",
+        "input_max": "inputMax",
+        "output_min": "outputMin",
+        "output_max": "outputMax",
+    },
 }
 
-# aiMultiply and aiAdd take two interchangeable inputs, so which one holds the
-# constant depends on how the network was wired. The free input is the operand.
+# multiplyDivide's operation enum, measured: No operation:Multiply:Divide:Power.
+# Power has no Mix blend type, so it is reported rather than approximated.
+MULTIPLY_DIVIDE_OPERATIONS = {
+    0: "none",
+    1: "multiply",
+    2: "divide",
+    3: "power",
+}
+
+# remapValue keeps its curve in a ramp array. Measured on Maya 2023: each entry
+# carries a position, a float value and its own interpolation, and a fresh node
+# already holds two entries, (0, 0) and (1, 1).
+REMAP_RAMP_ATTR = "value"
+REMAP_RAMP_CHILDREN = {
+    "position": "value_Position",
+    "value": "value_FloatValue",
+    "interpolation": "value_Interp",
+}
+# value_Interp enum, measured: None:Linear:Smooth:Spline.
+REMAP_INTERPOLATIONS = {
+    0: "none",
+    1: "linear",
+    2: "smooth",
+    3: "spline",
+}
+
+# Nodes taking two interchangeable inputs, where which one holds the constant
+# depends on how the network was wired. The free input is the operand.
+#
+# blendColors is here too, and its blend is the reverse of Blender's: measured,
+# Maya's blender of 1 returns color1 while Blender's Factor of 1 returns the
+# second colour.
 CORRECTION_OPERAND_INPUTS = {
     "aiMultiply": ("multiply", ("input1", "input2")),
     "aiAdd": ("add", ("input1", "input2")),
+    "multiplyDivide": ("operand", ("input1", "input2")),
+    "blendColors": ("other_color", ("color1", "color2")),
+}
+
+# Which of the two inputs the upstream texture actually arrived on. blendColors
+# is not symmetric, so rebuilding it needs to know which side is which.
+CORRECTION_CONNECTED_INPUTS = {
+    "blendColors": ("connected_input", ("color1", "color2")),
 }
 
 # Nodes that legitimately appear in a texture chain and carry no correction of

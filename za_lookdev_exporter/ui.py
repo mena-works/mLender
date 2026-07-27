@@ -26,7 +26,7 @@ def show_ui():
         WINDOW_NAME,
         title=TOOL_NAME,
         sizeable=False,
-        widthHeight=(620, 420),
+        widthHeight=(620, 470),
     )
     cmds.columnLayout(
         adjustableColumn=True,
@@ -67,6 +67,12 @@ def show_ui():
         value1=LIVELINK_PORT,
         adjustableColumn=2,
         columnWidth2=(120, 120),
+    )
+    selection_field = cmds.checkBoxGrp(
+        label="Export Scope",
+        label1="Selected objects only, instead of the whole scene",
+        value1=False,
+        columnWidth2=(120, 400),
     )
     bake_field = cmds.checkBoxGrp(
         label="Bake Procedurals",
@@ -119,6 +125,7 @@ def show_ui():
             animation_field,
             frame_range_field,
             collect_field,
+            selection_field,
         ),
     )
     cmds.showWindow(window)
@@ -160,6 +167,7 @@ def export_from_ui(
     animation_field=None,
     frame_range_field=None,
     collect_field=None,
+    selection_field=None,
 ):
     """Export, then notify Blender, reporting each failure mode separately.
 
@@ -197,9 +205,16 @@ def export_from_ui(
     if collect_field is not None:
         collect = bool(cmds.checkBoxGrp(collect_field, query=True, value1=True))
 
+    selected_only = False
+    if selection_field is not None:
+        selected_only = bool(
+            cmds.checkBoxGrp(selection_field, query=True, value1=True)
+        )
+
     try:
         result = export_lookdev(
             output_folder,
+            selected_only=selected_only,
             bake_procedurals=bake,
             bake_resolution=bake_resolution,
             collect_textures_into_package=collect,

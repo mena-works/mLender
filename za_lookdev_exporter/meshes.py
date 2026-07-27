@@ -7,6 +7,10 @@ import maya.cmds as cmds
 from .constants import (
     DISPLACEMENT_ENGINE_PLUG,
     DISPLACEMENT_MESH_ATTRS,
+    DISPLACEMENT_MODES,
+    DISPLACEMENT_MODE_ATTR,
+    DISPLACEMENT_SPACES,
+    DISPLACEMENT_SPACE_ATTR,
     DISPLACEMENT_NODE_INPUT,
     DISPLACEMENT_NODE_SCALE,
     DISPLACEMENT_NODE_TYPES,
@@ -44,23 +48,77 @@ from .shaders import shader_channels
 from .textures import texture_from_plug
 
 
-def scene_mesh_shapes():
-    """Every renderable mesh shape in the scene.
+def scene_mesh_shapes(selected_only=False):
+    """Every renderable mesh shape in the scene, or under the selection."""
+    if selected_only:
+        return selected_mesh_shapes()
+    return unique([
+        shape for shape in cmds.ls(type="mesh", long=True) or []
+        if usable_mesh_shape(shape)
+    ])
+
+
+def selected_mesh_shapes():
+    """Mesh shapes under the current selection, with groups expanded.
+
+    Selecting the group that holds an asset is the normal way to pick it, so
+    the selection is expanded to its descendants rather than taken literally;
+    a literal reading would export nothing for the most common selection.
+    """
+    selection = cmds.ls(selection=True, long=True) or []
+    if not selection:
+        return []
+    nodes = list(selection)
+    try:
+        nodes.extend(
+            cmds.listRelatives(
+                selection, allDescendents=True, fullPath=True
+            ) or []
+        )
+    except Exception:
+        pass
+    return unique([
+        node for node in nodes
+        if node_type(node) == "mesh" and usable_mesh_shape(node)
+    ])
+
+
+def usable_mesh_shape(shape):
+    """Whether a mesh shape can be exported at all.
 
     Intermediate objects belong to construction history and parentless shapes
     cannot be exported, so both are skipped.
     """
-    result = []
-    for shape in cmds.ls(type="mesh", long=True) or []:
-        try:
-            if cmds.getAttr(shape + ".intermediateObject"):
-                continue
-        except Exception:
-            pass
-        if not parent_of(shape):
-            continue
-        result.append(shape)
-    return unique(result)
+    try:
+        if cmds.getAttr(shape + ".intermediateObject"):
+            return False
+    except Exception:
+        pass
+    return bool(parent_of(shape))
+
+
+def selected_light_count():
+    """Lights in the selection, so the user can be told they are not filtered.
+
+    Lighting always travels whole: an asset exported without its lighting is
+    not a lookdev package, it is a dark one.
+    """
+    selection = cmds.ls(selection=True, long=True) or []
+    if not selection:
+        return 0
+    nodes = list(selection)
+    try:
+        nodes.extend(
+            cmds.listRelatives(
+                selection, allDescendents=True, fullPath=True
+            ) or []
+        )
+    except Exception:
+        pass
+    return len([
+        node for node in unique(nodes)
+        if "light" in node_type(node).lower()
+    ])
 
 
 def mesh_transforms(mesh_shapes):
@@ -331,10 +389,23 @@ def displacement_info(mesh_shape, shading_engine, bake_context=None):
     vector = False
     node_label_name = node_label(source)
 
+    space = ""
     if node_type(source) in DISPLACEMENT_NODE_TYPES:
         scale = _number_or(plug_value(source + "." + DISPLACEMENT_NODE_SCALE), 1.0)
-        vector = _vector_displacement_connected(source)
-        height_plug = source + "." + DISPLACEMENT_NODE_INPUT
+        mode = DISPLACEMENT_MODES.get(
+            int(plug_value(source + "." + DISPLACEMENT_MODE_ATTR) or 0), "scalar"
+        )
+        vector = mode != "scalar" or _vector_displacement_connected(source)
+        if vector:
+            space = mode.replace("vector_", "") if mode != "scalar" else ""
+            if not space:
+                space = DISPLACEMENT_SPACES.get(
+                    int(plug_value(source + "." + DISPLACEMENT_SPACE_ATTR) or 1),
+                    "object",
+                )
+            height_plug = source + "." + DISPLACEMENT_NODE_VECTOR
+        else:
+            height_plug = source + "." + DISPLACEMENT_NODE_INPUT
     else:
         # A texture straight into the engine plug; the engine plug itself is
         # what carries the map.
@@ -357,6 +428,7 @@ def displacement_info(mesh_shape, shading_engine, bake_context=None):
         "node_type": node_type(source),
         "scale": scale,
         "vector": vector,
+        "vector_space": space,
         "subdivision_enabled": bool(
             subdivision_info(mesh_shape).get("enabled")
         ),

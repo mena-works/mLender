@@ -29,6 +29,8 @@ from .lights import (
     linked_mesh_names,
     scene_light_shapes,
     scene_uses_light_linking,
+    scene_uses_shadow_linking,
+    shadow_linked_mesh_names,
 )
 from .mayautils import (
     color_management_info,
@@ -37,7 +39,12 @@ from .mayautils import (
     meters_per_maya_unit,
     parent_of,
 )
-from .meshes import mesh_record, mesh_transforms, scene_mesh_shapes
+from .meshes import (
+    mesh_record,
+    mesh_transforms,
+    scene_mesh_shapes,
+    selected_light_count,
+)
 
 
 PACKAGE_PATTERN = re.compile(
@@ -48,6 +55,7 @@ PACKAGE_PATTERN = re.compile(
 
 def export_lookdev(
     output_folder,
+    selected_only=False,
     bake_procedurals=True,
     bake_resolution=DEFAULT_BAKE_RESOLUTION,
     collect_textures_into_package=False,
@@ -80,9 +88,22 @@ def export_lookdev(
     )
 
     try:
-        mesh_shapes = scene_mesh_shapes()
+        mesh_shapes = scene_mesh_shapes(selected_only)
         if not mesh_shapes:
-            raise RuntimeError("The Maya scene contains no exportable mesh.")
+            raise RuntimeError(
+                "Nothing selected contains an exportable mesh."
+                if selected_only
+                else "The Maya scene contains no exportable mesh."
+            )
+        if selected_only:
+            lights_in_selection = selected_light_count()
+            if lights_in_selection:
+                warnings.append(
+                    "Selection held {0} light(s); lighting is always exported "
+                    "in full, so they were not filtered.".format(
+                        lights_in_selection
+                    )
+                )
         mesh_records = [
             mesh_record(shape, bake_context) for shape in mesh_shapes
         ]
@@ -126,6 +147,7 @@ def export_lookdev(
             "package_name": package_name,
             "package_folder": maya_path(package_folder),
             "fbx_file": maya_path(fbx_path),
+            "selected_only": bool(selected_only),
             "mesh_count": len(mesh_records),
             "meshes": mesh_records,
             "light_count": len(light_records),
@@ -182,7 +204,9 @@ def _apply_light_linking(light_records, light_shapes, mesh_records):
     written for a light that still lights everything: the importer's job is
     only to reproduce restrictions, and an absent field means no restriction.
     """
-    if not scene_uses_light_linking():
+    uses_light = scene_uses_light_linking()
+    uses_shadow = scene_uses_shadow_linking()
+    if not uses_light and not uses_shadow:
         return 0
 
     lookup = {}
@@ -202,11 +226,16 @@ def _apply_light_linking(light_records, light_shapes, mesh_records):
 
     restricted = 0
     for record, shape in zip(light_records, light_shapes):
-        linked = linked_mesh_names(parent_of(shape), lookup)
-        if linked is None or set(linked) == every_mesh:
-            continue
-        record["linked_meshes"] = linked
-        restricted += 1
+        transform = parent_of(shape)
+        if uses_light:
+            linked = linked_mesh_names(transform, lookup)
+            if linked is not None and set(linked) != every_mesh:
+                record["linked_meshes"] = linked
+                restricted += 1
+        if uses_shadow:
+            casting = shadow_linked_mesh_names(transform, lookup)
+            if casting is not None and set(casting) != every_mesh:
+                record["shadow_meshes"] = casting
     return restricted
 
 

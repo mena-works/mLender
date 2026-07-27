@@ -647,7 +647,9 @@ bir receiver collection'da olabilir, bu normaldir.
   ışığı Blender'da tamamen karartırdı. İki hata eşit değil: yanlış kısıtlamak ışığı
   yok eder, kısıtlamamak sadece muhtemelen olmayan bir kısıtlamayı kaçırır.
 
-Gölge linking (shadow linking) aktarılmıyor.
+**Gölge linking ayrıca aktarılır.** Maya onu kendi dizilerinde tutar, yani bir
+sahne ışığı kısıtlamadan yalnız gölgeyi kısıtlayabilir. Blender'daki karşılığı
+`blocker_collection`'dır — ışığı engelleyen, yani gölgesini bırakan objeler.
 
 ## Renk yönetimi
 
@@ -690,6 +692,20 @@ olurdu; onun yerine tanımlı bir transform kurulur.
 
 Maya'da renk yönetimi kapalıysa sahne ham lineer kabul edilir ve `Standard`
 kurulur.
+
+## Export kapsamı
+
+`Export Scope` kutusu işaretlenirse sahnenin tamamı yerine **yalnız seçili
+objeler** gönderilir. Tek bir asset üzerinde çalışırken her gönderimde tüm
+sahneyi paketlemek gereksiz.
+
+- **Seçim gruplara açılır.** Bir asset'i seçmenin normal yolu onu tutan grubu
+  seçmektir; seçimi harfi harfine okumak en yaygın durumda hiçbir şey export
+  etmek olurdu.
+- **Işıklar ve kameralar her zaman tam gelir.** Işıklandırması olmayan bir
+  lookdev paketi lookdev değil, karanlıktır. Seçimde ışık varsa bu bir uyarıyla
+  söylenir, sessizce yok sayılmaz.
+- Seçimde hiç mesh yoksa export **sesli hata verir** ve yarım paket bırakmaz.
 
 ## Görünürlük ve render bayrakları
 
@@ -798,8 +814,10 @@ eklemek santimetre sahnelerde 100 kat fazla displacement verirdi.
 
 İki sınır:
 
-- **Vector displacement kurulmuyor**, uyarı yazılıyor. Yalnız skaler yükseklik
-  aktarılıyor.
+- **Vector displacement da kuruluyor.** `displacementMode` enum'u hem vector
+  olup olmadığını hem uzayı söyler (`Vector, Tangent/Object/World Space`), ve
+  Blender'ın **Vector Displacement** node'unun `space` seçenekleri birebir
+  aynıdır — yeniden adlandırmadan ibaret.
 - Mesh subdivision istemiyorsa uyarı yazılıyor: displacement'ın kıpırdatacak
   geometrisi olmaz. (Arnold'da da aynı şey geçerli.)
 
@@ -854,6 +872,10 @@ hızlı ve sonradan elle düzenlenebilir:
 | `aiMultiply`     | Mix (Multiply)                                   |
 | `aiAdd`          | Mix (Add)                                        |
 | `reverse`        | Invert                                           |
+| `clamp`          | Mix (Lighten) + Mix (Darken)                     |
+| `blendColors`    | Mix (Mix), faktör ters çevrilmiş                 |
+| `multiplyDivide` | Mix (Multiply / Divide)                          |
+| `remapValue`     | Mix + Colour Ramp + Mix (rampa dahil)            |
 
 Node'lar `ZA_CC_` / `ZA_` önekiyle adlandırılır. Bir ayar nötr değerindeyse o
 node hiç kurulmaz, yani dokunulmamış bir düzeltme node'u ağacı kalabalıklaştırmaz.
@@ -870,8 +892,19 @@ node hiç kurulmaz, yani dokunulmamış bir düzeltme node'u ağacı kalabalıkl
 
 `exposure` ayrı bir node kurmaz; multiply ile aynı node'a katlanır.
 
-**Kurulamayanlar bildirilir.** `remapValue`, `blendColors`, `aiComposite` gibi
-karşılığı olmayan node'lar için import sonrası uyarı yazılır (Blender System
+İki ayrıntı ölçüldü ve sezginin tersi:
+
+- **`blendColors` Blender'ın Mix'inin tersidir.** Maya'da `blender = 1` color1'i
+  döndürür, Blender'da `Factor = 1` **ikinci** rengi döndürür. Faktör bu yüzden
+  ters çevrilir, ve texture'ın hangi girişe geldiği de kaydedilir çünkü node
+  simetrik değildir.
+- **`remapValue`'nun asıl işi rampasıdır.** Yalnız doğrusal kısmı kurmak —
+  eski davranış — sanatçının çizdiği eğriyi sessizce düşürüyordu. Rampa artık
+  Colour Ramp olarak kuruluyor. Maya interpolasyonu durak başına, Blender rampa
+  başına tutar; ilki kullanılır ve karışık bir rampa uyarılır.
+
+**Kurulamayanlar bildirilir.** `aiComposite`, `remapHsv` gibi karşılığı olmayan
+node'lar için import sonrası uyarı yazılır (Blender System
 Console veya panel status satırı):
 
 ```text

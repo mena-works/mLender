@@ -236,7 +236,8 @@ def apply_light_linking(obj, record, mesh_objects, warnings):
     collection, which deliberately is not linked into the scene.
     """
     names = record.get("linked_meshes")
-    if names is None:
+    shadow_names = record.get("shadow_meshes")
+    if names is None and shadow_names is None:
         return False
     linking = getattr(obj, "light_linking", None)
     if linking is None:
@@ -246,38 +247,58 @@ def apply_light_linking(obj, record, mesh_objects, warnings):
         )
         return False
 
-    receivers = bpy.data.collections.new("ZA_Link_" + obj.name)
-    receivers["za_generated"] = True
+    applied = False
+    if names is not None:
+        applied = _assign_link_collection(
+            linking, "receiver_collection", "ZA_Link_", obj, names,
+            mesh_objects, warnings,
+        ) or applied
+    if shadow_names is not None:
+        # Blender's blockers are the objects that cast this light's shadow,
+        # which is what Maya's shadow linking restricts.
+        applied = _assign_link_collection(
+            linking, "blocker_collection", "ZA_Shadow_", obj, shadow_names,
+            mesh_objects, warnings,
+        ) or applied
+    return applied
+
+
+def _assign_link_collection(linking, attribute, prefix, obj, names,
+                            mesh_objects, warnings):
+    if not hasattr(linking, attribute):
+        return False
+    collection = bpy.data.collections.new(prefix + obj.name)
+    collection["za_generated"] = True
     found = 0
     for name in names:
         target = (mesh_objects or {}).get(name)
         if target is None:
             continue
         try:
-            receivers.objects.link(target)
+            collection.objects.link(target)
             found += 1
         except Exception:
             continue
 
     if not found and names:
         warnings.append(
-            'Light "{0}" is linked to {1} mesh(es) in Maya but none of them '
-            "were found, so the restriction was not applied.".format(
+            'Light "{0}" is restricted to {1} mesh(es) in Maya but none were '
+            "found, so the restriction was not applied.".format(
                 obj.name, len(names)
             )
         )
-        bpy.data.collections.remove(receivers)
+        bpy.data.collections.remove(collection)
         return False
 
     try:
-        linking.receiver_collection = receivers
+        setattr(linking, attribute, collection)
     except Exception as error:
         warnings.append(
             'Could not restrict "{0}": {1}'.format(obj.name, error)
         )
-        bpy.data.collections.remove(receivers)
+        bpy.data.collections.remove(collection)
         return False
-    obj["za_linked_mesh_count"] = found
+    obj["za_" + attribute + "_count"] = found
     return True
 
 
