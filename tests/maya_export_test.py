@@ -159,6 +159,48 @@ def build_scene():
     ramp = cmds.shadingNode("ramp", asTexture=True, name="procRamp")
     cmds.connectAttr(ramp + ".outAlpha", proc + ".specularRoughness", force=True)
 
+    # A tiled, rotated texture behind a bump node. Placement and bump strength
+    # both used to be dropped on the way past.
+    _, tiled = shaded_cube("tiledCube", "aiStandardSurface")
+    cmds.setAttr(tiled + ".coat", 0.6)
+    cmds.setAttr(tiled + ".coatRoughness", 0.08)
+    cmds.setAttr(tiled + ".coatColor", 0.9, 0.95, 1.0, type="double3")
+    cmds.setAttr(tiled + ".sheen", 0.4)
+    cmds.setAttr(tiled + ".sheenRoughness", 0.25)
+    cmds.setAttr(tiled + ".subsurface", 0.3)
+    cmds.setAttr(tiled + ".subsurfaceScale", 2.5)
+    cmds.setAttr(tiled + ".specularAnisotropy", 0.35)
+
+    tiled_tex = os.path.join(OUT, "tiled_basecolor.tx").replace("\\", "/")
+    with open(tiled_tex, "w") as handle:
+        handle.write("placement is what matters here")
+    tiled_file = cmds.shadingNode("file", asTexture=True, name="tiledTex")
+    cmds.setAttr(tiled_file + ".fileTextureName", tiled_tex, type="string")
+    tiled_place = cmds.shadingNode(
+        "place2dTexture", asUtility=True, name="tiledPlace"
+    )
+    cmds.connectAttr(tiled_place + ".outUV", tiled_file + ".uvCoord", force=True)
+    cmds.connectAttr(
+        tiled_place + ".outUvFilterSize", tiled_file + ".uvFilterSize", force=True
+    )
+    cmds.setAttr(tiled_place + ".repeatU", 4.0)
+    cmds.setAttr(tiled_place + ".repeatV", 3.0)
+    cmds.setAttr(tiled_place + ".offset", 0.25, 0.5, type="double2")
+    cmds.setAttr(tiled_place + ".rotateUV", 45.0)
+    cmds.setAttr(tiled_place + ".mirrorU", True)
+    cmds.connectAttr(tiled_file + ".outColor", tiled + ".baseColor", force=True)
+
+    normal_tex = os.path.join(OUT, "tiled_normal.tx").replace("\\", "/")
+    with open(normal_tex, "w") as handle:
+        handle.write("normal map")
+    normal_file = cmds.shadingNode("file", asTexture=True, name="normalTex")
+    cmds.setAttr(normal_file + ".fileTextureName", normal_tex, type="string")
+    bump = cmds.shadingNode("bump2d", asUtility=True, name="tiledBump")
+    cmds.setAttr(bump + ".bumpDepth", 0.35)
+    cmds.setAttr(bump + ".bumpInterp", 1)          # Tangent Space Normals
+    cmds.connectAttr(normal_file + ".outAlpha", bump + ".bumpValue", force=True)
+    cmds.connectAttr(bump + ".outNormal", tiled + ".normalCamera", force=True)
+
     # Portals emit nothing and must not become black area lights.
     cmds.createNode("aiLightPortal", name="aiPortalShape")
 
@@ -222,7 +264,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("6 meshes exported", payload["mesh_count"] == 6, payload["mesh_count"])
+    check("7 meshes exported", payload["mesh_count"] == 7, payload["mesh_count"])
 
     print("\naiStandardSurface")
     std = channels("stdSurfCube")
@@ -332,6 +374,40 @@ def main():
           preview)
     check("preview level 1 carried",
           preview.get("viewport_iterations") == 1, preview)
+
+    print("\nplacement, bump and the extra lobes")
+    tiled = channels("tiledCube")
+    placement = tiled.get("base_color", {}).get("texture", {}).get("placement", {})
+    check("place2dTexture was captured", bool(placement), placement)
+    check("repeatU 4 carried", placement.get("repeat_u") == 4.0, placement)
+    check("repeatV 3 carried", placement.get("repeat_v") == 3.0, placement)
+    check("offset carried",
+          [round(v, 4) for v in (placement.get("offset") or [])][:2] == [0.25, 0.5],
+          placement.get("offset"))
+    check("rotateUV exported in degrees",
+          abs(placement.get("rotate_uv_degrees", 0) - 45.0) < 1e-4,
+          placement.get("rotate_uv_degrees"))
+    check("mirrorU carried", bool(placement.get("mirror_u")), placement)
+
+    bump = tiled.get("normal", {}).get("texture", {}).get("bump", {})
+    check("bump2d was captured", bool(bump), bump)
+    check("bumpDepth 0.35 carried",
+          abs(bump.get("depth", 0) - 0.35) < 1e-5, bump.get("depth"))
+    check("bump interpretation carried",
+          "tangent" in str(bump.get("interpretation", "")).lower(),
+          bump.get("interpretation"))
+
+    check("coat weight 0.6", abs(tiled.get("coat", {}).get("value", 0) - 0.6) < 1e-5)
+    check("coat roughness 0.08",
+          abs(tiled.get("coat_roughness", {}).get("value", 0) - 0.08) < 1e-5)
+    check("sheen weight 0.4",
+          abs(tiled.get("sheen", {}).get("value", 0) - 0.4) < 1e-5)
+    check("subsurface weight 0.3",
+          abs(tiled.get("subsurface", {}).get("value", 0) - 0.3) < 1e-5)
+    check("subsurface scale 2.5",
+          abs(tiled.get("subsurface_scale", {}).get("value", 0) - 2.5) < 1e-5)
+    check("anisotropy 0.35",
+          abs(tiled.get("anisotropic", {}).get("value", 0) - 0.35) < 1e-5)
 
     print("\nprocedural baking")
     proc = channels("procCube")

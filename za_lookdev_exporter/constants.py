@@ -17,7 +17,7 @@ LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
 LIVELINK_PROTOCOL = "za_lookdev_livelink"
 LIVELINK_VERSION = 1
-EXPORT_SCHEMA_VERSION = 9
+EXPORT_SCHEMA_VERSION = 10
 
 LIGHT_NODE_TYPES = (
     "RedshiftPhysicalLight",
@@ -143,6 +143,18 @@ ARNOLD_STANDARD_CHANNELS = {
     "transmission_roughness": ("transmissionExtraRoughness",),
     "ior": ("specularIOR",),
     "thin_walled": ("thinWalled",),
+    "anisotropic": ("specularAnisotropy",),
+    "coat": ("coat",),
+    "coat_roughness": ("coatRoughness",),
+    "coat_tint": ("coatColor",),
+    "coat_ior": ("coatIOR",),
+    "sheen": ("sheen",),
+    "sheen_roughness": ("sheenRoughness",),
+    "sheen_tint": ("sheenColor",),
+    "subsurface": ("subsurface",),
+    "subsurface_color": ("subsurfaceColor",),
+    "subsurface_radius": ("subsurfaceRadius",),
+    "subsurface_scale": ("subsurfaceScale",),
     "normal": ("normalCamera",),
     "emission": ("emissionColor",),
     "emission_strength": ("emission",),
@@ -162,6 +174,18 @@ ARNOLD_OPENPBR_CHANNELS = {
     "transmission_color": ("transmissionColor",),
     "ior": ("specularIOR",),
     "thin_walled": ("geometryThinWalled",),
+    "anisotropic": ("specularRoughnessAnisotropy",),
+    "coat": ("coatWeight",),
+    "coat_roughness": ("coatRoughness",),
+    "coat_tint": ("coatColor",),
+    "coat_ior": ("coatIOR",),
+    # OpenPBR calls the sheen lobe fuzz.
+    "sheen": ("fuzzWeight",),
+    "sheen_roughness": ("fuzzRoughness",),
+    "sheen_tint": ("fuzzColor",),
+    "subsurface": ("subsurfaceWeight",),
+    "subsurface_color": ("subsurfaceColor",),
+    "subsurface_radius": ("subsurfaceRadiusScale", "subsurfaceRadius"),
     "normal": ("normalCamera",),
     "emission": ("emissionColor",),
     "emission_strength": ("emissionLuminance",),
@@ -193,6 +217,17 @@ REDSHIFT_STANDARD_CHANNELS = {
     "ior": ("refl_ior", "refr_ior", "ior"),
     "thin_walled": ("refr_thin_walled", "thin_walled"),
     "transmission_affects_alpha": ("affects_alpha",),
+    "anisotropic": ("refl_aniso", "anisotropy"),
+    "coat": ("coat_weight", "coating_weight"),
+    "coat_roughness": ("coat_roughness", "coating_roughness"),
+    "coat_tint": ("coat_color", "coating_transmittance"),
+    "coat_ior": ("coat_ior", "coating_ior"),
+    "sheen": ("sheen_weight",),
+    "sheen_roughness": ("sheen_roughness",),
+    "sheen_tint": ("sheen_color",),
+    "subsurface": ("ms_amount", "sss_amount"),
+    "subsurface_color": ("ms_color", "sss_color"),
+    "subsurface_radius": ("ms_radius", "sss_radius"),
     "normal": ("bump_input", "normalCamera"),
     "emission": ("emission_color", "emission"),
     "emission_strength": ("emission_weight", "emissionWeight"),
@@ -234,6 +269,33 @@ UDIM_FIRST_TILE = 1001
 
 # File path attributes checked while walking a texture network upstream.
 TEXTURE_PATH_ATTRS = ("fileTextureName", "tex0", "filename", "file")
+
+# place2dTexture, read from a live Maya 2023 node. rotateUV and rotateFrame
+# are doubleAngle attributes, so getAttr hands them back in the current angular
+# unit, which is degrees by default. They are exported as degrees and named so.
+PLACEMENT_NODE_TYPE = "place2dTexture"
+PLACEMENT_NUMERIC_ATTRS = {
+    "repeat_u": "repeatU",
+    "repeat_v": "repeatV",
+    "offset": "offset",
+    "rotate_uv_degrees": "rotateUV",
+    "rotate_frame_degrees": "rotateFrame",
+    "translate_frame": "translateFrame",
+    "coverage": "coverage",
+    "wrap_u": "wrapU",
+    "wrap_v": "wrapV",
+    "mirror_u": "mirrorU",
+    "mirror_v": "mirrorV",
+    "stagger": "stagger",
+    "noise_u": "noiseU",
+    "noise_v": "noiseV",
+}
+
+# bump2d sits between a texture and normalCamera and carries the strength that
+# would otherwise be lost when the walk steps past it to reach the file.
+BUMP_NODE_TYPES = ("bump2d",)
+BUMP_DEPTH_ATTR = "bumpDepth"
+BUMP_INTERP_ATTR = "bumpInterp"  # Bump : Tangent Space Normals : Object Space
 
 # Procedural baking. Measured on Maya 2023: convertSolidTx writes linear
 # values whatever the colour management setting, and it cannot write EXR (the

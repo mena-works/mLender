@@ -14,6 +14,11 @@ import re
 import maya.cmds as cmds
 
 from .constants import (
+    BUMP_DEPTH_ATTR,
+    BUMP_INTERP_ATTR,
+    BUMP_NODE_TYPES,
+    PLACEMENT_NODE_TYPE,
+    PLACEMENT_NUMERIC_ATTRS,
     TEXTURE_PATH_ATTRS,
     UDIM_FIRST_TILE,
     UDIM_TILING_MODE,
@@ -23,6 +28,8 @@ from .constants import (
 from .mayautils import (
     absolute_user_path,
     attr_exists,
+    first_existing_attr,
+    plug_value,
     maya_path,
     node_label,
     node_type,
@@ -67,6 +74,12 @@ def texture_from_plug(plug):
                 record["udim"] = True
                 record["udim_pattern"] = maya_path(udim["pattern"])
                 record["udim_mode"] = udim.get("mode") or "detected"
+            placement = placement_info(node)
+            if placement:
+                record["placement"] = placement
+            bump = bump_info(candidates)
+            if bump:
+                record["bump"] = bump
             return record
     return {
         "path": "",
@@ -75,6 +88,53 @@ def texture_from_plug(plug):
         "source_plug": source_plug,
         "unsupported_network": True,
     }
+
+
+def placement_info(texture_node):
+    """Read the place2dTexture feeding a file node, if there is one.
+
+    Maya expresses tiling as repeat/offset/rotate on a separate node, which the
+    upstream walk would otherwise step straight past. Dropping it silently
+    turns a texture tiled four times into a single stretched one.
+    """
+    placements = [
+        node for node in (
+            cmds.listConnections(texture_node, source=True, destination=False)
+            or []
+        )
+        if node_type(node) == PLACEMENT_NODE_TYPE
+    ]
+    if not placements:
+        return None
+
+    placement = placements[0]
+    values = {}
+    for semantic, attr in PLACEMENT_NUMERIC_ATTRS.items():
+        if not attr_exists(placement, attr):
+            continue
+        value = plug_value(placement + "." + attr)
+        if value is not None:
+            values[semantic] = value
+    if not values:
+        return None
+    values["node"] = node_label(placement)
+    return values
+
+
+def bump_info(candidates):
+    """Strength and mode of a bump2d sitting between the file and the shader."""
+    for node in candidates:
+        if node_type(node) not in BUMP_NODE_TYPES:
+            continue
+        depth = plug_value(node + "." + BUMP_DEPTH_ATTR)
+        _value, _attr, label = first_existing_attr(node, (BUMP_INTERP_ATTR,))
+        return {
+            "node": node_label(node),
+            "depth": 1.0 if depth is None else float(depth),
+            # Bump : Tangent Space Normals : Object Space Normals
+            "interpretation": str(label or ""),
+        }
+    return None
 
 
 def udim_texture_info(node, path):

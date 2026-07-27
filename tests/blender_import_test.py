@@ -86,8 +86,8 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("6 meshes imported", result["mesh_count"] == 6, result["mesh_count"])
-    check("6 materials built", result["material_count"] == 6,
+    check("7 meshes imported", result["mesh_count"] == 7, result["mesh_count"])
+    check("7 materials built", result["material_count"] == 7,
           result["material_count"])
     # Three of the five cubes asked for subdivision in Maya; the other two
     # must arrive unmodified.
@@ -218,6 +218,52 @@ def main():
     check("the smooth preview cube has one at level 1",
           lam_mod is not None and lam_mod.levels == 1,
           lam_mod.levels if lam_mod else None)
+
+    print("\nplacement, bump and the extra lobes")
+    tiled = material_for("tiledCube")
+    check("tiled material exists", tiled is not None)
+    if tiled:
+        mapping = next((n for n in tiled.node_tree.nodes
+                        if n.bl_idname == "ShaderNodeMapping"), None)
+        check("a Mapping node was built", mapping is not None)
+        if mapping:
+            scale = [round(v, 4) for v in mapping.inputs["Scale"].default_value]
+            check("scale follows repeatU and repeatV",
+                  scale[:2] == [4.0, 3.0], scale)
+            location = [
+                round(v, 4) for v in mapping.inputs["Location"].default_value
+            ]
+            check("location follows the offset",
+                  location[:2] == [0.25, 0.5], location)
+            rotation = mapping.inputs["Rotation"].default_value[2]
+            check("45 degrees became radians",
+                  abs(rotation - math.radians(45.0)) < 1e-5, rotation)
+        base_image = next(
+            (n for n in tiled.node_tree.nodes
+             if n.bl_idname == "ShaderNodeTexImage"
+             and "base_color" in n.name), None)
+        if base_image:
+            check("mirrorU became a mirrored extension",
+                  base_image.extension == "MIRROR", base_image.extension)
+
+        normal_map = next((n for n in tiled.node_tree.nodes
+                           if n.bl_idname == "ShaderNodeNormalMap"), None)
+        check("a Normal Map node was built", normal_map is not None)
+        if normal_map:
+            check("bump depth became normal map strength",
+                  abs(normal_map.inputs["Strength"].default_value - 0.35) < 1e-5,
+                  normal_map.inputs["Strength"].default_value)
+
+        check("coat weight 0.6", abs(value(tiled, "Coat Weight") - 0.6) < 1e-5)
+        check("coat roughness 0.08",
+              abs(value(tiled, "Coat Roughness") - 0.08) < 1e-5)
+        check("sheen weight 0.4", abs(value(tiled, "Sheen Weight") - 0.4) < 1e-5)
+        check("subsurface weight 0.3",
+              abs(value(tiled, "Subsurface Weight") - 0.3) < 1e-5)
+        check("subsurface scale 2.5 set explicitly, not left at the version default",
+              abs(value(tiled, "Subsurface Scale") - 2.5) < 1e-5,
+              value(tiled, "Subsurface Scale"))
+        check("anisotropy 0.35", abs(value(tiled, "Anisotropic") - 0.35) < 1e-5)
 
     print("\nbaked procedurals")
     proc = material_for("procCube")

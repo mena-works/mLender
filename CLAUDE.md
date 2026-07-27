@@ -449,6 +449,7 @@ Kullanıcının elle doğrulaması gereken adımlar:
 - ❌ Işık enerjisinden `position_scale²` terimini düşürme
 - ❌ Blender soket varsayılanını kaynaktan gelen değer sanma (speküler 0.5)
 - ❌ Baked map'i sRGB sanma; Maya lineer yazar
+- ❌ Soket bileşen sayısını varsayma; Subsurface Radius 3, renk soketleri 4
 - ❌ Sahneyi export sırasında kalıcı olarak değiştirme (convertSolidTx'in file node'unu temizle)
 
 ---

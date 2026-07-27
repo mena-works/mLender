@@ -17,15 +17,21 @@ the import can tell its own datablocks apart from the placeholder materials
 the FBX importer creates.
 """
 
+import math
+
 import bpy
 
 from .constants import (
+    COLOUR_VALUED_CHANNELS,
     DEFAULT_EMISSION_STRENGTH,
     OPENPBR_EMISSION_LUMINANCE_SCALE,
     OPENPBR_EMISSION_SEMANTIC,
     GLASS_INPUTS,
     PRINCIPLED_INPUTS,
     SPECULAR_WEIGHT_TO_LEVEL,
+    TEXTURE_EXTENSION_CLAMP,
+    TEXTURE_EXTENSION_MIRROR,
+    TEXTURE_EXTENSION_REPEAT,
     TRANSMISSION_THRESHOLD,
     UNLIT_SHADER_TYPES,
 )
@@ -95,11 +101,22 @@ def _build_principled(material, channels, warnings):
         "base_color",
         "roughness",
         "specular",
+        "anisotropic",
         "metallic",
         "opacity",
         "normal",
         "emission",
         "emission_strength",
+        "coat",
+        "coat_roughness",
+        "coat_tint",
+        "coat_ior",
+        "sheen",
+        "sheen_roughness",
+        "sheen_tint",
+        "subsurface",
+        "subsurface_radius",
+        "subsurface_scale",
     ):
         apply_channel(material, bsdf, channel, channels.get(channel), warnings)
 
@@ -329,14 +346,15 @@ def apply_record_to_socket(material, shader, target, channel, record, warnings):
                 channel,
                 image,
                 bool(record.get("invert")),
+                texture,
             )
             return
 
     if "value" not in record:
         return
     value = record.get("value")
-    if channel in ("base_color", "emission", "transmission_color"):
-        target.default_value = color4(value)
+    if channel in COLOUR_VALUED_CHANNELS:
+        target.default_value = _fit_socket(target, color4(value))
     elif channel == "opacity":
         target.default_value = scalar(value, 1.0)
         enable_alpha(material)
@@ -357,18 +375,18 @@ def apply_record_to_socket(material, shader, target, channel, record, warnings):
         target.default_value = scalar(value, target.default_value)
 
 
-def connect_image_channel(material, bsdf, target, channel, image, invert):
+def connect_image_channel(material, bsdf, target, channel, image, invert,
+                         texture_record=None):
     nodes = material.node_tree.nodes
     links = material.node_tree.links
     image_node = nodes.new("ShaderNodeTexImage")
     image_node.name = "ZA_{0}_Texture".format(channel)
     image_node.label = channel.replace("_", " ").title()
     image_node.image = image
+    _apply_placement(material, image_node, texture_record)
 
     if channel == "normal":
-        normal_map = nodes.new("ShaderNodeNormalMap")
-        links.new(image_node.outputs.get("Color"), normal_map.inputs.get("Color"))
-        links.new(normal_map.outputs.get("Normal"), target)
+        _connect_normal(material, image_node, target, texture_record)
         return
 
     if channel == "opacity":
@@ -387,6 +405,123 @@ def connect_image_channel(material, bsdf, target, channel, image, invert):
         links.new(output, invert_node.inputs.get("Color"))
         output = invert_node.outputs.get("Color")
     links.new(output, target)
+
+
+def _connect_normal(material, image_node, target, texture_record):
+    """Wire a normal or bump map, honouring the bump2d strength from Maya.
+
+    Maya's bump2d can be interpreted as a height field or as tangent space
+    normals, and its bumpDepth is the strength. Both were dropped before, which
+    left every normal map at Blender's default strength of one.
+    """
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+    bump = (texture_record or {}).get("bump") or {}
+    interpretation = str(bump.get("interpretation") or "").lower()
+    depth = scalar(bump.get("depth"), 1.0)
+
+    if interpretation.startswith("bump"):
+        # A height field rather than a normal map.
+        node = nodes.new("ShaderNodeBump")
+        node.name = "ZA_Bump"
+        links.new(image_node.outputs.get("Color"), node.inputs.get("Height"))
+        if node.inputs.get("Strength") is not None:
+            node.inputs["Strength"].default_value = max(0.0, depth)
+        links.new(node.outputs.get("Normal"), target)
+        return
+
+    normal_map = nodes.new("ShaderNodeNormalMap")
+    normal_map.name = "ZA_Normal_Map"
+    if "object" in interpretation and hasattr(normal_map, "space"):
+        try:
+            normal_map.space = "OBJECT"
+        except Exception:
+            pass
+    if normal_map.inputs.get("Strength") is not None:
+        normal_map.inputs["Strength"].default_value = max(0.0, depth)
+    links.new(image_node.outputs.get("Color"), normal_map.inputs.get("Color"))
+    links.new(normal_map.outputs.get("Normal"), target)
+
+
+def _apply_placement(material, image_node, texture_record):
+    """Rebuild a place2dTexture as a Mapping node in front of the image.
+
+    Without this a texture tiled four times in Maya arrives tiled once, which
+    is a silent and very visible difference.
+    """
+    placement = (texture_record or {}).get("placement") or {}
+    _apply_extension(image_node, placement)
+    if not placement:
+        return
+
+    repeat_u = scalar(placement.get("repeat_u"), 1.0)
+    repeat_v = scalar(placement.get("repeat_v"), 1.0)
+    offset = placement.get("offset") or [0.0, 0.0]
+    rotation = scalar(placement.get("rotate_uv_degrees"), 0.0)
+    if (
+        abs(repeat_u - 1.0) < 1e-6
+        and abs(repeat_v - 1.0) < 1e-6
+        and abs(scalar(offset[0] if offset else 0.0, 0.0)) < 1e-6
+        and abs(scalar(offset[1] if len(offset) > 1 else 0.0, 0.0)) < 1e-6
+        and abs(rotation) < 1e-6
+    ):
+        # Nothing to express; leave the tree uncluttered.
+        return
+
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+    mapping = nodes.new("ShaderNodeMapping")
+    mapping.name = "ZA_Placement"
+    mapping.label = "Maya Placement"
+    mapping.vector_type = "POINT"
+    coord = nodes.new("ShaderNodeTexCoord")
+    coord.name = "ZA_Placement_Coord"
+
+    mapping.inputs["Scale"].default_value = (repeat_u, repeat_v, 1.0)
+    mapping.inputs["Location"].default_value = (
+        scalar(offset[0] if offset else 0.0, 0.0),
+        scalar(offset[1] if len(offset) > 1 else 0.0, 0.0),
+        0.0,
+    )
+    # rotateUV is exported in degrees, which is the unit getAttr reports.
+    mapping.inputs["Rotation"].default_value = (0.0, 0.0, math.radians(rotation))
+
+    links.new(coord.outputs.get("UV"), mapping.inputs.get("Vector"))
+    links.new(mapping.outputs.get("Vector"), image_node.inputs.get("Vector"))
+
+
+def _apply_extension(image_node, placement):
+    """Maya wrap and mirror flags onto the image node's extension mode."""
+    if not hasattr(image_node, "extension"):
+        return
+    mirror = bool(placement.get("mirror_u")) or bool(placement.get("mirror_v"))
+    # wrapU and wrapV default to on in Maya, so an absent flag means wrap.
+    wrap = bool(placement.get("wrap_u", True)) or bool(
+        placement.get("wrap_v", True)
+    )
+    if mirror:
+        mode = TEXTURE_EXTENSION_MIRROR
+    elif wrap:
+        mode = TEXTURE_EXTENSION_REPEAT
+    else:
+        mode = TEXTURE_EXTENSION_CLAMP
+    try:
+        image_node.extension = mode
+    except Exception:
+        pass
+
+
+def _fit_socket(target, rgba):
+    """Trim a colour to the component count the socket actually accepts.
+
+    Most colour sockets take RGBA, but some vector ones do not: Subsurface
+    Radius is three components and rejects a fourth outright.
+    """
+    try:
+        wanted = len(target.default_value)
+    except TypeError:
+        return rgba[0]
+    return tuple(rgba[:wanted])
 
 
 def _insert_value_invert(nodes, links, output):

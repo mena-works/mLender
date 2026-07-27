@@ -524,6 +524,66 @@ toplanır ve Blender System Console'a `Z-A Lookdev warning:` önekiyle yazılır
 Bir mesh birden fazla material kullanıyorsa Maya shadingEngine face membership
 bilgisi JSON'a yazılır ve Blender polygon material indexleri yeniden kurulur.
 
+## Texture yerleşimi
+
+Maya tiling'i ayrı bir `place2dTexture` node'unda tutar. Upstream taraması
+dosyayı bulup bu node'un yanından geçtiği için değerler eskiden **sessizce
+düşüyordu**: Maya'da 4×3 tekrarlanan bir texture Blender'a 1×1 geliyordu.
+
+Artık bir **Mapping** node kurulur:
+
+```text
+repeatU / repeatV   -> Mapping Scale X / Y
+offset              -> Mapping Location X / Y
+rotateUV            -> Mapping Rotation Z   (derece -> radyan)
+wrapU / wrapV       -> Image extension REPEAT, kapaliysa EXTEND
+mirrorU / mirrorV   -> Image extension MIRROR
+```
+
+`rotateUV` bir `doubleAngle` attribute'udur ve `getAttr` onu geçerli açı
+biriminde (varsayılan derece) döndürür; JSON'a `rotate_uv_degrees` adıyla
+derece olarak yazılır ve importer radyana çevirir.
+
+Yerleşim varsayılan değerlerdeyse Mapping node kurulmaz, node ağacı gereksiz
+kalabalıklaşmaz.
+
+## Bump şiddeti
+
+`bump2d.bumpDepth` artık taşınıyor ve Blender'ın Normal Map node'unun
+`Strength` girişine gidiyor. Eskiden düşüyordu, yani her normal map varsayılan
+1.0 şiddetle geliyordu.
+
+`bumpInterp` de okunuyor: `Tangent Space Normals` → Normal Map node,
+`Object Space Normals` → Normal Map node `space = OBJECT`, düz `Bump` →
+Blender'ın **Bump** node'u (yükseklik alanı olarak).
+
+## Coat, Sheen, Subsurface
+
+`aiStandardSurface` ve `aiOpenPBRSurface`'in ek lobları da aktarılıyor:
+
+```text
+coat / coatWeight        -> Coat Weight
+coatRoughness            -> Coat Roughness
+coatColor                -> Coat Tint
+coatIOR                  -> Coat IOR
+sheen / fuzzWeight       -> Sheen Weight
+sheenRoughness           -> Sheen Roughness
+sheenColor / fuzzColor   -> Sheen Tint
+subsurface / weight      -> Subsurface Weight
+subsurfaceRadius         -> Subsurface Radius
+subsurfaceScale          -> Subsurface Scale
+specularAnisotropy       -> Anisotropic
+```
+
+İki not:
+
+- **Principled'da ayrı bir Subsurface Color soketi yok** (4.1 ve 5.2'de
+  ölçüldü); base color'dan renklenir. Maya'nın `subsurfaceColor` değeri bu
+  yüzden metadata olarak saklanır, sessizce atılmaz.
+- **`Subsurface Scale` varsayılanı sürümler arası farklı** (4.1'de 0.05,
+  5.2'de 0.005). Bu yüzden değer açıkça set edilir; varsayılana güvenmek aynı
+  paketi iki sürümde farklı gösterirdi.
+
 ## Prosedürel bake
 
 Bir kanal dosyası olmayan bir ağla sürülüyorsa (checker, ramp, katmanlı noise)
