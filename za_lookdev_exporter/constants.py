@@ -17,7 +17,7 @@ LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
 LIVELINK_PROTOCOL = "za_lookdev_livelink"
 LIVELINK_VERSION = 1
-EXPORT_SCHEMA_VERSION = 16
+EXPORT_SCHEMA_VERSION = 17
 
 LIGHT_NODE_TYPES = (
     "RedshiftPhysicalLight",
@@ -290,6 +290,11 @@ PLACEMENT_NUMERIC_ATTRS = {
     "noise_u": "noiseU",
     "noise_v": "noiseV",
 }
+
+# Texture collection. Off by default: pointing at the Maya paths is right when
+# both applications run on the same machine and avoids duplicating a texture
+# library, but it breaks the moment the package moves.
+COLLECT_FOLDER_NAME = "textures_collected"
 
 # Colour management. Flag names read from a live Maya 2023 session, where the
 # defaults are the ACES config: renderingSpaceName "ACEScg" and

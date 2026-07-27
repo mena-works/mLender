@@ -8,7 +8,7 @@ message shape changes.
 
 import math
 
-BUILD_VERSION = "1.19.0"
+BUILD_VERSION = "1.20.0"
 
 LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
@@ -21,7 +21,7 @@ LIVELINK_EVENT = "lookdev_package_ready"
 # 3 added glass channels and 4 added UDIM on the main branch; 5 is this
 # branch with both, plus the Arnold channels.
 SUPPORTED_SCHEMA_VERSIONS = (
-    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
 )
 
 MAX_MESSAGE_BYTES = 32 * 1024 * 1024

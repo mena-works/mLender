@@ -26,7 +26,7 @@ def show_ui():
         WINDOW_NAME,
         title=TOOL_NAME,
         sizeable=False,
-        widthHeight=(620, 330),
+        widthHeight=(620, 420),
     )
     cmds.columnLayout(
         adjustableColumn=True,
@@ -80,6 +80,12 @@ def show_ui():
         adjustableColumn=2,
         columnWidth2=(120, 120),
     )
+    collect_field = cmds.checkBoxGrp(
+        label="Collect Textures",
+        label1="Copy referenced textures into the package folder",
+        value1=False,
+        columnWidth2=(120, 400),
+    )
     animation_field = cmds.checkBoxGrp(
         label="Export Animation",
         label1="Bake the frame range instead of the current frame",
@@ -112,6 +118,7 @@ def show_ui():
             bake_resolution_field,
             animation_field,
             frame_range_field,
+            collect_field,
         ),
     )
     cmds.showWindow(window)
@@ -152,6 +159,7 @@ def export_from_ui(
     bake_resolution_field=None,
     animation_field=None,
     frame_range_field=None,
+    collect_field=None,
 ):
     """Export, then notify Blender, reporting each failure mode separately.
 
@@ -185,11 +193,16 @@ def export_from_ui(
             cmds.textFieldGrp(frame_range_field, query=True, text=True)
         )
 
+    collect = False
+    if collect_field is not None:
+        collect = bool(cmds.checkBoxGrp(collect_field, query=True, value1=True))
+
     try:
         result = export_lookdev(
             output_folder,
             bake_procedurals=bake,
             bake_resolution=bake_resolution,
+            collect_textures_into_package=collect,
             export_animation=export_animation,
             frame_start=frame_start,
             frame_end=frame_end,
@@ -223,8 +236,9 @@ def export_from_ui(
     cmds.confirmDialog(
         title="Z-A Lookdev Export Complete",
         message=(
-            "Meshes: {0}\nLights: {1}\nCameras: {2}\nBaked textures: {3}\n"
-            "Frames: {7}\n\nPackage:\n{4}\n\nFBX:\n{5}{6}"
+            "Meshes: {0}\nLights: {1}\nCameras: {2}\n"
+            "Baked textures: {3}\nCollected textures: {8}\nFrames: {7}\n"
+            "\nPackage:\n{4}\n\nFBX:\n{5}{6}"
         ).format(
             result["mesh_count"],
             result["light_count"],
@@ -234,6 +248,7 @@ def export_from_ui(
             result["fbx_path"],
             _warning_summary(result.get("warnings")),
             result.get("frame_count", 1),
+            result.get("collected_texture_count", 0),
         ),
         button=["OK"],
         icon="information",

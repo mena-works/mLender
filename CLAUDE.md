@@ -27,6 +27,7 @@ bir modül yalnızca kendinden önce listelenenleri import edebilir.
 za_lookdev_exporter/     # Maya (import sırası = bağımlılık sırası)
   constants.py           # sabitler, attribute alias tabloları
   mayautils.py           # maya.cmds sarmalayıcıları
+  collect.py             # texture'ları pakete kopyalama (opsiyonel)
   animation.py           # frame aralığı ve zaman çizgisi örnekleme
   textures.py            # upstream texture arama
   bake.py                # prosedürel ağları UV'ye bake etme

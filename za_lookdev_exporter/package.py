@@ -21,6 +21,7 @@ from .constants import (
 )
 from .animation import animation_info, sample_records
 from .cameras import camera_record, camera_sample, scene_camera_shapes
+from .collect import collect_textures
 from .fbx import export_fbx
 from .lights import light_record, light_sample, scene_light_shapes
 from .mayautils import (
@@ -42,6 +43,7 @@ def export_lookdev(
     output_folder,
     bake_procedurals=True,
     bake_resolution=DEFAULT_BAKE_RESOLUTION,
+    collect_textures_into_package=False,
     export_animation=False,
     frame_start=None,
     frame_end=None,
@@ -128,6 +130,12 @@ def export_lookdev(
             "animation": animation,
             "color_management": color_management_info(),
         }
+        collected = {"collected": 0, "missing": 0, "folder": ""}
+        if collect_textures_into_package:
+            # After the payload is complete, so every texture record exists
+            # and can be repointed at its copy in one pass.
+            collected = collect_textures(payload, package_folder, warnings)
+            payload["collected_textures"] = collected
         write_json(json_path, payload)
     except Exception:
         remove_file(fbx_path)
@@ -152,6 +160,7 @@ def export_lookdev(
         "camera_count": len(camera_records),
         "baked_texture_count": len(bake_context.baked_files),
         "frame_count": animation["frame_count"],
+        "collected_texture_count": collected["collected"],
         "animated": animation["enabled"],
         "warnings": warnings,
     }

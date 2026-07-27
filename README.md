@@ -73,8 +73,36 @@ MTB_Z_A_02/
   MTB_Z_A_02_lookdev.json
 ```
 
-Texture dosyaları paket içine kopyalanmaz. JSON yalnız Maya'daki orijinal
-texture konumunu taşır; Blender image node aynı dosyayı doğrudan açar.
+Texture dosyaları **varsayılan olarak** paket içine kopyalanmaz. JSON yalnız
+Maya'daki orijinal texture konumunu taşır; Blender image node aynı dosyayı
+doğrudan açar. İki uygulama aynı makinede çalışıyorsa doğru olan budur ve
+texture kütüphanesini gereksiz yere çoğaltmaz.
+
+Maya penceresindeki **Collect Textures** kutusu işaretlenirse referans verilen
+bütün texture'lar paketin içindeki `textures_collected/` klasörüne kopyalanır
+ve JSON yolları oraya çevrilir. Paket böylece başka bir makineye taşınabilir
+hale gelir.
+
+```text
+MTB_Z_A_01/
+  MTB_Z_A_01.fbx
+  MTB_Z_A_01_lookdev.json
+  textures_collected/
+    wood_basecolor.tx
+    tile.1001.tx
+    tile.1002.tx
+```
+
+Üç ayrıntı:
+
+- **UDIM bir dosya değil, kalıptır.** `<UDIM>` içeren bir yolu olduğu gibi
+  kopyalamak hiçbir şey kopyalamaz; yanındaki tile'lar diskte bulunup tek tek
+  kopyalanır, JSON'daki yol ise token'ı korur ki importer seti yine çözsün.
+- Aynı texture birden fazla kanalda kullanılıyorsa **bir kez** kopyalanır.
+- Orijinal Maya yolu `original_path` alanında saklanır, kaybolmaz.
+
+Bulunamayan bir texture export'u durdurmaz; uyarı yazılır ve o yol
+değiştirilmeden bırakılır.
 
 ## Desteklenen Maya shaderları
 

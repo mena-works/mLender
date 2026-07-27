@@ -392,6 +392,54 @@ def main():
     check("remapValue reported as unrebuildable rather than dropped silently",
           "remapValue" in unsupported, unsupported)
 
+    print("\ncollected textures")
+    # A second export with collection on, into its own folder so the package
+    # numbering the Blender import test reads from is left alone, and so the
+    # first package keeps proving the default of pointing at the Maya paths.
+    collected_result = za.export_lookdev(
+        os.path.join(OUT, "collected"), collect_textures_into_package=True
+    )
+    with open(collected_result["json_path"], "r") as handle:
+        collected_payload = json.load(handle)
+    collected_folder = os.path.join(
+        collected_result["package_folder"], "textures_collected"
+    )
+    check("collection folder created", os.path.isdir(collected_folder),
+          collected_folder)
+    check("something was collected",
+          collected_result["collected_texture_count"] > 0,
+          collected_result["collected_texture_count"])
+
+    collected_paths = []
+    for mesh in collected_payload["meshes"]:
+        for material in mesh["materials"]:
+            for entry in (material.get("channels") or {}).values():
+                path = (entry.get("texture") or {}).get("path") or ""
+                if path:
+                    collected_paths.append(path)
+    check("every texture path now points inside the package",
+          collected_paths
+          and all("textures_collected" in path for path in collected_paths),
+          [p for p in collected_paths if "textures_collected" not in p][:3])
+    check("the original Maya path is kept for reference",
+          any(
+              (entry.get("texture") or {}).get("original_path")
+              for mesh in collected_payload["meshes"]
+              for material in mesh["materials"]
+              for entry in (material.get("channels") or {}).values()
+          ))
+    # The UDIM set is three tiles behind one <UDIM> pattern; copying the
+    # pattern verbatim would have copied nothing.
+    tiles = [
+        name for name in os.listdir(collected_folder)
+        if name.startswith("tile.")
+    ]
+    check("UDIM tiles expanded and copied, not the pattern",
+          len(tiles) == 3, sorted(tiles))
+    check("no file is named after the pattern itself",
+          not any("<UDIM>" in name for name in os.listdir(collected_folder)),
+          os.listdir(collected_folder))
+
     print("\ncolour management")
     color = payload.get("color_management") or {}
     check("colour management exported", bool(color), color)
