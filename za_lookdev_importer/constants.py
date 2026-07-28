@@ -8,7 +8,7 @@ message shape changes.
 
 import math
 
-BUILD_VERSION = "1.24.0"
+BUILD_VERSION = "1.25.0"
 
 LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
@@ -74,6 +74,18 @@ COLOUR_VALUED_CHANNELS = (
     "transmission_color",
     "coat_tint",
     "sheen_tint",
+    "subsurface_radius",
+)
+
+# Of those, the ones that are not reflectances and so must not be clamped to
+# one. Measured: an emission colour of 50 in Maya arrived in Blender as 1, so
+# every bright emissive material was silently flattened.
+#
+# Base colour and the tints stay clamped on purpose. An albedo above one is
+# unphysical and Principled misbehaves when given it.
+UNCLAMPED_COLOUR_CHANNELS = (
+    "emission",
+    # A distance in scene units, not a colour at all.
     "subsurface_radius",
 )
 

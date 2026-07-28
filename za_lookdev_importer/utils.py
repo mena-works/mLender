@@ -12,8 +12,15 @@ import re
 import bpy
 
 
-def color4(value):
-    """Coerce a scalar, RGB or RGBA value into a clamped RGBA tuple."""
+def color4(value, clamp=True):
+    """Coerce a scalar, RGB or RGBA value into an RGBA tuple.
+
+    Clamping to 0..1 is right for an albedo or a tint and wrong for anything
+    that is not a reflectance. Measured: an emission colour of 50 in Maya
+    arrived in Blender as 1, so a bright emissive material was silently
+    flattened. Light colours are used as multipliers above one too, and a
+    subsurface radius is a distance rather than a colour at all.
+    """
     if isinstance(value, (list, tuple)):
         values = [float(item) for item in value]
     else:
@@ -21,6 +28,13 @@ def color4(value):
     while len(values) < 3:
         values.append(values[-1] if values else 1.0)
     alpha = values[3] if len(values) > 3 else 1.0
+    if not clamp:
+        return (
+            max(0.0, values[0]),
+            max(0.0, values[1]),
+            max(0.0, values[2]),
+            max(0.0, alpha),
+        )
     return (
         max(0.0, min(1.0, values[0])),
         max(0.0, min(1.0, values[1])),

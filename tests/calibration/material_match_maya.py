@@ -88,6 +88,10 @@ MATERIALS = [
 
     ("emission_off", _cell(emission=0.0)),
     ("emission_on", _cell(emission=1.0, emissionColor=(0.4, 0.4, 0.4))),
+    # Above one on purpose. The first version of this chart used 0.4 and
+    # so never noticed that the importer clamped emission colours to one,
+    # which flattened every bright emissive material.
+    ("emission_hdr", _cell(emission=1.0, emissionColor=(4.0, 4.0, 4.0))),
 
     ("opacity_full", _cell(baseColor=(0.8, 0.8, 0.8))),
     ("opacity_half", _cell(baseColor=(0.8, 0.8, 0.8),
@@ -102,6 +106,7 @@ PAIRS = [
     ("coat_off", "coat_on"),
     ("sheen_off", "sheen_on"),
     ("emission_off", "emission_on"),
+    ("emission_on", "emission_hdr"),
     ("opacity_full", "opacity_half"),
 ]
 

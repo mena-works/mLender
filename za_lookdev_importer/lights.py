@@ -452,7 +452,8 @@ def emitting_surface_area(record, position_scale):
 
 
 def light_color(record):
-    return color4(record.get("color") or (1.0, 1.0, 1.0))[:3]
+    """A light colour, unclamped: Maya uses values above one as a boost."""
+    return color4(record.get("color") or (1.0, 1.0, 1.0), clamp=False)[:3]
 
 
 def apply_light_temperature(data, record, warnings=None):
@@ -608,7 +609,7 @@ def create_dome_world(dome_records, collection, position_scale, warnings):
     output = nodes.new("ShaderNodeOutputWorld")
     background = nodes.new("ShaderNodeBackground")
     background.inputs["Color"].default_value = color4(
-        selected.get("color") or (1.0, 1.0, 1.0)
+        selected.get("color") or (1.0, 1.0, 1.0), clamp=False
     )
     background.inputs["Strength"].default_value = (
         scalar(selected.get("effective_intensity"), 1.0)
@@ -657,7 +658,9 @@ def _build_dome_environment(
     tint = nodes.new("ShaderNodeMixRGB")
     tint.blend_type = "MULTIPLY"
     tint.inputs[0].default_value = 1.0
-    tint.inputs[2].default_value = color4(record.get("color") or (1.0, 1.0, 1.0))
+    tint.inputs[2].default_value = color4(
+        record.get("color") or (1.0, 1.0, 1.0), clamp=False
+    )
     links.new(environment.outputs["Color"], tint.inputs[1])
     links.new(tint.outputs["Color"], background.inputs["Color"])
 

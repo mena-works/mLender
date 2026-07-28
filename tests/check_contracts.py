@@ -203,6 +203,31 @@ def main():
         == importer.constants.OPENPBR_EMISSION_SEMANTIC,
     )
 
+    print("\ncolour clamping")
+    color4 = importer.utils.color4
+    check("an albedo above one is clamped",
+          color4((2.0, 2.0, 2.0))[:3] == (1.0, 1.0, 1.0),
+          color4((2.0, 2.0, 2.0)))
+    check("an emission colour above one is not",
+          color4((50.0, 2.0, 0.5), clamp=False)[:3] == (50.0, 2.0, 0.5),
+          color4((50.0, 2.0, 0.5), clamp=False))
+    check("negatives are still floored either way",
+          color4((-1.0, 0.5, 0.5), clamp=False)[0] == 0.0
+          and color4((-1.0, 0.5, 0.5))[0] == 0.0)
+    # Which channels skip the clamp is the part worth pinning down: an albedo
+    # above one is unphysical, an emission colour above one is ordinary.
+    unclamped = set(importer.constants.UNCLAMPED_COLOUR_CHANNELS)
+    check("emission skips the clamp", "emission" in unclamped)
+    check("a distance skips it too", "subsurface_radius" in unclamped)
+    check("base colour and the tints do not",
+          not unclamped.intersection(
+              {"base_color", "transmission_color", "coat_tint", "sheen_tint"}
+          ),
+          sorted(unclamped))
+    check("every unclamped channel is a colour valued one",
+          unclamped <= set(importer.constants.COLOUR_VALUED_CHANNELS),
+          sorted(unclamped - set(importer.constants.COLOUR_VALUED_CHANNELS)))
+
     print("\nlivelink message")
     validate = importer.livelink.validate_message
     base = {

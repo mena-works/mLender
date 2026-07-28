@@ -70,7 +70,27 @@ opacity_full -> opacity_half  0.000397    0.000397
 `sheen_on`'un `sheen_off`'tan **daha koyu** olması doğrudur: sheen dik gelişte
 enerjiyi tabandan alır. İki renderer da aynı yönde hareket ediyor.
 
-**Aktarım hatası bulunamadı.**
+**Bu turda aktarım hatası bulunamadı** — ama chart'ın kendisi bir tanesini
+kaçırmıştı, aşağıya bak.
+
+## Chart'ın kaçırdığı hata: emission kırpması
+
+`emission_on` hücresi `emissionColor` olarak **0.4** kullanıyordu, yani 1'in
+altında. Importer ise her rengi 0–1 aralığına kırpıyordu, dolayısıyla chart
+temiz görünüyordu.
+
+Hata ayrı bir deneyde ortaya çıktı: `emissionColor` **50** verilen bir yüzey
+Arnold'da 50, Blender'da **1.0** okundu. Yani parlak her emissive materyal
+sessizce düzleşiyordu.
+
+Düzeltildi ve chart'a `emission_hdr` hücresi eklendi (`emissionColor` 4.0):
+
+```text
+emission_hdr     arnold 4.0003    blender 4.0003    oran 1.0000
+```
+
+Ders, bu belgede kalmalı: **sınır değerlerinin öte tarafında da bir hücre
+olsun.** 0–1 aralığında kalan bir test, aralığı daraltan bir hatayı göremez.
 
 ## Kapsamadıkları
 
@@ -84,6 +104,22 @@ Sonucu okurken bunlar akılda tutulmalı:
   ve bu bilinçli bir tercihtir (README "Desteklenen Maya shaderları"), yani
   rig'in "aynı model" varsayımı orada geçerli değil.
 - Değerler küçük (1e-4 – 1e-2); dinamik aralık dar.
+
+## Sınanan ve çürütülen bir hipotez
+
+Bir ara "emissive yüzeyler Cycles'ta komşularını aydınlatıyor, Arnold'da
+aydınlatmıyor" diye düşünülmüştü. İzole bir deneyle sınandı — iki quad,
+biri emissive biri düfüz, sahnede hiç ışık yok, iki tarafta da bir
+diffüz sıçrama açık:
+
+```text
+                      arnold      blender
+emitter (kendisi)   50.000002     1.000000   <- asıl hata buradaydı
+receiver (komşu)     0.000000     0.000000
+```
+
+Komşu iki tarafta da siyah: **hipotez yanlış**. Ama aynı deney emission
+kırpmasını ortaya çıkardı.
 
 ## Tekrar çalıştırmak
 

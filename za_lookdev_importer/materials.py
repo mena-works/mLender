@@ -23,6 +23,7 @@ import bpy
 
 from .constants import (
     COLOUR_VALUED_CHANNELS,
+    UNCLAMPED_COLOUR_CHANNELS,
     DISPLACEMENT_SPACES,
     DEFAULT_EMISSION_STRENGTH,
     OPENPBR_EMISSION_LUMINANCE_SCALE,
@@ -379,8 +380,10 @@ def _build_unlit(material, channels, warnings):
                 emission.inputs["Color"],
             )
     elif "value" in emission_record:
+        # An unlit shader's colour is emission, so it is not clamped
+        # either; a surfaceShader above one is ordinary.
         emission.inputs["Color"].default_value = color4(
-            emission_record.get("value")
+            emission_record.get("value"), clamp=False
         )
 
     strength_record = channels.get("emission_strength") or {}
@@ -461,7 +464,10 @@ def apply_record_to_socket(material, shader, target, channel, record, warnings):
         return
     value = record.get("value")
     if channel in COLOUR_VALUED_CHANNELS:
-        target.default_value = _fit_socket(target, color4(value))
+        target.default_value = _fit_socket(
+            target,
+            color4(value, clamp=channel not in UNCLAMPED_COLOUR_CHANNELS),
+        )
     elif channel == "opacity":
         target.default_value = scalar(value, 1.0)
         enable_alpha(material)

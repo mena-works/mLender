@@ -466,6 +466,8 @@ Kullanıcının elle doğrulaması gereken adımlar:
 - ❌ DCC attribute ismini probe etmeden tabloya yazma
 - ❌ Arnold `opacity`'sini Maya `transparency` gibi ters çevirme
 - ❌ Arnold shader'ında `outColor` okuma (hesaplanmış çıktı, girdi değil)
+- ❌ Emission ve ışık rengini 0–1'e kırpma; ikisi de meşru şekilde 1'i aşar,
+  albedo ve tint'ler kırpılır
 - ❌ Materyal chart'ına tek hücre ekleme; **çift** ekle, yoksa iki tarafta da
   sıfır olan bir kanal "eşleşti" görünür
 - ❌ Yeni davranışı teste assertion eklemeden bırakma
