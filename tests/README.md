@@ -91,6 +91,26 @@ Prosedürel bake de 2. ve 4. adımda sınanır: gerçek bir checker ve ramp
 ağı kurulur, bake edilir, Blender'da Non-Color yüklendiği doğrulanır, ve
 export'un sahneye `file` node bırakmadığı kontrol edilir.
 
+## Materyal render eşleşmesi (gerçek Arnold + gerçek Cycles, ~1 dk)
+
+```bash
+"C:\Program Files\Autodesk\Maya2023in\mayapy.exe" ^
+    tests/calibration/material_match_maya.py
+"C:\Program Files\Blender Foundation\Blender 5.2lender.exe" ^
+    --background --factory-startup --python ^
+    tests/calibration/material_match_blender.py
+```
+
+Işık rig'inin materyal karşılığı: sabit nötr ışık, değişen materyal. Düz
+quad'lar, ışık kameranın arkasında, yani her örnek dik geliş açısında.
+
+İki BRDF farklı olduğu için birebir eşleşme beklenmiyor; aranan **aktarım
+hatası**. Kritik tasarım kararı: eşleşmek yeterli değil, çünkü iki tarafta da
+sessizce sıfır olan bir kanal da eşleşir. Bu yüzden her şüpheli kanal için
+**tek o kanalda farklılaşan bir çift** hücre var.
+
+Sonuçlar ve kapsamadıkları `docs/material_match.md` içinde.
+
 ## Performans ölçümü (gerçek Maya + gerçek Blender, ~1 dk)
 
 ```bash
@@ -128,6 +148,11 @@ içinde: Arnold `aiColorCorrect`/`aiRange` bir `aiFlat` üzerinden render
 edilerek, Blender node'ları da world background'a bağlanıp render edilerek.
 Üç sonuç sezginin tersi çıktı (gamma ters üs, hueShift tur cinsinden, contrast
 pivotlu) ve soket **isimleri** 4.1→5.2'de değişip indeksleri sabit kaldı.
+
+Materyaller de ölçüldü, `material_match.md` içinde: on altı hücrelik bir
+chart iki renderer'da render edilip karşılaştırıldı, hepsi %0.7 içinde ve
+altı kanal çiftinin altısı da iki tarafta hareket ediyor. Aktarım hatası
+bulunamadı. Kapsamadıkları belgede yazılı.
 
 Işık değerleri de ölçüldü, `light_calibration.md` içinde:
 

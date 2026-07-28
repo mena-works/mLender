@@ -63,7 +63,7 @@ tests/                   # amaca göre ayrılmış, ayrıntı tests/README.md
   check_contracts.py     # host gerekmez, saniyeler — en sık çalıştırılan
   host/                  # gerçek Maya ve gerçek Blender testleri
   calibration/           # render eşleşmesi, ölçek probları, performans rig'i
-  docs/                  # ölçüm kayıtları (ışık, düzeltme node'ları)
+  docs/                  # ölçüm kayıtları (ışık, materyal, düzeltme node'ları)
 
 README.md                # Kullanıcı dokümantasyonu (Türkçe)
 ```
@@ -466,6 +466,8 @@ Kullanıcının elle doğrulaması gereken adımlar:
 - ❌ DCC attribute ismini probe etmeden tabloya yazma
 - ❌ Arnold `opacity`'sini Maya `transparency` gibi ters çevirme
 - ❌ Arnold shader'ında `outColor` okuma (hesaplanmış çıktı, girdi değil)
+- ❌ Materyal chart'ına tek hücre ekleme; **çift** ekle, yoksa iki tarafta da
+  sıfır olan bir kanal "eşleşti" görünür
 - ❌ Yeni davranışı teste assertion eklemeden bırakma
 - ❌ Kaynak sahnenin istemediği bir şeyi bütün meshlere uygulama
 - ❌ Işık enerjisinden `position_scale²` terimini düşürme
