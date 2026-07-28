@@ -190,6 +190,28 @@ def main():
         exported <= known,
         "unmapped: {0}".format(sorted(exported - known)),
     )
+    # A channel honoured only by the glass path is not honoured: the common
+    # build is Principled, and ior used to be missing from it entirely.
+    principled_reachable = (
+        set(importer.constants.PRINCIPLED_INPUTS)
+        | set(importer.constants.METADATA_CHANNELS)
+        | set(importer.constants.GLASS_ONLY_CHANNELS)
+    )
+    check(
+        "every channel reaches the Principled build or is declared glass only",
+        exported <= principled_reachable,
+        "only reachable through glass: {0}".format(
+            sorted(exported - principled_reachable)
+        ),
+    )
+    check(
+        "the glass only list really is only about refraction",
+        all(
+            "transmission" in name
+            for name in importer.constants.GLASS_ONLY_CHANNELS
+        ),
+        sorted(importer.constants.GLASS_ONLY_CHANNELS),
+    )
     check(
         "the glass path covers the refraction channels",
         {"transmission_color", "transmission_roughness", "ior"}

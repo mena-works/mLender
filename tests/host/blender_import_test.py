@@ -103,9 +103,9 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("12 meshes imported", result["mesh_count"] == 12,
+    check("13 meshes imported", result["mesh_count"] == 13,
           result["mesh_count"])
-    check("10 materials built", result["material_count"] == 10,
+    check("11 materials built", result["material_count"] == 11,
           result["material_count"])
     # Four of the eight cubes asked for subdivision in Maya, the displaced one
     # among them; the rest must arrive unmodified.
@@ -158,6 +158,41 @@ def main():
     check("four collections were reported",
           result["group_collection_count"] == 4,
           result["group_collection_count"])
+
+    print("\nvalues outside the usual range")
+    # The emission clamp survived every test because nothing ever asked for a
+    # value past a limit. These assertions exist to keep that from recurring.
+    extreme = material_for("extremeCube")
+    check("the extreme material exists", extreme is not None)
+    if extreme:
+        emission = value(extreme, "Emission Color")
+        check("an emission colour of 8 is not clamped to 1",
+              emission is not None and abs(emission[0] - 8.0) < 1e-4,
+              list(emission) if emission is not None else None)
+        radius = value(extreme, "Subsurface Radius")
+        check("a subsurface radius of 5 is not clamped to 1",
+              radius is not None and abs(radius[0] - 5.0) < 1e-4,
+              list(radius) if radius is not None else None)
+        check("an IOR of 2.4 survives", abs(value(extreme, "IOR") - 2.4) < 1e-4,
+              value(extreme, "IOR"))
+        coat_ior = socket(extreme, "Coat IOR")
+        check("a coat IOR of 2.0 survives",
+              coat_ior is None or abs(coat_ior.default_value - 2.0) < 1e-4,
+              coat_ior.default_value if coat_ior else None)
+        check("roughness of exactly zero stays zero",
+              abs(value(extreme, "Roughness")) < 1e-6,
+              value(extreme, "Roughness"))
+        check("metallic of exactly one stays one",
+              abs(value(extreme, "Metallic") - 1.0) < 1e-6,
+              value(extreme, "Metallic"))
+
+    boost = object_named("boostLight")
+    check("the boosted light exists", boost is not None)
+    if boost:
+        colour = list(boost.data.color)
+        check("a light colour of 3,2,1 is not clamped to white",
+              abs(colour[0] - 3.0) < 1e-4 and abs(colour[1] - 2.0) < 1e-4,
+              colour)
 
     print("\nedge cases")
     # Two Maya meshes share the short name "twin" under different groups. The

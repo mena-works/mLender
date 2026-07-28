@@ -8,7 +8,7 @@ message shape changes.
 
 import math
 
-BUILD_VERSION = "1.25.0"
+BUILD_VERSION = "1.26.0"
 
 LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
@@ -49,6 +49,11 @@ PRINCIPLED_INPUTS = {
     "roughness": ("Roughness",),
     "specular": ("Specular IOR Level", "Specular"),
     "metallic": ("Metallic",),
+    # Arnold's specularIOR drives the specular Fresnel, and so does
+    # Principled's IOR. It used to be listed only under GLASS_INPUTS,
+    # so every non refractive material silently kept Blender's 1.45
+    # default however the Maya shader was set.
+    "ior": ("IOR",),
     "opacity": ("Alpha",),
     "normal": ("Normal",),
     "emission": ("Emission Color", "Emission"),
@@ -108,6 +113,18 @@ GLASS_INPUTS = {
     "ior": ("IOR",),
     "normal": ("Normal",),
 }
+
+# Channels that only ever apply on the refractive path, because transmission
+# is what selects that path in the first place. Everything else a shader can
+# export has to reach the Principled build too.
+#
+# This list exists because "the importer honours this channel" used to be
+# satisfied by the glass path alone: ior sat in GLASS_INPUTS and nowhere else,
+# so every non refractive material silently ignored the Maya IOR.
+GLASS_ONLY_CHANNELS = (
+    "transmission_color",
+    "transmission_roughness",
+)
 
 # Channels with no socket of their own. They either select the build path or
 # survive as custom properties on the material for reference.

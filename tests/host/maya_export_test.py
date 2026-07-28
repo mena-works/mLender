@@ -171,6 +171,20 @@ def build_scene():
         pass
     cmds.connectAttr(udim_node + ".outColor", lam + ".KdColor", force=True)
 
+    # Values deliberately outside the ranges the rest of the scene uses. The
+    # emission clamp bug survived every test because nothing ever asked for a
+    # value on the far side of a limit, so this cube does nothing else.
+    _, extreme = shaded_cube("extremeCube", "aiStandardSurface")
+    cmds.setAttr(extreme + ".emission", 1.0)
+    cmds.setAttr(extreme + ".emissionColor", 8.0, 8.0, 8.0, type="double3")
+    cmds.setAttr(extreme + ".subsurfaceRadius", 5.0, 5.0, 5.0, type="double3")
+    cmds.setAttr(extreme + ".specularIOR", 2.4)
+    cmds.setAttr(extreme + ".coat", 1.0)
+    cmds.setAttr(extreme + ".coatIOR", 2.0)
+    # Exactly at the ends, where an off-by-one clamp shows.
+    cmds.setAttr(extreme + ".specularRoughness", 0.0)
+    cmds.setAttr(extreme + ".metalness", 1.0)
+
     # ---------------------------------------------------------- edge cases
     # Two meshes sharing a short name under different groups. Maya allows it,
     # and the importer matches records to objects by name, so this is where a
@@ -228,6 +242,17 @@ def build_scene():
         cmds.setKeyframe(turntable_shape + ".focalLength", time=frame,
                          value=focal)
     cmds.playbackOptions(minTime=1, maxTime=25)
+
+    # A light colour above one, which Maya artists use as a boost. It was
+    # clamped to white until the same bug that flattened emission was fixed.
+    # A point light, not an area one: the assertions below key lights by
+    # node type, so a second aiAreaLight would quietly replace the one
+    # they are about.
+    boost = cmds.createNode("pointLight", name="boostLightShape")
+    boost_tf = cmds.listRelatives(boost, parent=True, fullPath=True)[0]
+    cmds.setAttr(boost + ".color", 3.0, 2.0, 1.0, type="double3")
+    cmds.setAttr(boost + ".intensity", 2.0)
+    cmds.setAttr(boost_tf + ".translateY", 12.0)
 
     area = cmds.createNode("aiAreaLight", name="aiAreaShape")
     area_tf = cmds.listRelatives(area, parent=True, fullPath=True)[0]
@@ -402,7 +427,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("12 meshes exported", payload["mesh_count"] == 12,
+    check("13 meshes exported", payload["mesh_count"] == 13,
           payload["mesh_count"])
 
     print("\naiStandardSurface")

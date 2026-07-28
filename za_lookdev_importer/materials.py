@@ -192,6 +192,7 @@ def _build_principled(material, channels, warnings):
         "specular",
         "anisotropic",
         "metallic",
+        "ior",
         "opacity",
         "normal",
         "emission",
