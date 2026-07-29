@@ -105,6 +105,8 @@ def main():
     arnold = sample_cells(expected["arnold_exr"], len(cells))
     blender = sample_cells(blender_exr, len(cells))
 
+    print("\nsurface: {0}   quads turned {1:g} degrees from the camera".format(
+        expected.get("surface", "?"), expected.get("tilt_degrees", 0)))
     print("\n{0:16s} {1:>26s} {2:>26s} {3:>9s}".format(
         "cell", "arnold rgb", "blender rgb", "ratio"))
     print("-" * 82)

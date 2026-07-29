@@ -92,13 +92,65 @@ emission_hdr     arnold 4.0003    blender 4.0003    oran 1.0000
 Ders, bu belgede kalmalı: **sınır değerlerinin öte tarafında da bir hücre
 olsun.** 0–1 aralığında kalan bir test, aralığı daraltan bir hatayı göremez.
 
+## OpenPBR: emission ölçekleyicisi 10 kat yanlıştı
+
+Chart artık yüzey tipini ve quad'ların açısını argüman olarak alıyor:
+
+```bash
+material_match_maya.py                        # aiStandardSurface, dik
+material_match_maya.py aiOpenPBRSurface       # diğer yüzey
+material_match_maya.py aiStandardSurface 45    # aynı chart, eğik
+```
+
+OpenPBR koşusu üç anomali gösterdi, biri kesin:
+
+**`OPENPBR_EMISSION_LUMINANCE_SCALE` 100 değil 1000.** Kodda "seçilmiş bir
+değer, ölçülmedi" diye duruyordu. Arnold, `emissionLuminance = 100` ve
+`emissionColor = 0.4` için **0.0404** veriyor — yani renge uygulanan çarpan
+0.1, 1 değil. Blender her OpenPBR emissive yüzeyde **10 kat parlaktı**.
+
+Sabit 1000'e çekildikten sonra, iki farklı parlaklıkta oran tam 1.0000:
+
+```text
+nit    hucre           arnold     blender    oran
+100    emission_on     0.0404     0.0404     1.0000
+100    emission_hdr    0.4003     0.4003     1.0000
+400    emission_on     0.1604     0.1604     1.0000
+400    emission_hdr    1.6003     1.6003     1.0000
+```
+
+Çift deltaları da altı hanede örtüşüyor, yani dönüşüm doğrusal.
+
+### Çözülmemiş iki OpenPBR farklılığı
+
+- **`metal_on`**: Arnold 0.0000, Blender 0.0167. Chart'ın tabanında
+  `specular = 0` var; OpenPBR metali `specularWeight`'e bağlı görünüyor,
+  Principled'ın metali ise `Specular IOR Level`'a bağlı değil. Aktarım hatası
+  mı semantik fark mı, ayrıca sınanmalı.
+- **`coat_on`**: %28 fark. Coat modelleri zaten aynı değil; anlamlı olup
+  olmadığı belli değil.
+
+## Sıyırma açısı: henüz güvenilir değil
+
+Açı argümanı çalışıyor ve dik koşu bilinen-iyi sayıları aynen üretiyor
+(rig'in kendi regresyon kontrolü). Ama 45° ve 70°'de emission ve opacity
+hücreleri açıklayamadığım şekilde sapıyor.
+
+**İki hipotez kuruldu ve ikisi de çürütüldü:**
+
+1. Örnekleme yaması dar quad'ı taşıyor — 45°'de quad 38 piksel, yama 12
+   piksel; anomali aynı kaldı.
+2. Emissive yüzey komşusunu aydınlatıyor — izole deneyde quad'lar birbirine
+   **bakacak şekilde** döndürüldü, alıcı iki renderer'da da 0.000000.
+
+Sebep henüz bilinmiyor, o yüzden sıyırma sonuçları bulgu sayılmamalı.
+
 ## Kapsamadıkları
 
 Sonucu okurken bunlar akılda tutulmalı:
 
-- Yalnız `aiStandardSurface`. OpenPBR, Redshift, `lambert`/`blinn` sınanmadı.
-- Yalnız **dik geliş açısı**. Sheen, coat ve Fresnel en çok sıyırma açılarında
-  ayrışır; oraya bakılmadı.
+- Redshift ve `lambert`/`blinn` sınanmadı. OpenPBR artık sınanıyor.
+- Pratikte yalnız **dik geliş açısı**; eğik koşu var ama güvenilir değil.
 - Yalnız düz değerler; texture'lı kanallar bu rig'de yok.
 - **Transmission bilerek yok.** Araç orada Principled yerine Glass BSDF kurar
   ve bu bilinçli bir tercihtir (README "Desteklenen Maya shaderları"), yani

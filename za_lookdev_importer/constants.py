@@ -8,7 +8,7 @@ message shape changes.
 
 import math
 
-BUILD_VERSION = "1.26.0"
+BUILD_VERSION = "1.27.0"
 
 LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
@@ -263,8 +263,13 @@ DEFAULT_LIGHT_POWER_SCALE = 1.0
 
 # OpenPBR's emissionLuminance is a photometric value in nits, not a 0..1
 # weight, so it cannot go straight into a Blender Emission Strength socket.
-# Dividing by this maps a display-white-ish 100 nits onto strength 1.0.
-OPENPBR_EMISSION_LUMINANCE_SCALE = 100.0
+#
+# Measured, having previously been a guess of 100. The material chart rendered
+# an OpenPBR surface with emissionLuminance 100 and emissionColor 0.4: Arnold
+# produced 0.0404, so the multiplier Arnold applies to the colour is about a
+# tenth, not one. Confirmed linear at a second luminance. Blender was ten times
+# too bright on every OpenPBR emissive surface until this changed.
+OPENPBR_EMISSION_LUMINANCE_SCALE = 1000.0
 OPENPBR_EMISSION_SEMANTIC = "openpbr_emission_luminance"
 
 # A light's node tree is a multiplier on top of its energy. Nodes feeding

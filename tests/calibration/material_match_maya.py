@@ -44,6 +44,46 @@ KICK = r"C:\Program Files\Autodesk\Arnold\maya2023\bin\kick.exe"
 if TOOL_ROOT not in sys.path:
     sys.path.insert(0, TOOL_ROOT)
 
+# Which surface to chart, and how far the quads are turned from the camera.
+# Two runs rather than two rows: the multi row version of this rig produced
+# numbers I could not reconcile with the single row one, and rather than ship
+# an instrument I did not trust, each angle now gets its own run of exactly
+# the chart that is known to be sound.
+#
+#   material_match_maya.py                          aiStandardSurface, head on
+#   material_match_maya.py aiStandardSurface 70     the same at grazing
+#   material_match_maya.py aiOpenPBRSurface         the other surface
+SURFACE = sys.argv[1] if len(sys.argv) > 1 else "aiStandardSurface"
+TILT_DEGREES = float(sys.argv[2]) if len(sys.argv) > 2 else 0.0
+
+# Semantic name -> what each surface calls it. OpenPBR renames half of these
+# and had never been checked against a render.
+ATTRS = {
+    "aiStandardSurface": {
+        "base_color": "baseColor", "specular": "specular",
+        "roughness": "specularRoughness", "metalness": "metalness",
+        "coat": "coat", "coat_roughness": "coatRoughness",
+        "sheen": "sheen", "sheen_roughness": "sheenRoughness",
+        "emission": "emission", "emission_color": "emissionColor",
+        "opacity": "opacity",
+    },
+    "aiOpenPBRSurface": {
+        "base_color": "baseColor", "specular": "specularWeight",
+        "roughness": "specularRoughness", "metalness": "baseMetalness",
+        "coat": "coatWeight", "coat_roughness": "coatRoughness",
+        # OpenPBR calls the sheen lobe fuzz and states emission in nits.
+        "sheen": "fuzzWeight", "sheen_roughness": "fuzzRoughness",
+        "emission": "emissionLuminance", "emission_color": "emissionColor",
+        "opacity": "geometryOpacity",
+    },
+}
+
+# OpenPBR emission is a luminance in nits and the importer divides by
+# OPENPBR_EMISSION_LUMINANCE_SCALE to reach a Blender strength. This chart
+# is what measured that constant: at 100 the two sides were exactly ten
+# times apart, and 1000 makes them agree at every luminance tried.
+OPENPBR_EMISSION_NITS = 100.0
+
 RESOLUTION = 1024
 CELL = 10.0          # world width of one chart cell
 LIGHT_DISTANCE = 60.0
@@ -57,8 +97,7 @@ LIGHT_INTENSITY = 40.0
 # off cell and an on cell differing in exactly that channel. If the pair is
 # identical in Arnold the chart is wrong; if it is identical in Blender but not
 # in Arnold, the channel did not survive the transfer.
-BASE = {"baseColor": (0.3, 0.3, 0.3), "specular": 0.0,
-        "specularRoughness": 0.4}
+BASE = {"base_color": (0.3, 0.3, 0.3), "specular": 0.0, "roughness": 0.4}
 
 
 def _cell(**overrides):
@@ -68,33 +107,33 @@ def _cell(**overrides):
 
 
 MATERIALS = [
-    ("grey_diffuse", _cell(baseColor=(0.5, 0.5, 0.5))),
-    ("dark_diffuse", _cell(baseColor=(0.18, 0.18, 0.18))),
-    ("red_diffuse", _cell(baseColor=(0.8, 0.15, 0.1))),
+    ("grey_diffuse", _cell(base_color=(0.5, 0.5, 0.5))),
+    ("dark_diffuse", _cell(base_color=(0.18, 0.18, 0.18))),
+    ("red_diffuse", _cell(base_color=(0.8, 0.15, 0.1))),
 
-    ("spec_off", _cell(specular=0.0, specularRoughness=0.1)),
-    ("spec_on", _cell(specular=1.0, specularRoughness=0.1)),
-    ("spec_rough", _cell(specular=1.0, specularRoughness=0.6)),
+    ("spec_off", _cell(specular=0.0, roughness=0.1)),
+    ("spec_on", _cell(specular=1.0, roughness=0.1)),
+    ("spec_rough", _cell(specular=1.0, roughness=0.6)),
 
-    ("metal_off", _cell(baseColor=(0.9, 0.9, 0.9), metalness=0.0)),
-    ("metal_on", _cell(baseColor=(0.9, 0.9, 0.9), metalness=1.0,
-                       specularRoughness=0.3)),
+    ("metal_off", _cell(base_color=(0.9, 0.9, 0.9), metalness=0.0)),
+    ("metal_on", _cell(base_color=(0.9, 0.9, 0.9), metalness=1.0,
+                       roughness=0.3)),
 
     ("coat_off", _cell(coat=0.0)),
-    ("coat_on", _cell(coat=1.0, coatRoughness=0.1)),
+    ("coat_on", _cell(coat=1.0, coat_roughness=0.1)),
 
     ("sheen_off", _cell(sheen=0.0)),
-    ("sheen_on", _cell(sheen=1.0, sheenRoughness=0.3)),
+    ("sheen_on", _cell(sheen=1.0, sheen_roughness=0.3)),
 
     ("emission_off", _cell(emission=0.0)),
-    ("emission_on", _cell(emission=1.0, emissionColor=(0.4, 0.4, 0.4))),
+    ("emission_on", _cell(emission=1.0, emission_color=(0.4, 0.4, 0.4))),
     # Above one on purpose. The first version of this chart used 0.4 and
     # so never noticed that the importer clamped emission colours to one,
     # which flattened every bright emissive material.
-    ("emission_hdr", _cell(emission=1.0, emissionColor=(4.0, 4.0, 4.0))),
+    ("emission_hdr", _cell(emission=1.0, emission_color=(4.0, 4.0, 4.0))),
 
-    ("opacity_full", _cell(baseColor=(0.8, 0.8, 0.8))),
-    ("opacity_half", _cell(baseColor=(0.8, 0.8, 0.8),
+    ("opacity_full", _cell(base_color=(0.8, 0.8, 0.8))),
+    ("opacity_half", _cell(base_color=(0.8, 0.8, 0.8),
                            opacity=(0.5, 0.5, 0.5))),
 ]
 
@@ -121,20 +160,38 @@ def build_scene():
         pass
 
     count = len(MATERIALS)
+    names = ATTRS[SURFACE]
     for index, (name, attrs) in enumerate(MATERIALS):
         quad = cmds.polyPlane(
+            # Deliberately not widened to keep filling the cell when turned.
+            # Widening by 1/cos(tilt) makes a 70 degree quad nearly three
+            # cells across and every cell then reads its neighbours.
             width=CELL * 0.9, height=CELL * 0.9,
             subdivisionsX=1, subdivisionsY=1, name=name,
         )[0]
-        # Stand it up to face the camera, which looks down -Z.
+        # Stand it up to face the camera, which looks down -Z, then turn it.
         cmds.setAttr(quad + ".rotateX", 90.0)
+        cmds.setAttr(quad + ".rotateY", TILT_DEGREES)
         cmds.setAttr(quad + ".translateX", (index - (count - 1) / 2.0) * CELL)
 
-        shader = cmds.shadingNode(
-            "aiStandardSurface", asShader=True, name=name + "_shd"
-        )
-        for attr, value in attrs.items():
-            if isinstance(value, tuple):
+        shader = cmds.shadingNode(SURFACE, asShader=True, name=name + "_shd")
+        for semantic, value in attrs.items():
+            attr = names.get(semantic)
+            if not attr or not cmds.attributeQuery(
+                attr, node=shader, exists=True
+            ):
+                continue
+            if semantic == "emission" and SURFACE == "aiOpenPBRSurface":
+                # A luminance in nits, not a nought to one weight.
+                value = OPENPBR_EMISSION_NITS if value else 0.0
+            # The float check comes first: OpenPBR states opacity as a single
+            # geometryOpacity where standard surface uses an RGB opacity, and
+            # testing for a tuple first would send a colour to a float plug.
+            if semantic == "opacity" and SURFACE == "aiOpenPBRSurface":
+                if isinstance(value, tuple):
+                    value = value[0]
+                cmds.setAttr(shader + "." + attr, float(value))
+            elif isinstance(value, tuple):
                 cmds.setAttr(shader + "." + attr, value[0], value[1], value[2],
                              type="double3")
             else:
@@ -234,6 +291,8 @@ def main():
                 "resolution": RESOLUTION,
                 "height": RESOLUTION // len(MATERIALS),
                 "cells": [name for name, _ in MATERIALS],
+                "surface": SURFACE,
+                "tilt_degrees": TILT_DEGREES,
                 "pairs": PAIRS,
                 "arnold_exr": exr,
                 "package": result["package_folder"],

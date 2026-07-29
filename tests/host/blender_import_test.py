@@ -541,8 +541,10 @@ def main():
     if pbr:
         check("metallic 1.0", abs(value(pbr, "Metallic") - 1.0) < 1e-5)
         check("alpha 0.25", abs(value(pbr, "Alpha") - 0.25) < 1e-5)
-        check("250 nits scaled to emission strength 2.5",
-              abs(value(pbr, "Emission Strength") - 2.5) < 1e-5,
+        # 250 nits over the measured 1000, not the 100 that was guessed at
+        # first: rendering both sides put Blender ten times too bright.
+        check("250 nits scaled to emission strength 0.25",
+              abs(value(pbr, "Emission Strength") - 0.25) < 1e-5,
               value(pbr, "Emission Strength"))
 
     print("\naiFlat")
