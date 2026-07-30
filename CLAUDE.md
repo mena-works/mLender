@@ -465,6 +465,9 @@ Kullanıcının elle doğrulaması gereken adımlar:
 - ❌ Package'lar arasında döngüsel bağımlılık oluşturma
 - ❌ DCC attribute ismini probe etmeden tabloya yazma
 - ❌ Arnold `opacity`'sini Maya `transparency` gibi ters çevirme
+- ❌ Bir kaydın `value` taşımasına bakıp "düz değer" sanma; `first_channel_record`
+  bağlantı olsa da `value` doldurur. Texture'ı `texture.path` ile ayır, yoksa
+  texture'lı transparency ters çevrilmeden geçer
 - ❌ Arnold shader'ında `outColor` okuma (hesaplanmış çıktı, girdi değil)
 - ❌ Bir kanalı yalnız Glass yoluna bağlayıp bırakma; yaygın olan Principled
   yoludur, `GLASS_ONLY_CHANNELS` dışındaki her kanal oraya da ulaşmalı

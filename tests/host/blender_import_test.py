@@ -62,10 +62,20 @@ def object_named(fragment):
 
 
 def material_for(fragment):
+    """Find a material by its Maya name, exact stem first.
+
+    Substring alone is ambiguous: "lambertCube" is inside "aiLambertCube_shd",
+    so the native shader's assertions silently ran against the Arnold one.
+    """
+    wanted = fragment.lower()
+    fallback = None
     for material in bpy.data.materials:
-        if fragment.lower() in str(material.get("za_maya_material", "")).lower():
+        name = str(material.get("za_maya_material", "")).lower()
+        if name == wanted or name == wanted + "_shd":
             return material
-    return None
+        if fallback is None and wanted in name:
+            fallback = material
+    return fallback
 
 
 def bsdf_of(material):
@@ -103,9 +113,9 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("13 meshes imported", result["mesh_count"] == 13,
+    check("16 meshes imported", result["mesh_count"] == 16,
           result["mesh_count"])
-    check("11 materials built", result["material_count"] == 11,
+    check("14 materials built", result["material_count"] == 14,
           result["material_count"])
     # Four of the eight cubes asked for subdivision in Maya, the displaced one
     # among them; the rest must arrive unmodified.
@@ -572,6 +582,70 @@ def main():
               abs(value(lam, "Roughness") - 0.7) < 1e-5)
         check("alpha 0.8, not inverted to 0.2",
               abs(value(lam, "Alpha") - 0.8) < 1e-5, value(lam, "Alpha"))
+
+    print("\nnative Maya shaders")
+    # Maya states transparency, Blender wants opacity. Arnold's opacity is
+    # already opacity, so only this family is inverted and only here.
+    native_lam = material_for("lambertCube")
+    check("lambert material exists", native_lam is not None)
+    if native_lam:
+        check("transparency 0.25 arrived as alpha 0.75",
+              abs(value(native_lam, "Alpha") - 0.75) < 1e-5,
+              value(native_lam, "Alpha"))
+        base = value(native_lam, "Base Color")
+        check("base colour survived",
+              base is not None and abs(base[0] - 0.4) < 1e-4
+              and abs(base[1] - 0.6) < 1e-4,
+              list(base) if base is not None else None)
+        check("roughness pinned to the lambert approximation",
+              abs(value(native_lam, "Roughness") - 0.7) < 1e-5,
+              value(native_lam, "Roughness"))
+
+    native_blinn = material_for("blinnCube")
+    check("blinn material exists", native_blinn is not None)
+    if native_blinn:
+        alpha = socket(native_blinn, "Alpha")
+        check("a textured transparency reaches alpha at all",
+              alpha is not None and alpha.is_linked)
+        # The exporter cannot invert a map, so it sends the flag and the
+        # importer owes us a 1-x node. Without it the mesh renders inside out.
+        def upstream_ids(sock, depth=6):
+            found = set()
+            if depth <= 0 or sock is None or not sock.is_linked:
+                return found
+            node = sock.links[0].from_node
+            found.add((node.bl_idname, getattr(node, "operation", "")))
+            for downstream in node.inputs:
+                found |= upstream_ids(downstream, depth - 1)
+            return found
+
+        chain = upstream_ids(alpha) if alpha else set()
+        check("and an invert sits between the map and the socket",
+              ("ShaderNodeMath", "SUBTRACT") in chain, sorted(chain))
+        check("the map itself is in the chain",
+              any(i[0] == "ShaderNodeTexImage" for i in chain), sorted(chain))
+        check("roughness pinned to the blinn approximation",
+              abs(value(native_blinn, "Roughness") - 0.1) < 1e-5,
+              value(native_blinn, "Roughness"))
+
+    native_surface = material_for("surfaceCube")
+    check("surfaceShader material exists", native_surface is not None)
+    if native_surface:
+        ids = {n.bl_idname for n in native_surface.node_tree.nodes}
+        check("built unlit, like aiFlat",
+              {"ShaderNodeEmission", "ShaderNodeBsdfTransparent",
+               "ShaderNodeMixShader"} <= ids, sorted(ids))
+        emission = next((n for n in native_surface.node_tree.nodes
+                         if n.bl_idname == "ShaderNodeEmission"), None)
+        if emission:
+            colour = [round(c, 3)
+                      for c in emission.inputs["Color"].default_value[:3]]
+            check("outColor drives emission", colour == [0.9, 0.3, 0.1], colour)
+        mix = next((n for n in native_surface.node_tree.nodes
+                    if n.bl_idname == "ShaderNodeMixShader"), None)
+        check("outTransparency 0.2 became a mix factor of 0.8",
+              mix is not None and abs(mix.inputs[0].default_value - 0.8) < 1e-5,
+              mix.inputs[0].default_value if mix else None)
 
     print("\nglass")
     glass = material_for("glassCube")

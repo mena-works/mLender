@@ -171,6 +171,29 @@ def build_scene():
         pass
     cmds.connectAttr(udim_node + ".outColor", lam + ".KdColor", force=True)
 
+    # The native Maya shaders, which have their own code paths and had no
+    # coverage at all. They matter because of the transparency conversion:
+    # Maya states transparency where Blender wants opacity, and the exporter
+    # inverts a flat value itself while leaving a textured one for the
+    # importer. Getting that wrong inverts twice and nothing was watching.
+    _, lam_native = shaded_cube("lambertCube", "lambert")
+    cmds.setAttr(lam_native + ".color", 0.4, 0.6, 0.2, type="double3")
+    cmds.setAttr(lam_native + ".transparency", 0.25, 0.25, 0.25, type="double3")
+
+    _, blinn_native = shaded_cube("blinnCube", "blinn")
+    cmds.setAttr(blinn_native + ".color", 0.7, 0.7, 0.9, type="double3")
+    # Textured transparency takes the other branch: the flag survives to the
+    # importer instead of the value being inverted here.
+    blinn_tex = cmds.shadingNode("file", asTexture=True, name="blinnTransTex")
+    cmds.setAttr(blinn_tex + ".fileTextureName", texture, type="string")
+    cmds.connectAttr(blinn_tex + ".outColor", blinn_native + ".transparency",
+                     force=True)
+
+    _, surface_native = shaded_cube("surfaceCube", "surfaceShader")
+    cmds.setAttr(surface_native + ".outColor", 0.9, 0.3, 0.1, type="double3")
+    cmds.setAttr(surface_native + ".outTransparency", 0.2, 0.2, 0.2,
+                 type="double3")
+
     # Values deliberately outside the ranges the rest of the scene uses. The
     # emission clamp bug survived every test because nothing ever asked for a
     # value on the far side of a limit, so this cube does nothing else.
@@ -427,7 +450,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("13 meshes exported", payload["mesh_count"] == 13,
+    check("16 meshes exported", payload["mesh_count"] == 16,
           payload["mesh_count"])
 
     print("\naiStandardSurface")
@@ -834,6 +857,47 @@ def main():
           lam.get("base_color", {}).get("maya_attr") == "KdColor")
     check("opacity is NOT inverted",
           not lam.get("opacity", {}).get("invert", False))
+
+    print("\nnative Maya shaders and the transparency conversion")
+    by_material = {}
+    for mesh in payload["meshes"]:
+        for material in mesh["materials"]:
+            by_material[material.get("material")] = material
+
+    lam_channels = (by_material.get("lambertCube_shd") or {}).get("channels", {})
+    lam_opacity = lam_channels.get("opacity") or {}
+    check("lambert exported", bool(lam_channels), sorted(by_material))
+    # Transparency 0.25 is opacity 0.75, and the exporter does that itself.
+    check("a flat transparency is inverted into opacity",
+          abs(lam_opacity.get("value", [0])[0] - 0.75) < 1e-6,
+          lam_opacity.get("value"))
+    check("and its invert flag is cleared so nobody inverts twice",
+          lam_opacity.get("invert") is False, lam_opacity.get("invert"))
+    check("the conversion is labelled",
+          lam_opacity.get("semantic") == "maya_transparency_to_opacity",
+          lam_opacity.get("semantic"))
+
+    blinn_opacity = (
+        (by_material.get("blinnCube_shd") or {}).get("channels", {})
+        .get("opacity") or {}
+    )
+    check("a textured transparency keeps the flag for the importer",
+          blinn_opacity.get("invert") is True, blinn_opacity.get("invert"))
+    check("and carries the texture rather than a value",
+          blinn_opacity.get("texture", {}).get("path", "").endswith(".tx"),
+          blinn_opacity.get("texture"))
+
+    surface_channels = (
+        (by_material.get("surfaceCube_shd") or {}).get("channels", {})
+    )
+    check("surfaceShader drives emission, not base colour",
+          abs((surface_channels.get("emission") or {}).get("value", [0])[0]
+              - 0.9) < 1e-6,
+          (surface_channels.get("emission") or {}).get("value"))
+    check("its outTransparency becomes opacity 0.8",
+          abs((surface_channels.get("opacity") or {}).get("value", [0])[0]
+              - 0.8) < 1e-6,
+          (surface_channels.get("opacity") or {}).get("value"))
 
     print("\nglass")
     glass = channels("glassCube")

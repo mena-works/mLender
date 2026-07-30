@@ -228,14 +228,23 @@ def surface_shader_channels(shader, bake_context=None):
 def _transparency_as_opacity(shader, attrs, bake_context=None):
     """Convert a Maya transparency plug into an opacity channel record.
 
-    A flat colour is inverted immediately and ``invert`` cleared, so the
-    importer never inverts an already inverted value.
+    A flat colour is inverted here and ``invert`` cleared, so the importer
+    never inverts an already inverted value. A texture cannot be inverted
+    here, so the flag travels instead and the importer builds the node.
+
+    The texture case has to be checked first. first_channel_record fills in
+    ``value`` whether or not a texture drives the plug, so testing for a value
+    alone treated every textured transparency as flat: the flag was cleared,
+    nothing inverted the map, and the mesh came through inside out, opaque
+    where it should have been clear.
     """
     record = first_channel_record(shader, attrs, bake_context, "opacity")
     if not record:
         return {"value": [1.0, 1.0, 1.0, 1.0]}
     record["invert"] = True
     record["semantic"] = "maya_transparency_to_opacity"
+    if (record.get("texture") or {}).get("path"):
+        return record
     if "value" in record:
         record["value"] = invert_color(record["value"])
         record["invert"] = False
