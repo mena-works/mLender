@@ -132,6 +132,12 @@ def apply_glossiness_conversion(shader, roughness_record):
 
     A flat value can be inverted here; a texture cannot, so the record is
     tagged and the importer inserts an invert node instead.
+
+    The split is on ``texture.path``, not on the texture record existing. A
+    procedural that could not be baked leaves a record behind with no file in
+    it; the importer falls through to the flat value, and the flat value is
+    the only place an inversion can still happen. Tagging that case and
+    leaving the number alone shipped glossiness as roughness.
     """
     if not roughness_record:
         return
@@ -148,7 +154,7 @@ def apply_glossiness_conversion(shader, roughness_record):
     if not convert_gloss:
         return
     roughness_record["source_semantic"] = "glossiness"
-    if roughness_record.get("texture"):
+    if (roughness_record.get("texture") or {}).get("path"):
         roughness_record["invert"] = True
     elif "value" in roughness_record:
         roughness_record["value"] = 1.0 - float(roughness_record["value"])

@@ -899,6 +899,44 @@ def main():
               - 0.8) < 1e-6,
           (surface_channels.get("opacity") or {}).get("value"))
 
+    print("\nglossiness inversion, the other half of the same decision")
+    # Redshift is not installed here, but the conversion only asks whether the
+    # flag attribute exists, so a real Maya shader carrying a real flag name
+    # exercises it honestly. What is under test is which branch a record takes,
+    # and that is the branch that shipped a textured transparency uninverted.
+    from za_lookdev_exporter.constants import REDSHIFT_GLOSSINESS_FLAGS
+    from za_lookdev_exporter.shaders import apply_glossiness_conversion
+
+    probe = cmds.shadingNode("blinn", asShader=True, name="glossProbe")
+    cmds.addAttr(probe, longName=REDSHIFT_GLOSSINESS_FLAGS[0],
+                 attributeType="bool")
+    cmds.setAttr(probe + "." + REDSHIFT_GLOSSINESS_FLAGS[0], True)
+
+    flat = {"value": 0.9}
+    apply_glossiness_conversion(probe, flat)
+    check("a flat glossiness of 0.9 becomes roughness 0.1",
+          abs(flat["value"] - 0.1) < 1e-6, flat.get("value"))
+    check("and carries no invert flag, having been inverted already",
+          not flat.get("invert"), flat.get("invert"))
+
+    mapped = {"value": 0.9, "texture": {"path": "/nowhere/gloss.tx"}}
+    apply_glossiness_conversion(probe, mapped)
+    check("a mapped glossiness sends the flag instead",
+          mapped.get("invert") is True, mapped.get("invert"))
+    check("and leaves the stale value alone", abs(mapped["value"] - 0.9) < 1e-6,
+          mapped.get("value"))
+
+    # A procedural the bake could not resolve: a texture record with no file
+    # in it. The importer will fall through to the value, so the value is the
+    # only place left that can be inverted.
+    procedural = {"value": 0.9, "texture": {"node": "ramp1",
+                                            "node_type": "ramp"}}
+    apply_glossiness_conversion(probe, procedural)
+    check("a texture record with no file behind it inverts the value",
+          abs(procedural["value"] - 0.1) < 1e-6, procedural.get("value"))
+    check("and does not send a flag nothing will act on",
+          not procedural.get("invert"), procedural.get("invert"))
+
     print("\nglass")
     glass = channels("glassCube")
     check("glass material exported", bool(glass))
