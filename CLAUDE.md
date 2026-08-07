@@ -477,6 +477,9 @@ Kullanıcının elle doğrulaması gereken adımlar:
   albedo ve tint'ler kırpılır
 - ❌ Materyal chart'ına tek hücre ekleme; **çift** ekle, yoksa iki tarafta da
   sıfır olan bir kanal "eşleşti" görünür
+- ❌ Ölçüm rig'inin geometrisine dokunup kontrol satırlarına bakmadan sonuç
+  okuma; aynı materyali iki konuma koyan kontroller rig'in üç ayrı kusurunu
+  yakaladı ve üçü de tabloyu makul göstermeye devam ediyordu
 - ❌ Yeni davranışı teste assertion eklemeden bırakma
 - ❌ Kaynak sahnenin istemediği bir şeyi bütün meshlere uygulama
 - ❌ Işık enerjisinden `position_scale²` terimini düşürme
