@@ -22,6 +22,7 @@ the comparison and leaves the material response on its own.
 from __future__ import print_function
 
 import json
+import math
 import os
 import re
 import shutil
@@ -71,6 +72,9 @@ ATTRS = {
         "base_color": "baseColor", "specular": "specularWeight",
         "roughness": "specularRoughness", "metalness": "baseMetalness",
         "coat": "coatWeight", "coat_roughness": "coatRoughness",
+        # OpenPBR darkens the base under the coat. Principled has no such
+        # input, so this is the suspect for the coat cells disagreeing.
+        "coat_darkening": "coatDarkening",
         # OpenPBR calls the sheen lobe fuzz and states emission in nits.
         "sheen": "fuzzWeight", "sheen_roughness": "fuzzRoughness",
         "emission": "emissionLuminance", "emission_color": "emissionColor",
@@ -86,8 +90,25 @@ OPENPBR_EMISSION_NITS = 100.0
 
 RESOLUTION = 1024
 CELL = 10.0          # world width of one chart cell
-LIGHT_DISTANCE = 60.0
-LIGHT_INTENSITY = 40.0
+
+
+def chart_size():
+    """Pixel size of the strip, with the row's aspect ratio exact.
+
+    Deriving the width from the height rather than the other way round is the
+    point. Dividing a fixed width by the cell count truncates, so the real
+    aspect ratio drifts from the declared one and every cell sits slightly
+    further out than the sampler looks for. Head on the quads are wide enough
+    to absorb it; turned to a grazing angle they are a few pixels across and
+    the outer cells are sampled off their own quad, which is what made the
+    grazing runs unreadable.
+    """
+    height = max(16, RESOLUTION // len(MATERIALS))
+    return height * len(MATERIALS), height
+LIGHT_DISTANCE = 60.0     # camera pull back; the dome has no position
+# A dome puts the readings near the albedo itself rather than at 1e-4, which
+# also widens the dynamic range the old rig was noted as lacking.
+LIGHT_INTENSITY = 1.0
 
 # Each entry is one cell. Two things are being asked of this chart, and the
 # second is why several cells come in pairs.
@@ -118,9 +139,18 @@ MATERIALS = [
     ("metal_off", _cell(base_color=(0.9, 0.9, 0.9), metalness=0.0)),
     ("metal_on", _cell(base_color=(0.9, 0.9, 0.9), metalness=1.0,
                        roughness=0.3)),
+    # metal_on inherits the base's specular of zero. On OpenPBR that cell
+    # rendered black in Arnold while Blender showed a bright metal, so this
+    # one differs from it in the specular weight and nothing else: it says
+    # whether OpenPBR gates its metal lobe on that weight.
+    ("metal_spec", _cell(base_color=(0.9, 0.9, 0.9), metalness=1.0,
+                         roughness=0.3, specular=1.0)),
 
     ("coat_off", _cell(coat=0.0)),
     ("coat_on", _cell(coat=1.0, coat_roughness=0.1)),
+    # Same coat with OpenPBR's base darkening turned off. Standard surface
+    # has no such attribute and skips this cell, so it reads as coat_on there.
+    ("coat_nodark", _cell(coat=1.0, coat_roughness=0.1, coat_darkening=0.0)),
 
     ("sheen_off", _cell(sheen=0.0)),
     ("sheen_on", _cell(sheen=1.0, sheen_roughness=0.3)),
@@ -135,6 +165,20 @@ MATERIALS = [
     ("opacity_full", _cell(base_color=(0.8, 0.8, 0.8))),
     ("opacity_half", _cell(base_color=(0.8, 0.8, 0.8),
                            opacity=(0.5, 0.5, 0.5))),
+
+    # Controls. These repeat a cell from the middle of the chart out at the
+    # end, so they differ from their twin in position and in nothing else.
+    # If a twin pair disagrees, the chart is reading its own geometry rather
+    # than the material, and no other row can be trusted until that is fixed.
+    ("control_diffuse", _cell(base_color=(0.5, 0.5, 0.5))),
+    ("control_coat", _cell(coat=1.0, coat_roughness=0.1)),
+]
+
+# A control and the cell it repeats. Unlike PAIRS these must come out the
+# same, on both sides.
+CONTROLS = [
+    ("grey_diffuse", "control_diffuse"),
+    ("coat_on", "control_coat"),
 ]
 
 # Pairs that must differ from each other, on both sides. A pair that is
@@ -142,6 +186,7 @@ MATERIALS = [
 PAIRS = [
     ("spec_off", "spec_on"),
     ("metal_off", "metal_on"),
+    ("metal_on", "metal_spec"),
     ("coat_off", "coat_on"),
     ("sheen_off", "sheen_on"),
     ("emission_off", "emission_on"),
@@ -163,15 +208,15 @@ def build_scene():
     names = ATTRS[SURFACE]
     for index, (name, attrs) in enumerate(MATERIALS):
         quad = cmds.polyPlane(
-            # Deliberately not widened to keep filling the cell when turned.
-            # Widening by 1/cos(tilt) makes a 70 degree quad nearly three
-            # cells across and every cell then reads its neighbours.
             width=CELL * 0.9, height=CELL * 0.9,
             subdivisionsX=1, subdivisionsY=1, name=name,
         )[0]
-        # Stand it up to face the camera, which looks down -Z, then turn it.
+        # Stand it up to face the camera, which looks down -Z. The quads are
+        # never turned themselves; the camera is. Turning each quad tilts it
+        # out of the shared plane, and under a dome the neighbours then block
+        # part of each other's sky while the quad on the end of the row keeps
+        # an open side and comes back 12% brighter than its own twin.
         cmds.setAttr(quad + ".rotateX", 90.0)
-        cmds.setAttr(quad + ".rotateY", TILT_DEGREES)
         cmds.setAttr(quad + ".translateX", (index - (count - 1) / 2.0) * CELL)
 
         shader = cmds.shadingNode(SURFACE, asShader=True, name=name + "_shd")
@@ -202,22 +247,34 @@ def build_scene():
                          force=True)
         cmds.sets(quad, edit=True, forceElement=engine)
 
-    # One light, behind the camera, so every quad is lit at normal incidence.
-    light = cmds.createNode("aiAreaLight", name="chartLightShape")
-    light_tf = cmds.listRelatives(light, parent=True, fullPath=True)[0]
-    cmds.setAttr(light + ".aiTranslator", "quad", type="string")
+    # A uniform dome, not a quad light behind the camera. The quad light was
+    # 60 units away while the row is over 200 wide, so the cells at the ends
+    # saw far less of it than the ones in the middle: two quads carrying the
+    # same material read 36% apart, and a coat cell moved by a factor of 53
+    # purely by being moved along the row. A constant dome delivers identical
+    # irradiance at every position, which is what the control cells check.
+    light = cmds.createNode("aiSkyDomeLight", name="chartLightShape")
     cmds.setAttr(light + ".intensity", LIGHT_INTENSITY)
-    cmds.setAttr(light + ".aiNormalize", True)
-    cmds.setAttr(light + ".aiSamples", 4)
-    cmds.setAttr(light_tf + ".translateZ", LIGHT_DISTANCE)
-    cmds.setAttr(light_tf + ".scale", 20.0, 20.0, 20.0, type="double3")
+    cmds.setAttr(light + ".aiSamples", 5)
+    cmds.setAttr(light + ".color", 1.0, 1.0, 1.0, type="double3")
 
+    # The camera carries the tilt, swung around the origin so it still looks
+    # at the middle of the row. Orthographic, so every cell is seen from the
+    # same direction however far along the row it sits, and the row's own
+    # width foreshortens by the cosine.
+    radians = math.radians(TILT_DEGREES)
+    # Swinging the camera round brings one end of the row towards it, and past
+    # about 45 degrees that end ends up behind the camera and is clipped away.
+    # Orthographic, so pulling back costs nothing but the clearance.
+    distance = LIGHT_DISTANCE + 20.0 + CELL * count * math.sin(radians)
     camera_tf = cmds.rename(cmds.camera()[0], "chartCam")
     camera = cmds.listRelatives(camera_tf, shapes=True, fullPath=True)[0]
     cmds.setAttr(camera + ".orthographic", True)
-    cmds.setAttr(camera + ".orthographicWidth", CELL * count)
+    cmds.setAttr(camera + ".orthographicWidth", CELL * count * math.cos(radians))
     cmds.setAttr(camera + ".renderable", True)
-    cmds.setAttr(camera_tf + ".translateZ", LIGHT_DISTANCE + 20.0)
+    cmds.setAttr(camera_tf + ".translateX", distance * math.sin(radians))
+    cmds.setAttr(camera_tf + ".translateZ", distance * math.cos(radians))
+    cmds.setAttr(camera_tf + ".rotateY", TILT_DEGREES)
     return camera
 
 
@@ -236,8 +293,8 @@ def render_with_kick(camera):
         ("defaultArnoldRenderOptions.GISpecularDepth", 0),
         ("defaultArnoldRenderOptions.AASamples", 5),
         ("defaultArnoldRenderOptions.denoiseBeauty", 0),
-        ("defaultResolution.width", RESOLUTION),
-        ("defaultResolution.height", RESOLUTION // len(MATERIALS)),
+        ("defaultResolution.width", chart_size()[0]),
+        ("defaultResolution.height", chart_size()[1]),
         ("defaultResolution.deviceAspectRatio", float(len(MATERIALS))),
         ("defaultResolution.pixelAspect", 1.0),
     ):
@@ -257,9 +314,9 @@ def render_with_kick(camera):
         handle.write(text)
 
     exr = os.path.join(OUT, "arnold_chart.exr")
-    height = RESOLUTION // len(MATERIALS)
+    width, height = chart_size()
     process = subprocess.run(
-        [KICK, "-i", ass_path, "-o", exr, "-r", str(RESOLUTION), str(height),
+        [KICK, "-i", ass_path, "-o", exr, "-r", str(width), str(height),
          "-dw", "-nostdin", "-v", "1"],
         capture_output=True, text=True,
     )
@@ -288,12 +345,13 @@ def main():
     with open(os.path.join(OUT, "expected.json"), "w") as handle:
         json.dump(
             {
-                "resolution": RESOLUTION,
-                "height": RESOLUTION // len(MATERIALS),
+                "resolution": chart_size()[0],
+                "height": chart_size()[1],
                 "cells": [name for name, _ in MATERIALS],
                 "surface": SURFACE,
                 "tilt_degrees": TILT_DEGREES,
                 "pairs": PAIRS,
+                "controls": CONTROLS,
                 "arnold_exr": exr,
                 "package": result["package_folder"],
             },

@@ -153,7 +153,44 @@ def main():
                 off_name, on_name, a_delta, b_delta))
         print("That is a channel lost in transfer, not a BRDF difference.")
 
+    # Controls repeat a cell further along the row, so they differ from their
+    # twin in position and nothing else. A twin pair that disagrees means the
+    # chart is measuring where a quad sits rather than what it is made of, and
+    # every other row in the table is then suspect.
+    controls = expected.get("controls") or []
+    drift = []
+    if controls:
+        print("\n{0:28s} {1:>12s} {2:>12s}".format(
+            "control (must match)", "arnold", "blender"))
+        print("-" * 56)
+        for twin_name, control_name in controls:
+            if twin_name not in lookup or control_name not in lookup:
+                continue
+            a_twin, b_twin = lookup[twin_name]
+            a_ctl, b_ctl = lookup[control_name]
+            for label, first, second in (
+                ("arnold", luminance(a_twin), luminance(a_ctl)),
+                ("blender", luminance(b_twin), luminance(b_ctl)),
+            ):
+                if max(first, second) > 1e-9 and (
+                    abs(first - second) / max(first, second) > 0.05
+                ):
+                    drift.append((twin_name, control_name, label, first, second))
+            print("{0:28s} {1:12.6f} {2:12.6f}".format(
+                "{0} == {1}".format(twin_name, control_name),
+                abs(luminance(a_twin) - luminance(a_ctl)),
+                abs(luminance(b_twin) - luminance(b_ctl))))
+
+    if drift:
+        print("\nThe chart is position dependent, so nothing above is a "
+              "material result:")
+        for twin_name, control_name, label, first, second in drift:
+            print("  {0} vs {1} in {2}: {3:.6f} against {4:.6f}".format(
+                twin_name, control_name, label, first, second))
+
     print()
+    if drift:
+        return 1
     if not flagged and not lost:
         print("No cell differs by more than {0:.0%}, and every paired channel "
               "moves on both sides. Nothing here looks like a transfer "
