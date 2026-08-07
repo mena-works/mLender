@@ -1,87 +1,202 @@
-# Z-A Exporter — Lookdev
+# mLender
 
-Maya sahnesindeki bütün meshleri FBX olarak Blender'a canlı gönderen ve
-materialleri Maya shader bilgilerine göre Blender Principled BSDF olarak yeniden
-kuran Lookdev aktarım aracıdır.
+**Live lookdev transfer from Maya to Blender.**
 
-Bu sürümde:
+mLender packages a Maya scene as FBX plus a JSON sidecar, streams it to Blender
+over a local socket, and rebuilds the result there: materials as Principled BSDF
+node trees, lights as native Blender lights, cameras as native Blender cameras.
 
-- Alembic yoktur.
-- Texture kopyalama yoktur; yalnız bake edilen prosedüreller pakete yazılır.
-- Lookdev `.blend` seçimi yoktur.
-- Shape key, parent veya constraint kurulumu yoktur.
-- Yeni paket geldiğinde Blender sahnesi tamamen temizlenir ve unused data purge
-  edilir.
+The goal is not a file format. It is that a shot lit and shaded in Maya looks
+the same in Cycles without anybody re-authoring it. Where the two renderers
+disagree, the conversion constants in this tool were **measured by rendering
+both sides and solving for the ratio**, not guessed. Those measurements are
+recorded under [`tests/docs/`](tests/docs/).
 
-## Dosyalar
+---
 
-Araç iki Python package'ından oluşur. Package'lar birbirini import etmez; tek
-bağları LiveLink protokolü ve paket JSON şemasıdır.
+## Contents
 
-```text
-za_lookdev_exporter/        # Maya tarafı
-  __init__.py               # public API: show_ui, show, export_lookdev
-  constants.py              # protokol sabitleri, attribute alias tabloları
-  mayautils.py              # maya.cmds sarmalayıcıları, değer yardımcıları
-  textures.py               # shading network'te upstream texture arama
-  shaders.py                # shader → Principled kanal çıkarımı
-  meshes.py                 # mesh keşfi, material ve face atamaları
-  lights.py                 # ışık keşfi ve current-frame ışık kayıtları
-  fbx.py                    # MEL FBXExport sarmalayıcısı
-  cameras.py                # kamera keşfi ve lens kayıtları
-  livelink.py               # TCP gönderim istemcisi
-  package.py                # paket klasörü, JSON yazımı, atomik temizlik
-  ui.py                     # Maya penceresi
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Scope](#scope)
+- [How it works](#how-it-works)
+- [Materials](#materials)
+- [Lights](#lights)
+- [Cameras](#cameras)
+- [Animation](#animation)
+- [Scene structure](#scene-structure)
+- [Colour management](#colour-management)
+- [Development](#development)
 
-za_lookdev_importer/        # Blender tarafı (multi-file add-on)
-  __init__.py               # bl_info, register/unregister, reload
-  constants.py              # protokol sabitleri, socket adları, kalibrasyon
-  utils.py                  # değer dönüşümü, isim normalizasyonu
-  images.py                 # texture yükleme, UDIM çözümleme
-  corrections.py            # Maya düzeltme node'larını Blender node'u olarak kurma
-  materials.py              # Principled ve Surface Shader node ağaçları
-  lights.py                 # Blender ışıkları ve Dome World
-  cameras.py                # Blender kameraları
-  transforms.py             # Maya→Blender matris dönüşümü (ışık+kamera ortak)
-  scene.py                  # sahne temizleme, mesh eşleştirme, subdivision
-  fbx.py                    # FBX import, paket dosyası çözümleme
-  importer.py               # import orkestrasyonu, şema doğrulaması
-  livelink.py               # socket listener ve ana thread mesaj pompası
-  ui.py                     # operator'lar, scene property'leri, panel
+---
 
-tests/
-  check_contracts.py        # host gerekmez, saniyeler
-  host/                     # gerçek Maya ve gerçek Blender testleri
-  calibration/              # render eşleşmesi, ölçek probları
-  docs/                     # ölçüm kayıtları
+## Requirements
+
+| | |
+|---|---|
+| Maya | 2022 or newer |
+| Renderers | Arnold (MtoA), Redshift, or native Maya shaders |
+| Blender | 3.6 or newer — verified on 4.1, 4.3, 4.5 and 5.2 |
+| Dependencies | None. Standard library only on both sides. |
+
+The two halves never import each other and have no shared module: they run in
+different Python runtimes. Their only contract is the LiveLink protocol and the
+package JSON schema.
+
+---
+
+## Installation
+
+### Maya
+
+The exporter is a plain Python package. Add the directory **containing**
+`za_lookdev_exporter` to `sys.path`:
+
+```python
+import sys
+
+tool_path = r"C:\path\to\mLender"
+if tool_path not in sys.path:
+    sys.path.append(tool_path)
+
+import za_lookdev_exporter as za
+za.show_ui()
 ```
 
-Bölünmeden önceki tek dosyalık sürümler git geçmişinde `0dcbff4` commit'inde
-duruyor; karşılaştırmak için `git show 0dcbff4:za_lookdev_exporter.py`.
+For a permanent setup, append the following to
+`Documents/maya/scripts/userSetup.py`. Do not overwrite an existing file; add to
+it. `import maya.utils` must appear at the top of the file.
 
-## Paket sistemi
+```python
+MLENDER_ROOT = r"C:\path\to\mLender"
 
-Maya UI'da seçilen ana klasörde her gönderim için yeni paket oluşturulur:
+
+def _register_mlender():
+    import os
+    import sys
+    try:
+        if not os.path.isdir(os.path.join(MLENDER_ROOT,
+                                          "za_lookdev_exporter")):
+            return
+        if MLENDER_ROOT not in sys.path:
+            sys.path.append(MLENDER_ROOT)
+    except Exception as exc:
+        print("mLender could not be registered: %s" % exc)
+
+
+maya.utils.executeDeferred(_register_mlender)
+```
+
+The whole block is wrapped in `try`, so a moved directory cannot break Maya's
+startup.
+
+A shelf is the other option: drop a separate `shelf_mLender.mel` into
+`Documents/maya/<version>/prefs/shelves/`. Because it is a new file, existing
+shelves are untouched. Two buttons are useful — one calling `za.show_ui()` and
+one calling `za.reload_package()` for development.
+
+### Blender
+
+`za_lookdev_importer` is a standard multi-file add-on. Install it in any of
+three ways:
+
+**Copy the folder** into Blender's add-on directory:
+
+```text
+%APPDATA%\Blender Foundation\Blender\<version>\scripts\addons\za_lookdev_importer\
+```
+
+**Install a zip** of the `za_lookdev_importer` folder through
+`Edit > Preferences > Add-ons > Install`.
+
+**Link the folder** — best for development, since `git pull` then needs no
+copying:
+
+```bat
+mklink /J "%APPDATA%\Blender Foundation\Blender\5.2\scripts\addons\za_lookdev_importer" ^
+          "C:\path\to\mLender\za_lookdev_importer"
+```
+
+A directory junction needs no administrator rights on Windows. `ln -s` does the
+same on Linux and macOS.
+
+Enable **Z-A Exporter - Lookdev** in `Edit > Preferences > Add-ons`.
+
+> The add-on, its node prefixes (`ZA_`) and its custom properties (`za_`) still
+> carry the tool's original name. Renaming them is a breaking change for any
+> scene already imported, so it is deliberately not bundled with the repository
+> rename.
+
+---
+
+## Usage
+
+**In Maya** — `za.show_ui()`, then:
+
+1. Choose an **Export Location**.
+2. Check the Blender host and port. Default `127.0.0.1:50505`.
+3. Press **Send To Blender**.
+
+**In Blender** — `View3D > N Panel > Z-A Exporter`:
+
+1. Confirm the **Build** number is the version you expect.
+2. Check **FBX Scale**.
+3. Check host and port.
+4. Press **Start LiveLink**.
+
+After an import, read the panel's status line (mesh, material, subdivision and
+light counts) and check the System Console for lines beginning
+`Z-A Lookdev warning:`.
+
+### Options
+
+| Control | Default | Effect |
+|---|---|---|
+| Collect Textures | off | Copy every referenced texture into the package |
+| Export Scope | off | Send only the selected objects |
+| Export Animation | off | Send a frame range instead of a single frame |
+| Bake Procedurals | off | Bake fileless shading networks to UVs |
+| Bake Resolution | 1024 | Resolution of those bakes |
+| Light Power Scale | 1.0 | Artistic multiplier over the measured conversion |
+
+---
+
+## Scope
+
+Deliberately **not** included:
+
+- No Alembic.
+- No shape keys, parenting or constraint setup.
+- No lookdev `.blend` selection.
+- No turntable generator — whatever is animated in the scene is what arrives.
+
+**Import is destructive by design.** Every package wipes the Blender scene and
+purges unused data-blocks before rebuilding. This is the documented behaviour,
+not a bug; a merge mode would be a separate feature.
+
+---
+
+## How it works
+
+### Package layout
+
+Each send creates a new package folder under the chosen export location:
 
 ```text
 MTB_Z_A_01/
   MTB_Z_A_01.fbx
   MTB_Z_A_01_lookdev.json
-
-MTB_Z_A_02/
-  MTB_Z_A_02.fbx
-  MTB_Z_A_02_lookdev.json
 ```
 
-Texture dosyaları **varsayılan olarak** paket içine kopyalanmaz. JSON yalnız
-Maya'daki orijinal texture konumunu taşır; Blender image node aynı dosyayı
-doğrudan açar. İki uygulama aynı makinede çalışıyorsa doğru olan budur ve
-texture kütüphanesini gereksiz yere çoğaltmaz.
+Textures are **not** copied by default. The JSON carries the original Maya
+texture path and Blender's image node opens the same file. When both
+applications run on one machine this is the correct behaviour and it avoids
+duplicating a texture library.
 
-Maya penceresindeki **Collect Textures** kutusu işaretlenirse referans verilen
-bütün texture'lar paketin içindeki `textures_collected/` klasörüne kopyalanır
-ve JSON yolları oraya çevrilir. Paket böylece başka bir makineye taşınabilir
-hale gelir.
+Ticking **Collect Textures** copies every referenced texture into
+`textures_collected/` inside the package and rewrites the JSON paths, making
+the package portable:
 
 ```text
 MTB_Z_A_01/
@@ -93,509 +208,268 @@ MTB_Z_A_01/
     tile.1002.tx
 ```
 
-Üç ayrıntı:
+Three details matter here:
 
-- **UDIM bir dosya değil, kalıptır.** `<UDIM>` içeren bir yolu olduğu gibi
-  kopyalamak hiçbir şey kopyalamaz; yanındaki tile'lar diskte bulunup tek tek
-  kopyalanır, JSON'daki yol ise token'ı korur ki importer seti yine çözsün.
-- Aynı texture birden fazla kanalda kullanılıyorsa **bir kez** kopyalanır.
-- Orijinal Maya yolu `original_path` alanında saklanır, kaybolmaz.
+- **A UDIM path is a pattern, not a file.** Copying a path containing `<UDIM>`
+  verbatim copies nothing, so the sibling tiles are found on disk and copied
+  individually while the JSON keeps the token.
+- A texture used by several channels is copied **once**.
+- The original Maya path is preserved in `original_path`.
 
-Bulunamayan bir texture export'u durdurmaz; uyarı yazılır ve o yol
-değiştirilmeden bırakılır.
+A missing texture does not stop the export. A warning is recorded and that path
+is left unchanged.
 
-## Desteklenen Maya shaderları
+### Import sequence
 
-**Redshift**
+1. Validate the LiveLink protocol and the package schema version. An
+   incompatible package is rejected **before the scene is touched**.
+2. Locate the package's FBX.
+3. Save the current .blend if it has a path.
+4. Delete all objects and collections.
+5. Purge unused meshes, materials, images, textures, actions and other
+   data-blocks.
+6. Import the FBX.
+7. Remove the temporary material slots the FBX importer created.
+8. Apply the mesh-to-material and per-face assignments from the JSON.
+9. Rebuild materials as Principled BSDF (or Glass, or unlit) node trees.
+10. Link textures from their recorded locations.
+11. Rebuild lights and the Dome world.
+12. Rebuild cameras and make the renderable one active.
+13. Configure subdivision modifiers.
+14. Purge orphans again.
 
-- `RedshiftStandardMaterial`
-- `RedshiftMaterial` (legacy)
+Validation runs first on purpose. If the Blender add-on is older than the Maya
+exporter, the package is refused and the existing scene survives. Supported
+schema versions are listed in `SUPPORTED_SCHEMA_VERSIONS`.
 
-**Arnold** (MtoA 5.4.8 üzerinde doğrulandı)
+A single failed material, texture or light does not abort the import. Failures
+are collected as warnings and the rest of the scene still arrives — a partial
+result beats none.
 
-- `aiStandardSurface`
-- `aiOpenPBRSurface`
-- `aiLambert`
-- `aiFlat`
+### Repository layout
 
-**Native Maya**
-
-- `lambert`
-- `blinn`
-- `surfaceShader`
-
-Aktarılan kanallar:
-
-- Base Color
-- Reflection Roughness
-- Metalness
-- Normal/Bump
-- Opacity/Transparency
-- Emission Color
-- Emission Strength
-- Specular (ağırlık)
-- Transmission (weight, renk, roughness), IOR, Thin Walled
-
-Arnold ve Redshift speküleri 0–1 ağırlık olarak verir; Blender'ın
-`Specular IOR Level`'ında 0.5 sıradan bir dielektrik, 0 ise speküler yok
-demektir. Bu yüzden ağırlık 1 Blender'ın varsayılanına eşlenir, 1'e değil.
-Principled enerji koruduğu için bu önemlidir: Maya'da speküleri sıfır olan bir
-yüzeye 0.5 bırakmak hem olmayan bir parlama ekler hem o enerjiyi diffuse'dan
-çalar.
-
-Materialin transmission ağırlığı sıfırdan büyükse Principled yerine **Glass
-BSDF** kurulur. Cam bir yüzeyde refraction'ı Principled transmission'la taklit
-etmek yerine ayrı bir Glass BSDF kullanmak, hem Redshift hem Arnold tarafındaki
-görüntüye belirgin şekilde daha yakın duruyor; roughness ve IOR de iki tarafta
-aynı anlama geliyor.
-
-Cutout opacity refraction'dan ayrı tutulur: opacity 1'in altındaysa Glass BSDF
-bir Transparent BSDF ile Mix Shader üzerinden karıştırılır, cam rengine
-karıştırılmaz.
-
-Kaynak değerler material custom property'lerinde saklanır:
-`za_material_mode`, `za_transmission_weight`, `za_thin_walled`,
-`za_transmission_affects_alpha`.
-
-### Redshift roughness kuralı
-
-Principled BSDF Roughness için Redshift **Reflection Roughness** kullanılır.
-Redshift Diffuse Roughness, Oren–Nayar diffuse davranışını kontrol ettiği için
-Principled yüzey roughness'ına aktarılmaz.
-
-Materialda roughness inputunun glossiness olarak yorumlandığını belirten
-Redshift bayrağı açıksa değer veya texture Blender roughness'ına bağlanmadan
-önce ters çevrilir (`roughness = 1 - glossiness`).
-
-Redshift Standard Material için temel Maya attribute adayları:
+Both packages are ordered by dependency: a module may only import ones listed
+above it.
 
 ```text
-Base Color           → base_color
-Reflection Roughness → refl_roughness
-Metalness            → metalness
-Opacity              → opacity_color
-Normal/Bump          → bump_input
-Emission             → emission_color
-Emission Strength    → emission_weight
+za_lookdev_exporter/        # Maya side
+  constants.py              # protocol constants, attribute alias tables
+  mayautils.py              # maya.cmds wrappers and value helpers
+  collect.py                # optional texture collection
+  animation.py              # frame range and timeline sampling
+  textures.py               # upstream texture search
+  bake.py                   # baking procedural networks to UVs
+  shaders.py                # shader to channel extraction
+  meshes.py                 # mesh discovery, material and face assignment
+  lights.py                 # light discovery and records
+  cameras.py                # camera discovery and lens records
+  fbx.py                    # MEL FBXExport wrapper
+  livelink.py               # TCP client
+  package.py                # package folder, JSON, atomic cleanup
+  ui.py                     # Maya window
+
+za_lookdev_importer/        # Blender side (multi-file add-on)
+  constants.py              # protocol constants, socket names, calibration
+  utils.py                  # value and name normalisation
+  images.py                 # texture loading, UDIM
+  corrections.py            # rebuilding Maya correction nodes
+  materials.py              # node trees
+  lights.py                 # Blender lights, dome world
+  cameras.py                # Blender cameras
+  transforms.py             # Maya to Blender matrix conversion
+  colormanagement.py        # Maya OCIO settings to Blender view transform
+  animation.py              # sampled animation as keyframes
+  scene.py                  # scene clearing, mesh matching, subdivision
+  fbx.py                    # FBX import, package file resolution
+  importer.py               # orchestration and schema validation
+  livelink.py               # socket listener and main-thread pump
+  ui.py                     # operators, properties, panel
+
+tests/
+  check_contracts.py        # no host needed, runs in seconds
+  host/                     # real Maya and real Blender
+  calibration/              # render matching and measurement rigs
+  docs/                     # measurement records
 ```
 
-Legacy Redshift Material için:
+---
+
+## Materials
+
+### Supported shaders
+
+**Redshift** — `RedshiftStandardMaterial`, `RedshiftMaterial` (legacy)
+
+**Arnold** (verified against MtoA 5.4.8) — `aiStandardSurface`,
+`aiOpenPBRSurface`, `aiLambert`, `aiFlat`
+
+**Native Maya** — `lambert`, `blinn`, `surfaceShader`
+
+Transferred channels: base colour, reflection roughness, metalness,
+normal/bump, opacity, emission colour and strength, specular weight,
+transmission (weight, colour, roughness), IOR, thin-walled, and the coat, sheen
+and subsurface lobes.
+
+### Three build paths
+
+**Principled BSDF** is the normal case.
+
+**Glass BSDF** is used when the transmission weight is above zero. A dedicated
+Glass BSDF matches Redshift and Arnold refraction markedly better than
+Principled's transmission, and roughness and IOR mean the same thing on both
+sides. Cutout opacity is kept separate from refraction: an opacity below one
+mixes the Glass BSDF against a Transparent BSDF rather than tinting the glass.
+
+**Emission mixed against Transparent** is used for unlit shaders
+(`surfaceShader`, `aiFlat`), which reproduces their behaviour far better than
+pushing the colour into a base colour would.
+
+Source values survive as custom properties: `za_material_mode`,
+`za_transmission_weight`, `za_thin_walled`, `za_transmission_affects_alpha`.
+
+### Specular weight
+
+Arnold and Redshift state specular as a 0–1 weight. In Blender's
+`Specular IOR Level`, 0.5 is an ordinary dielectric and 0 is no specular at all,
+so a full weight maps onto Blender's **default**, not onto 1.
+
+This matters more than it looks. Principled conserves energy, so leaving the
+level at 0.5 for a shader whose Maya specular was 0 both adds a highlight that
+was never there and steals that energy from the diffuse.
+
+### Redshift roughness
+
+Principled Roughness is driven by Redshift **Reflection Roughness**. Redshift's
+Diffuse Roughness controls Oren–Nayar diffuse behaviour and is deliberately not
+used.
+
+If the material's flag says the roughness input is glossiness, the value is
+inverted (`roughness = 1 - glossiness`). A flat value is inverted by the
+exporter; a texture cannot be, so the flag travels with the record and the
+importer inserts an invert node. The split is on whether there is a **file**
+behind the texture, not on whether the record carries a value — a procedural
+that could not be baked leaves a record with no path, and the flat value is
+then the only place an inversion can still happen.
+
+Attribute candidates:
 
 ```text
-Base Color           → diffuse_color
-Reflection Roughness → refl_roughness
-Metalness            → refl_metalness
-Opacity              → opacity_color
-Normal/Bump          → bump_input
-Emission             → emission_color
-Emission Strength    → emission_weight
+                        RedshiftStandardMaterial   RedshiftMaterial
+Base Color              base_color                 diffuse_color
+Reflection Roughness    refl_roughness             refl_roughness
+Metalness               metalness                  refl_metalness
+Opacity                 opacity_color              opacity_color
+Normal/Bump             bump_input                 bump_input
+Emission                emission_color             emission_color
+Emission Strength       emission_weight            emission_weight
 ```
 
-Shader sürümleri arasındaki attribute isim farkları için alternatif isimler de
-kontrol edilir. JSON her kanal için gerçekten bulunan `maya_attr` ve
-`maya_plug` bilgisini yazar.
+Alternative spellings are tried for each channel. The JSON records the
+`maya_attr` and `maya_plug` actually found.
 
 ### Arnold
 
-Attribute isimleri canlı bir MtoA 5.4.8 oturumundan okunmuştur, tahmin
-değildir. `aiStandardSurface` ile `aiOpenPBRSurface` üç kanalda ayrışır:
+Attribute names were read from a live MtoA 5.4.8 session, not guessed.
+`aiStandardSurface` and `aiOpenPBRSurface` differ in three channels:
 
 ```text
-Kanal              aiStandardSurface     aiOpenPBRSurface
+Channel            aiStandardSurface     aiOpenPBRSurface
 Base Color         baseColor             baseColor
 Roughness          specularRoughness     specularRoughness
 Metallic           metalness             baseMetalness
-Opacity            opacity (renk)        geometryOpacity (float)
+Opacity            opacity (colour)      geometryOpacity (float)
 Normal/Bump        normalCamera          normalCamera
 Emission           emissionColor         emissionColor
-Emission Strength  emission (0-1)        emissionLuminance (nit)
+Emission Strength  emission (0-1)        emissionLuminance (nits)
 ```
 
-Üç davranış farkına dikkat:
+Three behavioural differences:
 
-- **Arnold opacity ters çevrilmez.** Maya'nın `transparency` değeri
-  opacity'ye çevrilirken tersi alınır; Arnold'ın `opacity`'si zaten
-  opacity'dir (1 = opak) ve olduğu gibi aktarılır.
-- **OpenPBR emission bir ağırlık değil, nit cinsinden parlaklıktır.**
-  Blender Emission Strength soketine ham geçirilemez; importer'daki
-  `OPENPBR_EMISSION_LUMINANCE_SCALE` ile ölçeklenir (varsayılan 100 nit → 1.0).
-- **`aiFlat` `color` okur, `outColor` değil.** Maya `surfaceShader`'ında
-  `outColor` gerçek bir girdi attribute'udur, ama Arnold shader'larında
-  hesaplanmış bir çıktıdır ve render dışında anlamsız bir sabit döner.
+- **Arnold opacity is not inverted.** Maya's `transparency` is inverted on the
+  way to opacity; Arnold's `opacity` already is opacity (1 = opaque).
+- **OpenPBR emission is a luminance in nits, not a weight.** It is divided by
+  `OPENPBR_EMISSION_LUMINANCE_SCALE` (1000, measured) to reach a Blender
+  strength. The value 100 that was first assumed made every OpenPBR emissive
+  surface ten times too bright.
+- **`aiFlat` reads `color`, never `outColor`.** On a Maya `surfaceShader`
+  `outColor` is a real input attribute; on an Arnold shader it is a computed
+  output that reads back as a meaningless constant outside a render.
 
-`aiStandardSurface.base` ve OpenPBR `baseWeight`/`specularWeight` ağırlıkları
-aktarılmaz; Principled'da karşılıkları yok ve base color'a katlamak dışa
-aktarılan değeri yanlış raporlamak olurdu.
+`aiStandardSurface.base` and OpenPBR's `baseWeight` are not applied: Principled
+has no matching input and folding them into base colour would misreport the
+exported value.
 
-`aiLambert` base color'ını `KdColor`'dan alır ve Principled Roughness `0.7`,
-Metallic `0.0` ile kurulur. `aiFlat`, `surfaceShader` gibi Emission +
-Transparent + Mix Shader olarak kurulur.
+`aiLambert` takes its base colour from `KdColor` and is built with Roughness
+`0.7` and Metallic `0.0`.
 
-### Lambert ve Blinn
+### Native Maya shaders
 
-Lambert ve Blinn'de base color texture bağlıysa texture yolu, değilse renk
-değeri aktarılır. Maya transparency değeri Blender opacity değerine çevrilir.
+Lambert and Blinn transfer base colour (texture if connected, value otherwise)
+and convert `transparency` to opacity. Roughness is approximated: **0.7** for
+lambert, **0.1** for blinn, with Metallic `0.0` for both.
 
-- Lambert → Principled Roughness `0.7`
-- Blinn → Principled Roughness `0.1`
-- İkisi için de Metallic `0.0`
+`surfaceShader.outColor` drives an Emission shader and `outTransparency`
+becomes the Mix Shader factor against a Transparent BSDF, so the material
+behaves emissively rather than taking light like a Principled surface.
 
-### Surface Shader
+### Texture networks
 
-Maya `surfaceShader.outColor` değeri veya bağlı texture Blender'da Emission
-shader Color girişine aktarılır. `outTransparency`, Transparent BSDF ile
-Emission arasında Mix Shader opacity değerine dönüştürülür. Böylece material
-Principled yüzey gibi ışık almak yerine Maya Surface Shader'a yakın, doğrudan
-emissive davranır.
+A material input need not have a file node wired straight into it. The exporter
+walks the upstream history and checks `file.fileTextureName`, Redshift's
+`tex0`, `filename` and `file`.
 
-## Texture ağları
+Intermediate nodes are no longer skipped: recognised ones are rebuilt as
+Blender nodes (see below) and unrecognised ones are reported. When a network's
+result cannot be expressed that way, baking takes over.
 
-Bir material inputuna doğrudan file node bağlı olmak zorunda değildir. Exporter
-upstream history tarar ve şu dosya alanlarını kontrol eder:
-
-- Maya `file.fileTextureName`
-- Redshift `tex0`
-- `filename`
-- `file`
-
-Color correction, bump veya benzeri ara node'ların arkasındaki ilk bulunabilir
-texture yolu JSON'a yazılır. Ara node'lar artık **atlanmıyor**: tanınanlar
-Blender'da node olarak yeniden kuruluyor, tanınmayanlar uyarı olarak
-bildiriliyor (aşağıda "Renk düzeltme"). Çok katmanlı/prosedürel ağların
-matematiksel sonucu bu yolla ifade edilemiyorsa bake devreye girer.
-
-Base Color ve Emission textureleri renkli; Roughness, Metalness, Opacity ve
-Normal textureleri Blender'da Non-Color olarak açılır. Normal texture,
-`Normal Map` node üzerinden Principled Normal inputuna bağlanır.
+Base colour and emission textures load as colour data; roughness, metalness,
+opacity and normal textures load as Non-Color. Normal maps route through a
+Normal Map node.
 
 ### UDIM
 
-UDIM tespiti dosya adına bakarak tahmin edilmez, **Maya'ya sorulur**:
-`file.uvTilingMode` tiled olup olmadığını, `computedFileTextureNamePattern` ise
-Maya'nın kendi çözdüğü deseni verir. Yalnız ikisi de sonuç vermezse dosya
-adındaki tile numarası `<UDIM>` ile değiştirilir.
-
-- `<UDIM>`, `<udim>`, `%(UDIM)d`, `$UDIM`, `{UDIM}` biçimleri tek token'a
-  normalize edilir.
-- Tile numarası sayılmak için 1001 veya üstü olmalı ve dosya adındaki **son**
-  dört haneli grup olmalıdır; böylece versiyon numaraları tile sanılmaz.
-- Blender tarafında image `TILED` yapılır ve `reload()` edilir — Blender kardeş
-  tile'ları yalnız reload sırasında tarar.
-- Glob'da `*` yerine `[1-9][0-9][0-9][0-9]` kullanılır; `*` aynı önekle
-  başlayan alakasız dosyaları yakalayabiliyordu.
-
-JSON hem `<UDIM>` desenini (`path`, `udim_pattern`) hem de somut tile yolunu
-(`original_path`) taşır.
-
-Bir shader emission rengi gönderip emission strength göndermezse Blender'da
-strength `1.0` olarak set edilir. Blender 3.x bu soketi varsayılan olarak `1.0`,
-4.x ise `0.0` bıraktığı için aksi halde aynı paket 3.6'da emissive, 4.x'te siyah
-görünürdü.
-
-## Maya kullanımı
-
-Maya Python sekmesinde:
-
-```python
-import sys
-
-tool_path = r"D:\GitHub_Repository\mayatools\ZA_Exporter"
-if tool_path not in sys.path:
-    sys.path.append(tool_path)
-
-import za_lookdev_exporter as za
-za.show_ui()
-```
-
-`tool_path`, package klasörünün **içi değil, üstündeki** klasördür; yani
-`za_lookdev_exporter` klasörünü içeren dizin.
-
-### Kalıcı kurulum
-
-Her seferinde yolu yazmamak için iki yol var, ikisi de mevcut ayarlarına
-dokunmadan eklenebilir.
-
-**userSetup.py** — `Documents/maya/scripts/userSetup.py` dosyasının sonuna
-ekle. Dosya zaten varsa üzerine yazma, altına ekle:
-
-```python
-ZA_EXPORTER_ROOT = r"...\MayaToBlender_Exporter-main"
-
-
-def _register_za_exporter():
-    import os
-    import sys
-    try:
-        if not os.path.isdir(os.path.join(ZA_EXPORTER_ROOT,
-                                          "za_lookdev_exporter")):
-            return
-        if ZA_EXPORTER_ROOT not in sys.path:
-            sys.path.append(ZA_EXPORTER_ROOT)
-    except Exception as exc:
-        print("Z-A Exporter could not be registered: %s" % exc)
-
-
-maya.utils.executeDeferred(_register_za_exporter)
-```
-
-`import maya.utils` dosyanın başında olmalı. Blok baştan sona try ile
-sarılıdır; klasör taşınmış olsa bile Maya'nın açılışını bozmaz.
-
-**Shelf** — `Documents/maya/<sürüm>/prefs/shelves/` altına ayrı bir
-`shelf_ZA_Exporter.mel` koy. Yeni bir dosya olduğu için mevcut shelf'lerin
-etkilenmez; Maya açılışta yükler. İki buton önerilir: biri `za.show_ui()`,
-diğeri `za.reload_package()` ile yeniden yükleyip UI'yi açan geliştirme
-butonu.
-
-1. `Export Location` seç.
-2. Blender host/port değerlerini kontrol et. Varsayılan `127.0.0.1:50505`.
-3. `Send To Blender` butonuna bas.
-
-### Maya'da yeniden yükleme
-
-Kodda değişiklik yaptıktan sonra `importlib.reload(za)` yetmez; package'da bu
-yalnızca `__init__.py`'yi tazeler, submodule'ler eski kalır. Bunun yerine:
-
-```python
-za = za.reload_package()
-za.show_ui()
-```
-
-`reload_package()` submodule'leri bağımlılık sırasına göre yeniler ve tazelenmiş
-package'ı döndürür. Dönen değeri `za`'ya geri atamayı unutma.
-
-## Blender kullanımı
-
-`za_lookdev_importer` standart bir Blender multi-file add-on'udur. Üç kurulum
-yolu var:
-
-**1. Klasörü doğrudan kopyala** (geliştirme için en pratik)
-
-`za_lookdev_importer` klasörünü Blender'ın add-on dizinine kopyala:
-
-```text
-%APPDATA%\Blender Foundation\Blender\<sürüm>\scripts\addons\za_lookdev_importer\
-```
-
-**2. Zip olarak kur**
-
-`za_lookdev_importer` klasörünü zip'le, `Edit > Preferences > Add-ons > Install`
-ile seç.
-
-**3. Junction / symlink** (geliştirme için en iyisi)
-
-Kopyalamak yerine add-on klasörünü depoya bağla; `git pull` sonrası kopyalama
-derdi kalmaz:
-
-```bat
-mklink /J "%APPDATA%\Blender Foundation\Blender\5.2\scripts\addons\za_lookdev_importer" ^
-          "<depo>\za_lookdev_importer"
-```
-
-Windows'ta dizin junction'i yönetici hakkı istemez. Linux/macOS'ta
-`ln -s` aynı işi görür.
-
-Kurulumdan sonra `Edit > Preferences > Add-ons` içinde
-`Z-A Exporter - Lookdev` kaydını etkinleştir.
-
-`View3D > N Panel > Z-A Exporter` içinde:
-
-1. Panelde yazan `Build` numarasının beklediğin sürüm olduğunu doğrula.
-2. FBX Scale değerini kontrol et.
-3. Host/Port değerlerini kontrol et.
-4. `Start LiveLink` butonuna bas.
-
-### Blender'da yeniden yükleme
-
-Add-on olarak kurulduğunda `F3 > Reload Scripts` yeterlidir; `__init__.py`
-submodule'leri bağımlılık sırasına göre kendisi yeniler ve `unregister()`
-listener socket'ini ve timer'ını kapatır.
-
-Port 50505 takılı kalırsa önce panelden `Stop LiveLink`, sonra `Reload Scripts`
-yap. Add-on'u tamamen kaldırırken Blender'ın `unregister()` çağrısı socket'i
-serbest bırakır; eski tek dosyalık sürümdeki elle socket avlama adımına artık
-gerek yok.
-
-## Işık aktarımı
-
-Işıklar FBX içine yazılmaz. Maya sahnesindeki geçerli frame değerleri JSON
-üzerinden gönderilir ve Blender'da `Z-A Lookdev Import > Z-A Lights` altında
-yeniden oluşturulur.
-
-Desteklenen eşlemeler:
-
-- Redshift Physical Area → Blender Area
-- Redshift Physical Point → Blender Point
-- Redshift Physical Spot → Blender Spot
-- Redshift Physical Directional → Blender Sun
-- Redshift Dome → Blender World Environment
-- Redshift IES → Blender Spot + IES texture node
-- Arnold `aiAreaLight` → Blender Area (`aiTranslator`: quad/disk/cylinder)
-- Arnold `aiSkyDomeLight` → Blender World Environment
-- Arnold `aiPhotometricLight` → Blender Spot + IES texture node (`aiFilename`)
-- Arnold `aiMeshLight` → Blender Area (yaklaşık)
-- Native Maya Area/Point/Spot/Directional → karşılık gelen Blender light
-
-Arnold `aiLightPortal` aktarılmaz: hiç color veya intensity attribute'u yok,
-aktarılırsa Blender'da siyah bir alan ışığı olurdu.
-
-Arnold ışıklarında exposure attribute'unun yazımı düzensizdir —
-`aiAreaLight` ve `aiPhotometricLight` `exposure`, `aiSkyDomeLight`,
-`aiMeshLight` ve Arnold'lu native Maya ışıkları ise yalnızca `aiExposure`
-taşır. Alias tablosu ikisini de dener.
-
-Aktarılan temel değerler:
-
-- World konum ve rotasyon
-- Transform scale üzerinden area boyutu
-- Color ve color temperature
-- Intensity, exposure ve fiziksel unit
-- Area shape, normalize, spread ve bidirectional metadata
-- Spot cone/falloff
-- Shadow, softness ve contribution değerleri
-- Dome HDR ve IES dosya yolları
-
-Exposure değeri `intensity * 2^exposure` olarak değerlendirilir. Orijinal
-değerler Blender light custom property'lerinde `za_source_*` alanlarıyla
-korunur.
-
-### Enerji modeli
-
-Blender'ın light Power değeri **toplam ışıl akıdır**. Bu, dokümandan değil
-render ölçümüyle doğrulandı: Blender 4.1 ve 5.2'de normalize açıkken bir
-ışığın boyutu 4× olduğunda parlaklığı değişmiyor (oran 0.998), kapalıyken 16×
-oluyor (=4²). `normalize` property'si olmayan eski Blender sürümleri de akı
-modunda davranıyor.
-
-Bu, Arnold'ın belgelediği sözleşmenin aynısı: normalize açıkken toplam
-çıktı `O = C`, kapalıyken `O = C × A`. Redshift de aynı kavramı kullanıyor.
-
-Importer bu yüzden **her ışığı toplam akıya çevirir** ve Blender'ın
-`normalize`'ını açık bırakır. Alan çarpımını hem burada yapıp hem Blender'a
-bırakmak alanı iki kez uygulardı.
-
-Fiziksel birim bildiren ışıklar tam olarak çevrilir:
-
-```text
-Lumens     -> flux = intensity / 683
-Candela    -> flux = intensity * 4pi / 683
-Watts      -> dogrudan
-Radiance   -> flux = intensity * alan * pi / 683
-Sun        -> irradiance, alan ve normalize uygulanmaz
-```
-
-### Yoğunluktan watt'a dönüşüm
-
-Arnold'ın `intensity`'si ve Redshift'in "Image" unit'i boyutsuzdur, Blender'ın
-Power'ı ise watt cinsinden toplam akıdır. Bu dönüşüm **tahmin edilmedi,
-ölçüldü**: Arnold ve Cycles'ta birebir aynı sahne render edilip oran çözüldü.
-
-```text
-Arnold        x pi     (olculdu)
-Native Maya   x pi     (olculdu, MtoA ayni quad_light'a cevirir)
-Redshift      x10      (olculemedi, orijinal aractan devralindi)
-```
-
-π tesadüf değil: Arnold'ın normalize edilmiş `intensity`'si ışığın normali
-yönündeki ışıl şiddettir (`I₀`), Lambert yayıcı için toplam akı `Φ = π·I₀`, ve
-Blender'ın Power'ı toplam akıdır.
-
-Buna sahne biriminin karesi de girer, çünkü Arnold birimden bağımsızdır:
-santimetre sahnede 150 birimlik mesafe Blender'da 1.5 m olur ve aydınlatma
-`1/d²` ile 10⁴ kat şaşar.
-
-```text
-Blender Power = pi * meters_per_maya_unit^2 * intensity * 2^exposure
-```
-
-Mesafe, yoğunluk ve exposure değiştirilen beş varyantta çapa her seferinde
-3.1412 çıktı (yayılım %0.00006). Yöntem ve ham sayılar için
-`tests/docs/light_calibration.md`.
-
-> Bu, 1.7.0'dan önceki sürümlerde Arnold ve Maya ışıklarının **318× fazla
-> parlak** geldiği anlamına gelir. Eski paketleri yeniden gönderirsen
-> aydınlatma belirgin şekilde değişecek; doğrusu yenisidir.
-
-`View3D > N Panel > Z-A Exporter > Light Power Scale` sanatsal bir çarpandır,
-varsayılanı `1.0`. Bütün ışıkları eşit ölçekler, ışıklar arası oranları bozmaz.
-
-Redshift kullanıyorsan devralınan tahmini tamamen atlamanın yolu var: ışığın
-`unitsType` değerini Lumens, Candela veya Watts gibi fiziksel bir birime çevir.
-O dallar tam çevrilir.
-
-Blender'ın birebir karşılığı olmayan Cylinder/Mesh area light şekilleri
-Rectangle Area olarak yaklaştırılır. Birden fazla Dome varsa Blender'ın tek
-World ortamı için ilk aktif Dome kullanılır; diğer Dome kayıtları metadata
-empty olarak korunur.
-
-## Blender import davranışı
-
-Yeni paket geldiğinde:
-
-1. LiveLink protokolü ve paket şema sürümü doğrulanır. Uyumsuz bir paket
-   **sahneye dokunulmadan** reddedilir.
-2. Paketin FBX dosyası bulunur.
-3. Açık Blender dosyası kayıtlıysa önce kaydedilir.
-4. Sahnedeki bütün objeler ve collection'lar silinir.
-5. Kullanılmayan mesh, material, image, texture, action ve diğer data-block'lar
-   purge edilir.
-6. Yeni FBX import edilir.
-7. FBX'in oluşturduğu geçici material slotları temizlenir.
-8. JSON'daki mesh → material ve yüz atamaları uygulanır.
-9. Materialler Principled BSDF olarak yeniden kurulur.
-10. Textureler Maya'daki orijinal dosya konumlarından bağlanır.
-11. JSON ışıkları ve Dome World ortamı yeniden oluşturulur.
-12. JSON kameraları kurulur ve renderable olan aktif kamera yapılır.
-12. Bütün meshlerde Z-A Subdivision modifier ayarları kurulur.
-13. Import sonunda tekrar recursive orphan purge yapılır.
-
-Import yıkıcı olduğu için doğrulama adımları bilinçli olarak en başta yapılır:
-Blender add-on'u Maya exporter'ından eskiyse paket reddedilir ve mevcut sahne
-korunur. Desteklenen şema sürümleri `za_lookdev_importer/constants.py` içindeki
-`SUPPORTED_SCHEMA_VERSIONS` ile tanımlıdır.
-
-Tek bir material, texture veya ışık hatası import'u durdurmaz; uyarı olarak
-toplanır ve Blender System Console'a `Z-A Lookdev warning:` önekiyle yazılır.
-
-Bir mesh birden fazla material kullanıyorsa Maya shadingEngine face membership
-bilgisi JSON'a yazılır ve Blender polygon material indexleri yeniden kurulur.
-
-## Texture yerleşimi
-
-Maya tiling'i ayrı bir `place2dTexture` node'unda tutar. Upstream taraması
-dosyayı bulup bu node'un yanından geçtiği için değerler eskiden **sessizce
-düşüyordu**: Maya'da 4×3 tekrarlanan bir texture Blender'a 1×1 geliyordu.
-
-Artık bir **Mapping** node kurulur:
+UDIM detection is not guessed from the filename, it is **asked of Maya**:
+`file.uvTilingMode` says whether the node is tiled and
+`computedFileTextureNamePattern` gives Maya's own resolved pattern. Only if
+both come back empty is the tile number in the filename replaced with `<UDIM>`.
+
+- `<UDIM>`, `<udim>`, `%(UDIM)d`, `$UDIM` and `{UDIM}` normalise to one token.
+- A tile number must be 1001 or above and must be the **last** four-digit group
+  in the name, so version numbers are not mistaken for tiles.
+- The Blender image is set to `TILED` and reloaded — Blender only scans for
+  sibling tiles during a reload.
+- The glob uses `[1-9][0-9][0-9][0-9]` rather than `*`, which used to catch
+  unrelated files sharing a prefix.
+
+### Texture placement
+
+Maya keeps tiling in a separate `place2dTexture` node. Because the upstream
+search walked past it on the way to the file, these values used to be dropped
+silently: a texture repeating 4×3 in Maya arrived 1×1 in Blender. A **Mapping**
+node is now built:
 
 ```text
 repeatU / repeatV   -> Mapping Scale X / Y
 offset              -> Mapping Location X / Y
-rotateUV            -> Mapping Rotation Z   (derece -> radyan)
-wrapU / wrapV       -> Image extension REPEAT, kapaliysa EXTEND
+rotateUV            -> Mapping Rotation Z   (degrees -> radians)
+wrapU / wrapV       -> Image extension REPEAT, or EXTEND when off
 mirrorU / mirrorV   -> Image extension MIRROR
 ```
 
-`rotateUV` bir `doubleAngle` attribute'udur ve `getAttr` onu geçerli açı
-biriminde (varsayılan derece) döndürür; JSON'a `rotate_uv_degrees` adıyla
-derece olarak yazılır ve importer radyana çevirir.
+`rotateUV` is a `doubleAngle` attribute and `getAttr` returns it in the current
+angle unit, so it is written to JSON as degrees and converted on import. If the
+placement is at its defaults, no Mapping node is created.
 
-Yerleşim varsayılan değerlerdeyse Mapping node kurulmaz, node ağacı gereksiz
-kalabalıklaşmaz.
+### Bump
 
-## Bump şiddeti
+`bump2d.bumpDepth` reaches the Normal Map node's **Strength** input. It used to
+be dropped, which meant every normal map arrived at full strength.
 
-`bump2d.bumpDepth` artık taşınıyor ve Blender'ın Normal Map node'unun
-`Strength` girişine gidiyor. Eskiden düşüyordu, yani her normal map varsayılan
-1.0 şiddetle geliyordu.
+`bumpInterp` selects the node: `Tangent Space Normals` builds a Normal Map
+node, `Object Space Normals` the same with `space = OBJECT`, and plain `Bump`
+builds Blender's **Bump** node, treating the map as a height field.
 
-`bumpInterp` de okunuyor: `Tangent Space Normals` → Normal Map node,
-`Object Space Normals` → Normal Map node `space = OBJECT`, düz `Bump` →
-Blender'ın **Bump** node'u (yükseklik alanı olarak).
-
-## Coat, Sheen, Subsurface
-
-`aiStandardSurface` ve `aiOpenPBRSurface`'in ek lobları da aktarılıyor:
+### Coat, sheen and subsurface
 
 ```text
 coat / coatWeight        -> Coat Weight
@@ -611,153 +485,417 @@ subsurfaceScale          -> Subsurface Scale
 specularAnisotropy       -> Anisotropic
 ```
 
-Beş not:
+Five of these needed more than a rename. Each was measured against Arnold with
+the chart rig in [`tests/calibration/`](tests/calibration/); the numbers are in
+[`tests/docs/material_match.md`](tests/docs/material_match.md).
 
-- **`aiStandardSurface`'ın sheen roughness'ı yeniden eşlenir.** Arnold'ın
-  standard surface sheen'i ile Blender'ın mikrolif sheen'i farklı modeller ve
-  roughness girdileri aynı şeyi anlatmıyor: 0.3'te Arnold'ın gösterdiğini
-  Blender neredeyse hiç göstermiyor, 1.0'da ise Blender fazlasını gösteriyor.
-  Üç bakış açısı ve iki taban albedosunda ölçülen bir tabloyla eşlenir
-  (0.25 → ~0.51). Orijinal değer `za_source_sheen_roughness`'ta saklanır.
-  **`aiOpenPBRSurface`'ın `fuzzRoughness`'ı dokunulmadan geçer** — OpenPBR ile
-  Blender aynı modeli kullanıyor ve zaten %2 içinde eşleşiyor.
-- **OpenPBR'ın `specularWeight`'i metal lobunu ölçekler.** OpenPBR'da
-  `baseMetalness = 1` ve `specularWeight = 0` olan bir yüzey Arnold'da
-  **tamamen siyah** render olur; `aiStandardSurface` böyle değildir ve
-  Principled'da bunu yapan bir soket yoktur. Ölçüldü: sonuç tam olarak
-  `base · (1 − metalness·(1 − specularWeight))`. Bu çarpan base color'a
-  uygulanır ve `za_openpbr_specular_scale` custom property'sinde saklanır.
-  Varsayılan ağırlık 1.0 olduğu için çarpan 1'dir ve normal sahnelerde
-  hiçbir şey değişmez.
-- **OpenPBR'ın `coatDarkening`'i base color'a katlanır.** OpenPBR coat'un
-  altındaki yüzeyi karartır: coat'un iç yüzünden geri dönen ışık tekrar
-  yutulur, dolayısıyla koyu bir taban parlak olandan çok daha fazla kaybeder.
-  Principled'da bunun karşılığı olan bir soket yok, o yüzden karartma base
-  color'ın kendisine uygulanır — texture'lı base color'da bir node zinciriyle,
-  düz renkte doğrudan. Bu yapılmadığında coat'lu OpenPBR materyalleri
-  Maya'nın gösterdiğinin **iki katına kadar parlak** geliyordu.
+**aiStandardSurface sheen roughness is remapped.** Arnold's standard-surface
+sheen and Blender's microfiber sheen are different lobes whose roughness inputs
+do not mean the same thing: at 0.3 Arnold shows a sheen Blender barely
+registers, and at 1.0 Blender shows a third more than Arnold. No single factor
+could fix that — the sign of the error changes partway along the scale. A
+measured table remaps it (0.25 becomes about 0.51); the original is kept in
+`za_source_sheen_roughness`. The table came out identical at two base albedos
+and stable across Blender 4.1 to 5.2.
 
-  Uygulanan eğri Arnold'a karşı ölçüldü (`tests/docs/material_match.md`):
-  karartma miktarında doğrusal, coat ağırlığının **karesinde** (ışık coat'u
-  girerken ve çıkarken olmak üzere iki kez geçer). Paketteki `base_color`
-  sanatçının verdiği değer olarak kalır; karartma yalnız Blender tarafında
-  uygulanır ve `za_coat_darkening` custom property'sinde saklanır.
-  `aiStandardSurface`'ta böyle bir attribute yok, o yüzden etkilenmez.
-- **Principled'da ayrı bir Subsurface Color soketi yok** (4.1 ve 5.2'de
-  ölçüldü); base color'dan renklenir. Maya'nın `subsurfaceColor` değeri bu
-  yüzden metadata olarak saklanır, sessizce atılmaz.
-- **`Subsurface Scale` varsayılanı sürümler arası farklı** (4.1'de 0.05,
-  5.2'de 0.005). Bu yüzden değer açıkça set edilir; varsayılana güvenmek aynı
-  paketi iki sürümde farklı gösterirdi.
+**aiOpenPBRSurface `fuzzRoughness` passes through untouched.** Swept the same
+way it already agrees with Blender to within 2%, because both follow the same
+model. Remapping it would break a match that is already correct.
 
-## Işık linking
+**OpenPBR's `specularWeight` scales the metal lobe.** A surface with
+`baseMetalness = 1` and `specularWeight = 0` renders **completely black** in
+Arnold; `aiStandardSurface` does not behave this way and Principled has no
+socket that does. Measured across five weights and five metalness values, the
+result is exactly `base × (1 − metalness × (1 − specularWeight))`. That factor
+is applied to the base colour and recorded as `za_openpbr_specular_scale`. At
+the default weight of 1.0 the factor is 1 and nothing changes.
 
-Maya'da bir ışığın yalnız belli objeleri aydınlatması (light linking) artık
-aktarılıyor. Blender'da karşılığı **receiver collection**'dır:
+**OpenPBR's `coatDarkening` is folded into the base colour.** OpenPBR darkens
+what sits under the coat — light the underside of the coat reflects back down
+is absorbed again, so a dark base loses far more than a bright one. Principled
+has no such input, and without this a coated OpenPBR material arrived up to
+**twice as bright** as Maya rendered it. The curve is
+`(1 − rᵢ)/(1 − rᵢ · base)`, linear in the darkening attribute and quadratic in
+the coat weight because the light crosses the coat going in and coming out.
+`rᵢ` follows the coat IOR and was checked at three IORs. A flat base colour is
+darkened directly; a textured one goes through a node chain. The package keeps
+reporting the artist's base colour; the amount applied is in
+`za_coat_darkening`. `aiStandardSurface` has no such attribute and is
+unaffected.
+
+**Principled has no separate Subsurface Color socket** in 4.1 or 5.2; it tints
+from the base colour. Maya's `subsurfaceColor` is therefore kept as metadata
+rather than dropped silently. **`Subsurface Scale` defaults differ between
+versions** (0.05 in 4.1, 0.005 in 5.2), so the value is always set explicitly.
+
+### Colour correction nodes
+
+Correction nodes between a texture and a shader used to be skipped silently:
+the upstream search walked past them, and a texture whose gamma and saturation
+had been changed arrived raw. Recognised nodes are now rebuilt as Blender
+nodes, which is faster than baking and stays editable:
+
+| Maya / Arnold | Blender |
+|---|---|
+| `aiColorCorrect` | Gamma + Hue/Saturation + Bright/Contrast + Mix |
+| `gammaCorrect` | Gamma |
+| `aiRange` | Mix (scale) + Mix (offset) + Bright/Contrast |
+| `aiMultiply` | Mix (Multiply) |
+| `aiAdd` | Mix (Add) |
+| `reverse` | Invert |
+| `clamp` | Mix (Lighten) + Mix (Darken) |
+| `blendColors` | Mix, factor inverted |
+| `multiplyDivide` | Mix (Multiply / Divide) |
+| `remapValue` | Mix + Colour Ramp + Mix |
+
+Nodes are prefixed `ZA_CC_` / `ZA_`. A setting left at its neutral value builds
+no node, so an untouched correction node does not clutter the tree.
+
+Five conversions were measured and came out against intuition — details in
+[`tests/docs/correction_nodes.md`](tests/docs/correction_nodes.md):
+
+- **Gamma is the inverse exponent.** Maya applies `in^(1/g)`, Blender's Gamma
+  node applies `in^g`.
+- **`hueShift` is in turns**, not degrees, while Blender's Hue is an offset
+  around a neutral 0.5.
+- **`contrast` is pivoted.** Arnold computes `c·(in − pivot) + pivot`, Blender
+  `(1 + C)·in + (B − C/2)`.
+- **`blendColors` is the reverse of Blender's Mix.** In Maya `blender = 1`
+  returns colour 1; in Blender `Factor = 1` returns the **second** colour. The
+  factor is inverted, and which input the texture arrived on is recorded
+  because the node is not symmetric.
+- **`remapValue`'s ramp is its main job.** Building only the linear part — the
+  old behaviour — silently discarded the curve the artist drew. The ramp is now
+  built as a Colour Ramp. Maya stores interpolation per stop and Blender per
+  ramp, so the first is used and a mixed ramp is reported.
+
+Nodes with no Blender equivalent (`aiComposite`, `remapHsv`, and `aiRange`'s
+`smoothstep`, `bias` and `gain`) are reported after the import:
 
 ```text
-Maya      lightA -> cubeA (cubeB'nin bağlantısı kırılmış)
+Correction node "remapCoat" (remapValue) has no Blender equivalent,
+so the texture is used without it.
+```
+
+### Procedural baking
+
+When a channel is driven by a network with no file behind it — a checker, a
+ramp, layered noise — there is nothing to reference, so the exporter **bakes**
+the network to the mesh's UVs and writes it into the package.
+
+```text
+MTB_Z_A_01/
+  textures/
+    procCube_shd_base_color.png
+    procCube_shd_roughness.png
+```
+
+Baking only runs when it is genuinely needed; if the upstream search finds a
+file, that file is referenced instead.
+
+Two measured constraints shaped this:
+
+- **Maya writes linear.** `convertSolidTx` writes linear values whether colour
+  management is on or off (0.5 in stores as 0.498; sRGB would give 0.735).
+  Baked maps are therefore loaded as **Non-Color even for colour channels**.
+  Assuming sRGB would darken every bake.
+- **It cannot write EXR.** The file node points at a path but nothing lands on
+  disk, so the format is PNG.
+
+Eight-bit linear PNG can band in the darks for colour channels. That is a
+deliberate trade; the alternative is not transferring the channel at all.
+
+A baked record carries `baked_from`, so a map can be traced back to the Maya
+node it came from. A mesh with no UVs bakes empty; that is warned about and the
+export continues.
+
+### Displacement
+
+Maya keeps displacement **on the shading engine, not the shader** —
+`aiStandardSurface` has no displacement attribute. Mesh and shading engine are
+therefore read together: the map comes from the engine, the height and zero
+value from the mesh. Both wirings found in real scenes are recognised:
+
+```text
+file -> displacementShader -> SG.displacementShader     (the common one)
+file --------------------->  SG.displacementShader      (Arnold renders this too)
+```
+
+A **Displacement** node is built and connected to the material output. The
+mapping is exact because both sides compute `(map − midlevel) × scale`:
+
+```text
+aiDispHeight * displacementShader.scale  ->  Scale
+aiDispZeroValue                          ->  Midlevel
+map                                      ->  Height
+aiDispAutobump                           ->  displacement_method = BOTH
+```
+
+**No unit scale is applied, on purpose.** Measured: FBX import puts the unit
+conversion on the object's scale and leaves vertex coordinates in Maya units,
+so one unit of object-space displacement already is one Maya unit. This is the
+**opposite** of the light energy rule, where the squared scene scale is
+mandatory; adding it here would give a hundred times too much displacement in a
+centimetre scene.
+
+Vector displacement is built as well: `displacementMode` states both whether it
+is vector and which space, and Blender's Vector Displacement node offers the
+same spaces.
+
+Displacement is a **Cycles** feature; EEVEE ignores it. A mesh with no
+subdivision is warned about, since displacement then has no geometry to move.
+The `Scale` socket's default differs between versions (1.0 in 4.1, 0.01 in
+5.2), so it is always set explicitly.
+
+---
+
+## Lights
+
+Lights are not written into the FBX. They are sent through the JSON and rebuilt
+under `Z-A Lookdev Import > Z-A Lights`.
+
+```text
+Redshift Physical Area         -> Area
+Redshift Physical Point        -> Point
+Redshift Physical Spot         -> Spot
+Redshift Physical Directional  -> Sun
+Redshift Dome                  -> World environment
+Redshift IES                   -> Spot + IES texture node
+aiAreaLight                    -> Area (quad / disk / cylinder)
+aiSkyDomeLight                 -> World environment
+aiPhotometricLight             -> Spot + IES texture node
+aiMeshLight                    -> Area (approximated)
+Maya Area/Point/Spot/Directional -> the matching Blender light
+```
+
+`aiLightPortal` is not transferred: it has neither colour nor intensity, so it
+would arrive as a black area light.
+
+Transferred: world position and rotation, area size from the transform scale,
+colour and colour temperature, intensity, exposure and physical unit, area
+shape, normalize, spread and bidirectional metadata, spot cone and falloff,
+shadow settings, and dome HDR and IES file paths. Exposure is evaluated as
+`intensity × 2^exposure`. Originals are preserved in `za_source_*` properties.
+
+Arnold spells the exposure attribute inconsistently — `aiAreaLight` and
+`aiPhotometricLight` carry `exposure`, while `aiSkyDomeLight`, `aiMeshLight`
+and Arnold-enhanced native Maya lights carry only `aiExposure`. The alias table
+tries both, in that order.
+
+### Energy model
+
+**Blender's light Power is total luminous flux.** This was established by
+rendering, not from documentation: in Blender 4.1 and 5.2, quadrupling a
+light's size with normalize on leaves its brightness unchanged (ratio 0.998),
+and with normalize off multiplies it by 16 (= 4²). Older versions without the
+`normalize` property behave in flux mode too.
+
+That is the same contract Arnold documents: with normalize on the total output
+is `O = C`, with it off `O = C × A`. Redshift uses the same concept.
+
+The importer therefore **converts every light to total flux** and leaves
+Blender's `normalize` on. Doing the area multiplication here *and* leaving it
+to Blender would apply the area twice.
+
+Lights that state a physical unit convert exactly:
+
+```text
+Lumens     -> flux = intensity / 683
+Candela    -> flux = intensity * 4pi / 683
+Watts      -> direct
+Radiance   -> flux = intensity * area * pi / 683
+Sun        -> irradiance; area and normalize do not apply
+```
+
+### Intensity to watts
+
+Arnold's `intensity` and Redshift's "Image" unit are dimensionless, while
+Blender's Power is total flux in watts. This conversion was **measured**, by
+rendering an identical scene in Arnold and Cycles and solving for the ratio:
+
+```text
+Arnold        x pi     (measured)
+Native Maya   x pi     (measured; MtoA converts to the same quad_light)
+Redshift      x10      (not measurable here, inherited from the original tool)
+```
+
+π is not a coincidence: Arnold's normalized `intensity` is the luminous
+intensity along the light's normal (`I₀`), the total flux of a Lambertian
+emitter is `Φ = π·I₀`, and Blender's Power is total flux.
+
+The square of the scene unit enters as well, because Arnold is unit-agnostic: a
+distance of 150 units in a centimetre scene becomes 1.5 m in Blender, and
+illumination goes wrong by 10⁴ through `1/d²`.
+
+```text
+Blender Power = pi * meters_per_maya_unit^2 * intensity * 2^exposure
+```
+
+Across five variants changing distance, intensity and exposure, the anchor came
+out at 3.1412 every time (spread 0.00006). Method and raw numbers are in
+[`tests/docs/light_calibration.md`](tests/docs/light_calibration.md).
+
+> Before 1.7.0 this meant Arnold and Maya lights arrived **318× too bright**.
+> Re-sending an old package will change its lighting noticeably. The new
+> result is the correct one.
+
+**Light Power Scale** in the N panel is an artistic multiplier over this,
+default `1.0`. It scales all lights equally and does not disturb their
+relative ratios.
+
+Redshift users can skip the inherited estimate entirely by setting the light's
+`unitsType` to a physical unit — those branches convert exactly.
+
+Cylinder and mesh area shapes, which Blender has no exact equivalent for, are
+approximated as rectangular area lights. With several domes present, the first
+active one drives Blender's single world and the rest are kept as metadata
+empties.
+
+### Light linking
+
+Maya's light linking is transferred. Blender's equivalent is a **receiver
+collection**:
+
+```text
+Maya      lightA -> cubeA (link to cubeB broken)
 Blender   lightA.light_linking.receiver_collection = ZA_Link_lightA
-          ZA_Link_lightA içinde: cubeA
+          containing: cubeA
 ```
 
-Bu collection sahne ağacına **bağlanmaz**; bir organizasyon klasörü değil,
-linking mekanizmasıdır. Bu yüzden bir mesh hem kendi grup collection'ında hem
-bir receiver collection'da olabilir, bu normaldir.
+That collection is **not** linked into the scene tree; it is a linking
+mechanism, not an organisational folder, so a mesh legitimately appears both in
+its group collection and in a receiver collection.
 
-Üç karar:
+Three decisions:
 
-- **Sahnede hiç kırılmış bağlantı yoksa hiçbir sorgu yapılmaz.** Maya kırılmaları
-  `lightLinker.ignore` dizisinde tutar; dizi boşsa her ışık her şeyi aydınlatıyor
-  demektir ve per-ışık sorgu (büyük sahnelerde pahalı) atlanır.
-- **Her şeyi aydınlatan bir ışık için hiçbir şey yazılmaz.** Alanın olmaması
-  "kısıtlama yok" demektir.
-- **Cevapsız kalan sorgu "hiçbir şeyi aydınlatmıyor" olarak okunmaz.** Maya,
-  `defaultLightSet` dışındaki bir ışık için boş cevap verir; bunu kısıtlama sanmak
-  ışığı Blender'da tamamen karartırdı. İki hata eşit değil: yanlış kısıtlamak ışığı
-  yok eder, kısıtlamamak sadece muhtemelen olmayan bir kısıtlamayı kaçırır.
+- **No queries at all if nothing is unlinked.** Maya keeps broken links in
+  `lightLinker.ignore`; an empty array means every light lights everything, and
+  the per-light query — expensive in large scenes — is skipped.
+- **Nothing is written for a light that lights everything.** Absence means no
+  restriction.
+- **An empty answer is not read as "lights nothing".** Maya returns an empty
+  result for any light outside `defaultLightSet`, and treating that as a
+  restriction would black the light out entirely in Blender. The two errors are
+  not equal: restricting wrongly destroys the light, while failing to restrict
+  merely misses a restriction that probably was not there.
 
-**Gölge linking ayrıca aktarılır.** Maya onu kendi dizilerinde tutar, yani bir
-sahne ışığı kısıtlamadan yalnız gölgeyi kısıtlayabilir. Blender'daki karşılığı
-`blocker_collection`'dır — ışığı engelleyen, yani gölgesini bırakan objeler.
+**Shadow linking is transferred separately**, since Maya keeps it in its own
+arrays and a light can restrict shadows without restricting illumination.
+Blender's equivalent is the `blocker_collection`.
 
-## Renk yönetimi
+---
 
-Aktarım doğru olduğu halde görüntünün "bir tuhaf" görünmesinin en sık sebebi
-budur: geometri, material ve ışıklar tutar, ama iki uygulama farklı tone
-mapping yapar.
+## Cameras
 
-Maya'nın renk yönetimi ayarı artık pakete yazılıyor ve Blender'da kurulmaya
-çalışılıyor:
+Maya's startup cameras (`persp`, `top`, `front`, `side`) are viewport
+furniture and are not transferred. User cameras are rebuilt under
+`Z-A Lookdev Import > Z-A Cameras`.
+
+Maya and Blender cameras face the same way (local −Z forward, +Y up), so the
+same matrix conversion as lights applies. The differences are lens and units:
 
 ```text
-renderingSpaceName    ACEScg
-viewTransformName     ACES 1.0 SDR-video (sRGB)
-displayName           sRGB
-configFilePath        ...\OCIO-configs\Maya2022-default\config.ocio
+focalLength              -> lens (mm, direct)
+horizontalFilmAperture   -> sensor_width   (inches x 25.4)
+verticalFilmAperture     -> sensor_height  (inches x 25.4)
+filmFit                  -> sensor_fit     (Fill/Overscan -> AUTO)
+horizontalFilmOffset     -> shift_x        (divided by aperture, a ratio)
+nearClipPlane/farClip    -> clip_start/end (scene units -> metres)
+orthographicWidth        -> ortho_scale    (scene units -> metres)
+depthOfField/fStop       -> dof.use_dof / dof.aperture_fstop
+focusDistance            -> dof.focus_distance (scene units -> metres)
 ```
 
-**Önemli sınır, ölçüldü:** Blender'ın kendi OCIO config'inde **hiçbir sürümde
-ACES view transform yok** (4.1, 4.5 ve 5.2'de tek tek denendi; sadece
-Standard, Raw, Filmic, Filmic Log, False Color, AgX ve 4.5'ten itibaren
-Khronos PBR Neutral var).
+The camera marked `renderable` in Maya becomes Blender's active scene camera.
+With several renderable cameras the first is chosen and a warning is issued.
+Originals are stored in `za_source_*` on the camera data.
 
-Bu yüzden davranış şu:
+---
 
-- Blender'da Maya'nın istediği transform **varsa** aynen kurulur. ACES config
-  yüklü bir Blender'da bu birebir eşleşir.
-- **Yoksa** en yakın karşılığı kurulur ve **uyarı yazılır** — hangi
-  transform'un istendiğini ve hangi OCIO config'e işaret edilmesi gerektiğini
-  söyleyerek:
+## Animation
+
+Off by default — the tool sends a single frame. Ticking **Export Animation**
+transfers a frame range.
 
 ```text
-Maya was using the "ACES 1.0 SDR-video (sRGB)" view transform, which this
-Blender's colour config does not have; "Standard" was used instead. To match
-exactly, point Blender at the same OCIO config through the OCIO environment
-variable: C:/Program Files/Autodesk/Maya2023/resources/OCIO-configs/...
+Frame Range   empty   -> Maya's playback range (minTime - maxTime)
+              1-120   -> explicit range
+              1-120x2 -> sample every second frame
 ```
 
-AgX'i olduğu gibi bırakıp "eşleşti" demek tek gerçekten yanıltıcı sonuç
-olurdu; onun yerine tanımlı bir transform kurulur.
+Two different routes are used, deliberately:
 
-Maya'da renk yönetimi kapalıysa sahne ham lineer kabul edilir ve `Standard`
-kurulur.
+- **Meshes travel inside the FBX.** FBX already carries animation and is the
+  only route that transfers deformers correctly;
+  `FBXExportBakeComplexAnimation` is enabled along with the range.
+- **Cameras and lights are sampled into the JSON**, because they are rebuilt
+  from scratch in Blender. World matrix, camera lens, light intensity and
+  colour are written per frame.
 
-## Aynı isimli meshler
+Light energy is **recomputed per frame** rather than interpolated, so every
+frame goes through the measured conversion.
 
-Maya'da iki mesh'in farklı gruplar altında aynı kısa ismi taşıması (`|setA|twin`
-ve `|setB|twin`) tamamen normaldir. Importer kayıtları objelere **isimle**
-eşleştirdiği için ikisi de aynı puanı alıyor ve rastgele biri kazanıyordu:
-meshler **yer değiştiriyor**, her biri diğerinin materyalini, görünürlüğünü ve
-grubunu alıyordu.
+FPS is read from Maya (`currentTimeUnitToFPS`) and NTSC fractions are
+reconstructed exactly with Blender's `fps` / `fps_base` pair (23.976 → 24 /
+1.001).
 
-Artık FBX'in getirdiği **parent zinciri** beraberliği bozuyor: kaydın grup izi
-objenin ata isimleriyle karşılaştırılıyor. Katkı bilinçli olarak tam-yol
-eşleşmesinin altında tutuluyor, böylece derin bir hiyerarşi gerçek bir tam-yol
-eşleşmesini asla geçemez.
+Two traps, either of which would ruin a turntable:
 
-Test bunu iki küpü zıt yönlere taşıyarak sınıyor; yer değiştirme olsa konumlar
-takas olurdu.
+- **Euler flips.** Solving each frame's matrix independently lets angles jump a
+  full turn between frames, so a camera orbiting 360° appears to snap back.
+  Each frame is made compatible with the previous one.
+- **Interpolation.** Baked samples are linear. Blender's default Bezier eases
+  in and out of every key and makes a constant rotation stutter, so keys are
+  set to `LINEAR`.
 
-## Export kapsamı
+The frame count is capped at **2000**. Exceeding it clips the range and records
+that it was clipped, rather than sending short silently.
 
-`Export Scope` kutusu işaretlenirse sahnenin tamamı yerine **yalnız seçili
-objeler** gönderilir. Tek bir asset üzerinde çalışırken her gönderimde tüm
-sahneyi paketlemek gereksiz.
+---
 
-- **Seçim gruplara açılır.** Bir asset'i seçmenin normal yolu onu tutan grubu
-  seçmektir; seçimi harfi harfine okumak en yaygın durumda hiçbir şey export
-  etmek olurdu.
-- **Işıklar ve kameralar her zaman tam gelir.** Işıklandırması olmayan bir
-  lookdev paketi lookdev değil, karanlıktır. Seçimde ışık varsa bu bir uyarıyla
-  söylenir, sessizce yok sayılmaz.
-- Seçimde hiç mesh yoksa export **sesli hata verir** ve yarım paket bırakmaz.
+## Scene structure
 
-## Görünürlük ve render bayrakları
+### Groups become collections
 
-Maya'da kameraya gizlenmiş ama gölge bırakan bir obje eskiden Blender'a
-**tamamen görünür** geliyordu; lookdev'in en sık kurulumlarından biri sessizce
-kayboluyordu. Artık ışın bazlı görünürlük aktarılıyor:
+Maya's group hierarchy is rebuilt as nested collections. Everything used to
+land flat in one root collection, which made the outliner unusable in a busy
+scene.
+
+```text
+Maya                              Blender
+|setDressing|props|chair    ->    Z-A Lookdev Import
+                                    setDressing
+                                      props
+                                        chair
+```
+
+- **Only real groups become folders.** A transform with its own shape is an
+  object, not a folder; otherwise a transform carrying geometry would invent a
+  nesting level that does not exist.
+- A mesh with no group stays in the root collection.
+- Two meshes from the same Maya group share **one** collection.
+- Generated collections carry `za_generated` and `za_maya_group`.
+
+Lights and cameras stay together under `Z-A Lights` and `Z-A Cameras` rather
+than joining this hierarchy, because lookdev wants them all reachable at once.
+
+### Meshes with the same name
+
+Two meshes under different groups sharing a short name (`|setA|twin` and
+`|setB|twin`) is entirely normal in Maya. Matching records to objects **by
+name** gave both the same score and one won at random: the meshes **swapped**,
+each taking the other's materials, visibility and group.
+
+The **parent chain** the FBX brings now breaks the tie, comparing the record's
+group trail against the object's ancestor names. Its contribution is
+deliberately kept below a full-path match, so a deep hierarchy can never
+outscore a genuine one.
+
+### Visibility and render flags
+
+An object hidden from camera but casting shadows — one of the most common
+lookdev setups — used to arrive fully visible. Ray visibility is now
+transferred:
 
 ```text
 primaryVisibility                 -> visible_camera
@@ -771,266 +909,24 @@ visibility (transform)            -> hide_render + hide_viewport
 lodVisibility                     -> hide_viewport
 ```
 
-Arnold ışın görünürlüğünü Maya'dan daha ince ayırır ve kendi `ai*`
-attribute'larını okur; Maya'nın `visibleInReflections`/`visibleInRefractions`
-değerleri diğer renderer'lar içindir. İkisi de aday listesinde, önce Arnold'unki.
+Arnold splits ray visibility more finely than Maya and reads its own `ai*`
+attributes; Maya's `visibleInReflections` / `visibleInRefractions` are for
+other renderers. Both are in the candidate list, Arnold's first.
 
-**Yalnız varsayılandan farklı olan bayraklar yazılır.** Sıradan bir mesh hiç
-bayrak üretmez ve Blender'ın kendi varsayılanlarına dokunulmaz — böylece
-aktarım, sahnenin istemediği bir şeyi bütün meshlere uygulamaz.
+**Only flags that differ from their defaults are written.** An ordinary mesh
+produces no flags at all and Blender's own defaults are left alone, so the
+transfer never applies something the source scene did not ask for.
 
-Gizli bir Maya mesh'i Blender'da hem viewport'ta hem **render'da** gizlenir;
-yalnız viewport'u gizlemek render'da yine görünmesine yol açardı.
+A hidden Maya mesh is hidden in both the viewport and the **render**; hiding
+only the viewport would let it reappear at render time.
 
-Bu bayraklar **Cycles** özellikleridir; EEVEE ışın görünürlüğünü yok sayar.
+These flags are **Cycles** features; EEVEE ignores ray visibility.
 
-## Animasyon (turntable)
+### Subdivision
 
-Varsayılan olarak **kapalı** — araç tek frame gönderir. Maya penceresindeki
-`Export Animation` kutusu işaretlenirse frame aralığı aktarılır.
-
-Aracın turntable üreten bir modu **yok**: sahnede ne animasyonluysa o gelir.
-Kamera dönüyorsa kamera döner, obje dönüyorsa obje döner.
-
-```text
-Frame Range   bos     -> Maya'nin playback range'i (minTime - maxTime)
-              1-120   -> acikca aralik
-              1-120x2 -> iki frame'de bir ornekle
-```
-
-İki farklı yol kullanılır ve bu bilinçlidir:
-
-- **Meshler FBX'in içinde gelir.** FBX zaten animasyon taşır ve deformer'ları
-  doğru aktaran tek yol odur; `FBXExportBakeComplexAnimation` aralıkla birlikte
-  açılır.
-- **Kamera ve ışıklar JSON'da örneklenir**, çünkü onlar Blender'da sıfırdan
-  kuruluyor. Her frame için world matrix, kamera lensi, ışık şiddeti ve rengi
-  yazılır.
-
-Işık enerjisi frame başına **yeniden hesaplanır**, interpolate edilmez —
-böylece her frame ölçülmüş dönüşümden geçer.
-
-FPS Maya'dan okunur (`currentTimeUnitToFPS`) ve NTSC kesirleri Blender'ın
-`fps` / `fps_base` çiftiyle tam olarak kurulur (23.976 → 24 / 1.001).
-
-### İki tuzak, ikisi de turntable'ı bozardı
-
-- **Euler sıçraması.** Her frame'in matrisi bağımsız çözülürse açılar iki
-  frame arasında tam tur atlayabilir; 360° dönen bir kamera ansızın geri
-  dönüyormuş gibi görünür. Her frame bir öncekiyle uyumlu hale getirilir
-  (`make_compatible`). Test bunu tam tur üzerinde sınıyor.
-- **Interpolasyon.** Bake edilmiş örnekler doğrusaldır. Blender'ın varsayılan
-  Bezier'i her iki anahtar arasında yavaşlatıp hızlandırır ve sabit bir dönüşü
-  kesik kesik gösterir. Anahtarlar `LINEAR` yapılır.
-
-Frame sayısı üst sınırı **2000**; aşılırsa aralık kırpılır ve pakete "kırpıldı"
-yazılır, sessizce eksik gönderilmez.
-
-## Displacement
-
-Maya displacement'ı **shader'da değil, shadingEngine'de** durur —
-`aiStandardSurface`'in displacement attribute'u yoktur. Bu yüzden mesh ile
-shading engine birlikte okunur: harita engine'den, yükseklik ve sıfır değeri
-mesh'ten gelir.
-
-İki kablolama da tanınır, ikisi de gerçek sahnelerde görülüyor:
-
-```text
-file -> displacementShader -> SG.displacementShader     (yaygın olan)
-file --------------------->  SG.displacementShader      (Arnold bunu da render eder)
-```
-
-Blender'da bir **Displacement** node kurulur ve material output'un
-`Displacement` girişine bağlanır. Eşleme birebir, çünkü iki taraf da aynı
-formülü hesaplıyor — `(harita - midlevel) * scale`:
-
-```text
-aiDispHeight * displacementShader.scale  ->  Scale
-aiDispZeroValue                          ->  Midlevel
-harita                                   ->  Height
-aiDispAutobump                           ->  displacement_method = BOTH
-                                             (kapalıysa DISPLACEMENT)
-```
-
-**Birim ölçeği bilerek eklenmiyor.** Ölçtüm: FBX import'unda birim dönüşümü
-obje scale'ine biniyor, vertex koordinatları Maya biriminde kalıyor. Yani
-object space'te 1 birimlik displacement zaten 1 Maya birimidir. Bu, ışık
-enerjisi kuralının **tersidir** (orada `position_scale²` zorunlu); buraya da
-eklemek santimetre sahnelerde 100 kat fazla displacement verirdi.
-
-İki sınır:
-
-- **Vector displacement da kuruluyor.** `displacementMode` enum'u hem vector
-  olup olmadığını hem uzayı söyler (`Vector, Tangent/Object/World Space`), ve
-  Blender'ın **Vector Displacement** node'unun `space` seçenekleri birebir
-  aynıdır — yeniden adlandırmadan ibaret.
-- Mesh subdivision istemiyorsa uyarı yazılıyor: displacement'ın kıpırdatacak
-  geometrisi olmaz. (Arnold'da da aynı şey geçerli.)
-
-Displacement bir **Cycles** özelliğidir; EEVEE onu yok sayar.
-
-`Scale` soketinin varsayılanı sürümler arası farklı (4.1'de 1.0, 5.2'de 0.01),
-bu yüzden değer her zaman açıkça set edilir.
-
-## Grup hiyerarşisi → Collection
-
-Maya'daki grup yapısı Blender'da **iç içe collection** olarak yeniden kurulur.
-Eskiden bütün meshler tek bir kök collection'a düz olarak giriyordu; kalabalık
-bir sahnede outliner kullanılamaz hale geliyordu.
-
-```text
-Maya                              Blender
-|setDressing|props|chair    ->    Z-A Lookdev Import
-                                    setDressing
-                                      props
-                                        chair
-```
-
-Kurallar:
-
-- **Yalnız gerçek gruplar klasör olur.** Kendi shape'i olan bir transform obje
-  sayılır, klasör değil; yoksa geometri taşıyan bir transform olmayan bir
-  nesting seviyesi uydururdu.
-- Grubu olmayan mesh kök collection'da kalır.
-- Aynı Maya grubundaki iki mesh **aynı** collection'a girer, isim benzeri iki
-  ayrı collection oluşmaz.
-- Üretilen collection'lar `za_generated` ve `za_maya_group` custom
-  property'lerini taşır.
-
-Işıklar ve kameralar bu hiyerarşiye girmez; `Z-A Lights` ve `Z-A Cameras`
-altında toplu kalırlar, çünkü lookdev sırasında hepsine birden erişmek
-istenir.
-
-## Renk düzeltme
-
-Texture ile shader arasındaki düzeltme node'ları eskiden **sessizce
-atlanıyordu**: upstream taraması dosyayı bulmak için üzerlerinden geçiyor,
-gamma'sı ve doygunluğu değiştirilmiş bir texture Blender'a ham geliyordu.
-
-Artık tanınan node'lar Blender node'u olarak yeniden kuruluyor — bake'den
-hızlı ve sonradan elle düzenlenebilir:
-
-| Maya / Arnold    | Blender                                          |
-|------------------|--------------------------------------------------|
-| `aiColorCorrect` | Gamma + Hue/Saturation + Bright/Contrast + Mix   |
-| `gammaCorrect`   | Gamma                                            |
-| `aiRange`        | Mix (scale) + Mix (offset) + Bright/Contrast     |
-| `aiMultiply`     | Mix (Multiply)                                   |
-| `aiAdd`          | Mix (Add)                                        |
-| `reverse`        | Invert                                           |
-| `clamp`          | Mix (Lighten) + Mix (Darken)                     |
-| `blendColors`    | Mix (Mix), faktör ters çevrilmiş                 |
-| `multiplyDivide` | Mix (Multiply / Divide)                          |
-| `remapValue`     | Mix + Colour Ramp + Mix (rampa dahil)            |
-
-Node'lar `ZA_CC_` / `ZA_` önekiyle adlandırılır. Bir ayar nötr değerindeyse o
-node hiç kurulmaz, yani dokunulmamış bir düzeltme node'u ağacı kalabalıklaştırmaz.
-
-Üç dönüşüm ölçüldü ve sezginin tersi çıktı (ayrıntı: `tests/docs/correction_nodes.md`):
-
-- **`gamma` ters üstür.** Maya `in^(1/g)` uygular, Blender'ın Gamma node'u
-  `in^g`. Değer bu yüzden tersine çevrilerek yazılır.
-- **`hueShift` tur cinsindendir**, derece değil. Blender'ın Hue'su ise 0.5'i
-  nötr alan bir ofsettir.
-- **`contrast` pivotludur.** Arnold `c*(in-pivot)+pivot`, Blender ise
-  `(1+C)*in + (B-C/2)`. İkisini eşitleyen çift ölçümle doğrulandı: aynı girdi
-  her iki tarafta da `0.820000` veriyor.
-
-`exposure` ayrı bir node kurmaz; multiply ile aynı node'a katlanır.
-
-İki ayrıntı ölçüldü ve sezginin tersi:
-
-- **`blendColors` Blender'ın Mix'inin tersidir.** Maya'da `blender = 1` color1'i
-  döndürür, Blender'da `Factor = 1` **ikinci** rengi döndürür. Faktör bu yüzden
-  ters çevrilir, ve texture'ın hangi girişe geldiği de kaydedilir çünkü node
-  simetrik değildir.
-- **`remapValue`'nun asıl işi rampasıdır.** Yalnız doğrusal kısmı kurmak —
-  eski davranış — sanatçının çizdiği eğriyi sessizce düşürüyordu. Rampa artık
-  Colour Ramp olarak kuruluyor. Maya interpolasyonu durak başına, Blender rampa
-  başına tutar; ilki kullanılır ve karışık bir rampa uyarılır.
-
-**Kurulamayanlar bildirilir.** `aiComposite`, `remapHsv` gibi karşılığı olmayan
-node'lar için import sonrası uyarı yazılır (Blender System
-Console veya panel status satırı):
-
-```text
-Correction node "remapCoat" (remapValue) has no Blender equivalent,
-so the texture is used without it.
-```
-
-`aiRange`'in `smoothstep`, `bias` ve `gain` ayarları da kurulmaz ve ayrıca
-uyarılır; doğrusal remap ve contrast kurulur.
-
-## Prosedürel bake
-
-Bir kanal dosyası olmayan bir ağla sürülüyorsa (checker, ramp, katmanlı noise)
-referans verilecek bir şey yoktur. Exporter bu durumda ağı mesh'in UV'lerine
-**bake eder** ve paketin içine yazar.
-
-```text
-MTB_Z_A_01/
-  MTB_Z_A_01.fbx
-  MTB_Z_A_01_lookdev.json
-  textures/
-    procCube_shd_base_color.png
-    procCube_shd_roughness.png
-```
-
-Bake yalnızca gerçekten gerektiğinde çalışır: upstream taraması bir dosya
-bulursa o dosya referans verilir, bake edilmez.
-
-Maya UI'da iki kontrol var: `Bake Procedurals` ve `Bake Resolution`
-(varsayılan 1024).
-
-İki ölçülmüş kısıt tasarımı belirledi:
-
-- **Maya lineer yazar.** `convertSolidTx`, renk yönetimi açık da olsa kapalı da
-  olsa lineer değer yazıyor (0.5 girdi → 0.498 saklanan; sRGB olsaydı 0.735).
-  Bu yüzden baked map'ler Blender'da **renk kanalı bile olsa Non-Color** yüklenir.
-  sRGB sanmak her bake'i koyulturdu.
-- **EXR yazamaz.** File node yolu gösteriyor ama diske bir şey düşmüyor. Format
-  bu yüzden PNG.
-
-Renk kanalları için 8-bit lineer PNG karanlıklarda bant verebilir; bu bilinçli
-bir takas, alternatifi hiç aktarmamak.
-
-Bake edilen kayıt nereden geldiğini de taşır (`baked_from`), yani Blender'da
-bir map'in hangi Maya node'undan çıktığı JSON'dan izlenebilir.
-
-Bake mesh'in UV'lerini kullanır. UV'si olmayan veya bozuk olan bir mesh'te
-sonuç boş çıkar; bu durumda export uyarı listesine yazılır ve akış durmaz.
-
-## Kamera aktarımı
-
-Maya'nın startup kameraları (`persp`, `top`, `front`, `side`) viewport
-mobilyasıdır, aktarılmaz. Kullanıcının oluşturduğu kameralar
-`Z-A Lookdev Import > Z-A Cameras` altında yeniden kurulur.
-
-Maya ile Blender kameraları aynı yöne bakar (yerel -Z ileri, +Y yukarı), yani
-ışıklarla aynı matris dönüşümü geçerli. Fark lenste ve birimlerde:
-
-```text
-focalLength              -> lens (mm, dogrudan)
-horizontalFilmAperture   -> sensor_width   (inc x 25.4)
-verticalFilmAperture     -> sensor_height  (inc x 25.4)
-filmFit                  -> sensor_fit     (Fill/Overscan -> AUTO)
-horizontalFilmOffset     -> shift_x        (apertura bolunur, oran olur)
-nearClipPlane/farClip    -> clip_start/end (sahne birimi -> metre)
-orthographicWidth        -> ortho_scale    (sahne birimi -> metre)
-depthOfField/fStop       -> dof.use_dof / dof.aperture_fstop
-focusDistance            -> dof.focus_distance (sahne birimi -> metre)
-```
-
-Maya'da `renderable` işaretli kamera Blender'ın aktif sahne kamerası yapılır.
-Birden fazla renderable kamera varsa ilki seçilir ve uyarı verilir.
-
-Orijinal değerler camera data'sında `za_source_*` alanlarında saklanır.
-
-## Subdivision
-
-Subdivision **her mesh'e uygulanmaz**; yalnızca Maya'daki mesh gerçekten
-istiyorsa uygulanır. Kaynak şu sırayla aranır, çünkü renderer ayarı gerçekten
-render edilen şeydir ve Maya'nın smooth preview'ı niyetin yedeğidir:
+Subdivision is **not** applied to every mesh, only where the Maya mesh actually
+asks for it. Sources are checked in this order, because the renderer setting is
+what actually renders and Maya's smooth preview is the fallback for intent:
 
 ```text
 1. Arnold    aiSubdivType != none   -> aiSubdivIterations
@@ -1038,29 +934,149 @@ render edilen şeydir ve Maya'nın smooth preview'ı niyetin yedeğidir:
 3. Maya      displaySmoothMesh != 0 -> smoothLevel / renderSmoothLevel
 ```
 
-Hiçbiri istemiyorsa mesh'e modifier eklenmez. Arnold'un `aiSubdivType`
-varsayılanı **none** olduğu için, modellenmemiş bir küpü Catmull-Clark ile
-yuvarlamak yerine olduğu gibi bırakır.
+If none of them asks, no modifier is added. Arnold's `aiSubdivType` defaults to
+**none**, so an unmodelled cube is left as it is rather than rounded off with
+Catmull-Clark.
 
-Şema eşlemeleri:
+`catclark` maps to `CATMULL_CLARK` and `linear` to `SIMPLE`;
+`aiSubdivUvSmoothing` maps `pin_corners` to `PRESERVE_CORNERS`, `pin_borders`
+to `PRESERVE_BOUNDARIES` and `smooth` to `SMOOTH_ALL`. When
+`useSmoothPreviewForRender` is off, viewport and render levels transfer
+separately. The source is recorded in `za_subdivision_source`.
 
-- `catclark` → Blender `CATMULL_CLARK`
-- `linear` → Blender `SIMPLE`
-- `aiSubdivUvSmoothing`: `pin_corners` → `PRESERVE_CORNERS`,
-  `pin_borders` → `PRESERVE_BOUNDARIES`, `smooth` → `SMOOTH_ALL`
+> Packages older than schema 6 carry no subdivision record and those meshes are
+> left unsubdivided. Before 1.9.0 every mesh was subdivided; re-sending the
+> package is enough.
 
-Maya'da `useSmoothPreviewForRender` kapalıysa viewport seviyesi `smoothLevel`,
-render seviyesi `renderSmoothLevel` olarak ayrı ayrı aktarılır. Kaynağın
-hangisi olduğu mesh data'sında `za_subdivision_source` ile saklanır.
+### Export scope
 
-> Şema 6'dan eski paketlerde subdivision kaydı yoktur ve o meshler
-> **subdivide edilmez**. 1.9.0 öncesinde her mesh subdivide ediliyordu; eski
-> bir paketi yeniden göndermen yeterli.
+Ticking **Export Scope** sends only the selected objects instead of the whole
+scene, which is what you want while iterating on a single asset.
 
-## Git
+- **The selection is expanded through groups.** Selecting an asset normally
+  means selecting the group holding it, so reading the selection literally
+  would export nothing in the most common case.
+- **Lights and cameras always come in full.** A lookdev package without its
+  lighting is not lookdev, it is darkness. A light in the selection is
+  mentioned in a warning rather than silently ignored.
+- If the selection contains no meshes at all, the export **fails loudly**
+  rather than leaving half a package behind.
 
-Bu klasör bağımsız Git deposudur:
+---
+
+## Colour management
+
+This is the most common reason a transfer that is technically correct still
+looks wrong: geometry, materials and lights all agree, but the two applications
+tone-map differently.
+
+Maya's colour management settings are written into the package and applied in
+Blender:
 
 ```text
-D:\GitHub_Repository\mayatools\ZA_Exporter\.git
+renderingSpaceName    ACEScg
+viewTransformName     ACES 1.0 SDR-video (sRGB)
+displayName           sRGB
+configFilePath        ...\OCIO-configs\Maya2022-default\config.ocio
 ```
+
+**A measured limitation:** Blender's own OCIO config has **no ACES view
+transform in any version** (tried individually in 4.1, 4.5 and 5.2 — only
+Standard, Raw, Filmic, Filmic Log, False Color, AgX, and Khronos PBR Neutral
+from 4.5 onwards).
+
+So the behaviour is:
+
+- If Blender **has** the transform Maya asked for, it is applied. On a Blender
+  pointed at an ACES config this matches exactly.
+- If it does **not**, the closest defined transform is applied and a warning
+  names both what was wanted and how to get it:
+
+```text
+Maya was using the "ACES 1.0 SDR-video (sRGB)" view transform, which this
+Blender's colour config does not have; "Standard" was used instead. To match
+exactly, point Blender at the same OCIO config through the OCIO environment
+variable: C:/Program Files/Autodesk/Maya2023/resources/OCIO-configs/...
+```
+
+Leaving AgX in place and calling it a match would be the one genuinely
+misleading outcome. With colour management off in Maya, the scene is treated as
+raw linear and `Standard` is applied.
+
+---
+
+## Development
+
+### Reloading
+
+**Maya** — `importlib.reload(za)` is not enough; for a package it only
+refreshes `__init__.py` and leaves the submodules stale.
+
+```python
+za = za.reload_package()
+za.show_ui()
+```
+
+`reload_package()` refreshes submodules in dependency order and returns the
+refreshed package. Remember to reassign the result.
+
+**Blender** — `F3 > Reload Scripts` is enough. `__init__.py` refreshes its own
+submodules in order and `unregister()` closes the listener socket and timer. If
+port 50505 stays bound, press **Stop LiveLink** first, then reload.
+
+### Tests
+
+```bash
+# 1. Syntax
+python -m py_compile za_lookdev_exporter/*.py za_lookdev_importer/*.py
+
+# 2. Contract checks (no host required, seconds)
+python tests/check_contracts.py
+
+# 3. Real Maya + Arnold (~2 min)
+"C:\Program Files\Autodesk\Maya2023\bin\mayapy.exe" tests/host/maya_export_test.py
+
+# 4. Real Blender, reading the package step 3 wrote (~30 s)
+"C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" ^
+    --background --factory-startup --python tests/host/blender_import_test.py
+```
+
+`tests/calibration/` holds the measurement rigs rather than tests: they do not
+verify the calibration constants, they **produce** them. See
+[`tests/README.md`](tests/README.md).
+
+Note that the tests do not render. They verify that the calibration constants
+are *applied*, not that they are *correct*. Changing a constant calls for a
+visual comparison.
+
+### Contracts
+
+Two constants must stay in step across both packages, and a contract check
+enforces it:
+
+| | |
+|---|---|
+| `LIVELINK_VERSION` | bumped in both files together for a breaking protocol change |
+| `EXPORT_SCHEMA_VERSION` | bumped in the exporter, added to the importer's `SUPPORTED_SCHEMA_VERSIONS` |
+
+The channel keys the exporter produces must match the importer's socket
+mapping exactly. A new channel belongs in exactly one of `PRINCIPLED_INPUTS`,
+`GLASS_INPUTS` or `METADATA_CHANNELS`; the contract check catches one that is
+in none of them.
+
+Attribute names differ between Maya and renderer versions. Every semantic
+channel keeps a **tuple of candidate names** and the first one that exists
+wins. Support a new version by extending the tuple, never by branching the
+logic. Order is priority: `aiAreaLight` carries both `exposure` and
+`aiExposure` and Arnold uses `exposure`, while `aiSkyDomeLight` carries only
+`aiExposure`.
+
+### Repository
+
+```text
+origin     https://github.com/mena-works/mLender
+upstream   https://github.com/hasancivili/MayaToBlender_Exporter
+```
+
+Commit messages are in English and follow `feat:` / `fix:` / `docs:`.
+Behavioural changes update this README in the same commit.

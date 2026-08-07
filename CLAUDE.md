@@ -12,8 +12,10 @@
   Blender tarafında materialleri Principled BSDF olarak, ışıkları native Blender
   light olarak yeniden kurar.
 - **Hedef sürümler:** Maya 2022+ (Redshift), Blender 3.6+ (4.x dahil)
-- **Dil:** Promptlar ve açıklamalar Türkçe; kod, değişken, fonksiyon ve
-  yorumlar İngilizce. README Türkçe.
+- **Dil:** Promptlar ve açıklamalar Türkçe; kod, değişken, fonksiyon,
+  yorumlar, commit mesajları **ve README** İngilizce. Depo `mena-works`
+  altında public olduğu için README dış dokümantasyondur.
+  `tests/docs/` altındaki ölçüm kayıtları Türkçe kalır — onlar iç notlardır.
 - **Test/build yok.** Doğrulama elle yapılır (aşağıda "Doğrulama").
 
 ---
@@ -517,9 +519,16 @@ Kullanıcının elle doğrulaması gereken adımlar:
 
 ## 12. Git
 
-Bu klasör şu an bir Git deposu **değil** (README'de bahsedilen depo
-`D:\GitHub_Repository\mayatools\ZA_Exporter` yolunda). Commit isteniyorsa önce
-`git init` gerektiğini kullanıcıya söyle.
+Depo `mena-works/mLender` altında **public**'tir:
+
+```text
+origin     https://github.com/mena-works/mLender      (metin_dev)
+upstream   https://github.com/hasancivili/MayaToBlender_Exporter
+```
+
+Çalışma dalı `metin_dev`. Ortam her commit'ten sonra `origin`'e **otomatik
+push** ediyor (VS Code sync), yani commit etmek yayınlamaktır — public bir
+depoda bunu akılda tut.
 
 Commit mesajı formatı (İngilizce):
 
