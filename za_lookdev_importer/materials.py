@@ -28,8 +28,10 @@ from .constants import (
     DEFAULT_COAT_IOR,
     DEFAULT_EMISSION_STRENGTH,
     OPENPBR_EMISSION_LUMINANCE_SCALE,
+    ARNOLD_SHEEN_ROUGHNESS_SEMANTIC,
     OPENPBR_EMISSION_SEMANTIC,
     OPENPBR_SPECULAR_SEMANTIC,
+    SHEEN_ROUGHNESS_REMAP,
     GLASS_INPUTS,
     PRINCIPLED_INPUTS,
     SPECULAR_WEIGHT_TO_LEVEL,
@@ -213,10 +215,58 @@ def _build_principled(material, channels, warnings):
         apply_channel(material, bsdf, channel, channels.get(channel), warnings)
 
     _default_emission_strength(bsdf, channels)
+    apply_sheen_roughness_remap(material, bsdf, channels, warnings)
     # Before the coat darkening, so the darkening curve sees the base colour
     # the metal lobe actually starts from.
     apply_openpbr_metal_specular(material, bsdf, channels, warnings)
     apply_coat_darkening(material, bsdf, channels, warnings)
+
+
+def remapped_sheen_roughness(value):
+    """Arnold standard surface sheen roughness onto Blender's scale."""
+    value = max(0.0, float(value))
+    points = SHEEN_ROUGHNESS_REMAP
+    if value >= points[-1][0]:
+        return points[-1][1]
+    for index in range(len(points) - 1):
+        low, low_out = points[index]
+        high, high_out = points[index + 1]
+        if low <= value <= high and high > low:
+            span = (value - low) / (high - low)
+            return low_out + (high_out - low_out) * span
+    return points[0][1]
+
+
+def apply_sheen_roughness_remap(material, bsdf, channels, warnings):
+    """Put an aiStandardSurface sheen roughness onto Blender's scale.
+
+    The two sheen lobes are different models and their roughness inputs do not
+    mean the same thing: at 0.3 Arnold shows a sheen that Blender barely
+    registers, and at 1.0 Blender shows more than twice as much as Arnold.
+    Measured at three viewing angles and two base albedos, one remap of the
+    roughness reconciles them, and it came out the same at both albedos.
+
+    OpenPBR's fuzz already matches Blender and is left alone; the exporter
+    tags only the record this applies to.
+    """
+    record = channels.get("sheen_roughness") or {}
+    if record.get("source_semantic") != ARNOLD_SHEEN_ROUGHNESS_SEMANTIC:
+        return
+    socket = principled_input(bsdf, "sheen_roughness")
+    if socket is None:
+        # Blender 3.x has a sheen with no roughness at all.
+        return
+    if (record.get("texture") or {}).get("path"):
+        warnings.append(
+            "sheen roughness is textured on {0}; it was left on the Arnold "
+            "scale, which reads differently in Blender".format(material.name)
+        )
+        return
+    source = scalar(record.get("value"), None)
+    if source is None:
+        return
+    socket.default_value = remapped_sheen_roughness(source)
+    material["za_source_sheen_roughness"] = float(source)
 
 
 def apply_openpbr_metal_specular(material, bsdf, channels, warnings):

@@ -73,6 +73,10 @@ def build_scene():
     cmds.setAttr(pbr + ".geometryOpacity", 0.25)
     cmds.setAttr(pbr + ".emissionLuminance", 250.0)
     cmds.setAttr(pbr + ".emissionColor", 0.0, 1.0, 0.0, type="double3")
+    # Same number as the standard surface cube's sheenRoughness on purpose:
+    # one of the two gets remapped on import and the other must not.
+    cmds.setAttr(pbr + ".fuzzWeight", 0.4)
+    cmds.setAttr(pbr + ".fuzzRoughness", 0.25)
 
     _, flat = shaded_cube("flatCube", "aiFlat")
     cmds.setAttr(flat + ".color", 0.1, 0.9, 0.4, type="double3")
@@ -839,6 +843,17 @@ def main():
           == "openpbr_emission_luminance")
     check("emission luminance 250 nits carried raw",
           abs(pbr.get("emission_strength", {}).get("value", -1) - 250.0) < 1e-6)
+    check("specular weight tagged as gating the metal lobe",
+          pbr.get("specular", {}).get("source_semantic")
+          == "openpbr_specular_scales_metal",
+          pbr.get("specular", {}).get("source_semantic"))
+    check("fuzz roughness read from fuzzRoughness",
+          pbr.get("sheen_roughness", {}).get("maya_attr") == "fuzzRoughness")
+    # OpenPBR's fuzz is the model Blender already implements, so this record
+    # must arrive untagged. Tagging it would remap a lobe that already agrees.
+    check("and left untagged, unlike standard surface's sheen",
+          "source_semantic" not in (pbr.get("sheen_roughness") or {}),
+          pbr.get("sheen_roughness", {}).get("source_semantic"))
 
     print("\naiFlat")
     flat = channels("flatCube")
@@ -1031,6 +1046,12 @@ def main():
           abs(tiled.get("coat_roughness", {}).get("value", 0) - 0.08) < 1e-5)
     check("sheen weight 0.4",
           abs(tiled.get("sheen", {}).get("value", 0) - 0.4) < 1e-5)
+    check("sheen roughness 0.25 sent raw",
+          abs(tiled.get("sheen_roughness", {}).get("value", 0) - 0.25) < 1e-5)
+    check("and tagged as being on the Arnold standard surface scale",
+          tiled.get("sheen_roughness", {}).get("source_semantic")
+          == "arnold_standard_sheen_roughness",
+          tiled.get("sheen_roughness", {}).get("source_semantic"))
     check("subsurface weight 0.3",
           abs(tiled.get("subsurface", {}).get("value", 0) - 0.3) < 1e-5)
     check("subsurface scale 2.5",

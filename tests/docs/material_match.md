@@ -261,21 +261,71 @@ ikisini render ediyor — sabit görüntü iki yolu inşa gereği denk kılar.
 Rig'in kendisi de sınandı: bölme node'unun operandları bilerek ters çevrildi
 ve beş vakanın beşi de düştü.
 
-## Sheen: soketler doğru, loblar farklı
+## Sheen: roughness ölçeği farklıydı
 
-`sheen_off → sheen_on` Arnold'da 0.0262, Blender'da 0.0006 hareket ediyor.
+`sheen_off → sheen_on` Arnold'da 0.0262, Blender'da 0.0006 hareket ediyordu.
 Eski quad ışıkta bu 0.000149'a karşı 0.000145 görünüyordu, yani "eşleşmiş"
 sayılıyordu — dome, sheen'in yaşadığı sıyırma yönlerini de aydınlattığı için
 farkı görünür kıldı.
 
-Import edilen materyal doğrudan okundu:
+Soketler doğruydu (`Sheen Weight = 1.0`, `Sheen Roughness = 0.3`, tint beyaz).
+Fark **roughness'ın iki tarafta aynı şeyi anlatmamasından** geliyordu: 0.3'te
+Arnold'ın gösterdiği sheen'i Blender neredeyse hiç göstermiyor, 1.0'da ise
+Blender Arnold'ın iki katından fazlasını gösteriyor. Tek bir çarpanın bunu
+düzeltemeyeceği buradan belli — yön bile aynı değil.
+
+### Eşlemenin ölçümü
+
+Her Arnold roughness değeri için, aynı katkıyı veren Blender roughness'ı
+arandı. Üç bakış açısı ve iki taban albedosunda:
 
 ```text
-sheen_on_shd   Sheen Weight = 1.0   Sheen Roughness = 0.3   Sheen Tint = beyaz
+arnold r   0° a.05  0° a.3  45° a.05  45° a.3  70° a.05  70° a.3   ortalama
+0.05        0.204   0.200     0.310    0.310     0.334    0.334      0.282
+0.20        0.450   0.450     0.502    0.502     0.469    0.469      0.474
+0.40        0.616   0.616     0.624    0.624     0.571    0.571      0.604
+0.60        0.682   0.682     0.691    0.691     0.654    0.654      0.676
+0.80        0.732   0.732     0.735    0.735     0.710    0.710      0.726
+1.00        0.765   0.765     0.758    0.758     0.727    0.727      0.750
 ```
 
-Soketler doğru dolmuş. Fark `standard_surface`'ın sheen lobu ile Principled'ın
-mikrolif sheen'inin farklı modeller olmasından. Aktarım hatası değil.
+İki şey önemli:
+
+- **Albedodan tamamen bağımsız.** 0.05 ve 0.3 sütunları üç hanede aynı. Bu,
+  eşlemenin tek bir malzemeye uydurulmuş bir fudge değil, iki
+  parametrelendirme arasındaki gerçek bir ilişki olduğunu gösteriyor.
+- **Açıya göre az oynuyor**: `r ≥ 0.2` için yayılım 0.025–0.053. Yalnız
+  `r = 0.05`'te 0.134, çünkü orada Arnold'ın sıyırma açısında bir rim'i var
+  ve Blender bunu hiçbir ayarda üretemiyor.
+
+Ortalama tabloyla en kötü hata **%91'den %25'e** düşüyor ve o %25 tek bir
+köşe: çok koyu taban + sıyırma + neredeyse sıfır sheen roughness. Geri
+kalanın çoğu %3 içinde.
+
+Blender 4.1 ile 5.2 aynı eğriyi üretiyor, yani eşleme sürüme bağlı değil.
+
+### OpenPBR'ın fuzz'ı zaten doğru
+
+Aynı tarama `aiOpenPBRSurface` ile koşulduğunda:
+
+```text
+fuzzRoughness   0.05     0.20     0.40     0.60     0.80     1.00
+oran           1.0000   0.9995   0.9929   0.9814   0.9846   0.9964
+```
+
+OpenPBR ile Blender aynı mikrolif modelini kullanıyor. Eşleme bu yüzden
+**yalnız `aiStandardSurface`'a** uygulanır; OpenPBR'a uygulamak şu anda doğru
+olan bir eşleşmeyi bozardı. Ayrım exporter'da
+`ARNOLD_SHEEN_ROUGHNESS_SEMANTIC` ile kanala işaretlenir.
+
+### Düzeltmeden sonra
+
+```text
+hucre          aci    arnold    blender    oran
+sheen_on        0°    0.3262    0.3199     0.9805   (once 0.9213)
+sheen_rough     0°    0.4079    0.3966     0.9723   (once 1.3221)
+sheen_on       70°    0.5013    0.5139     1.0251   (once 0.6798)
+```
 
 ## Sıyırma açısı: artık güvenilir
 

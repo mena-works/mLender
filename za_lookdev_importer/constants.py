@@ -8,7 +8,7 @@ message shape changes.
 
 import math
 
-BUILD_VERSION = "1.29.0"
+BUILD_VERSION = "1.30.0"
 
 LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
@@ -285,6 +285,29 @@ OPENPBR_EMISSION_SEMANTIC = "openpbr_emission_luminance"
 # weight into the base colour. Measured: reflectance is exactly linear in
 # the weight (tests/docs/material_match.md).
 OPENPBR_SPECULAR_SEMANTIC = "openpbr_specular_scales_metal"
+
+# See the exporter's note: only aiStandardSurface's sheen roughness needs this.
+ARNOLD_SHEEN_ROUGHNESS_SEMANTIC = "arnold_standard_sheen_roughness"
+
+# Arnold sheen roughness -> the Blender sheen roughness that renders the same.
+# Measured at three viewing angles and two base albedos (0.05 and 0.3); the
+# curve came out identical at both albedos, so it is a property of the two
+# parameterisations rather than a fit to one material. Blender 4.1 and 5.2
+# produce the same curve.
+#
+# The remap takes the worst disagreement from 91% down to 25%, and that 25%
+# is one corner: a very dark base at a grazing angle with almost no sheen
+# roughness, where Arnold has a rim Blender cannot produce at any setting.
+# Everything else lands within a few per cent. Below 0.05 is extrapolation.
+SHEEN_ROUGHNESS_REMAP = (
+    (0.00, 0.000),
+    (0.05, 0.282),
+    (0.20, 0.474),
+    (0.40, 0.604),
+    (0.60, 0.676),
+    (0.80, 0.726),
+    (1.00, 0.750),
+)
 
 # A light's node tree is a multiplier on top of its energy. Nodes feeding
 # Emission Strength must stay at unit scale, otherwise energy is applied twice.

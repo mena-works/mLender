@@ -166,6 +166,11 @@ MATERIALS = [
     ("opacity_half", _cell(base_color=(0.8, 0.8, 0.8),
                            opacity=(0.5, 0.5, 0.5))),
 
+    # The far end of the sheen roughness scale. Blender used to overshoot
+    # Arnold by a third here while falling short of it at 0.3, which is why
+    # a single scale factor was never going to reconcile the two lobes.
+    ("sheen_rough", _cell(sheen=1.0, sheen_roughness=1.0)),
+
     # Half metal at no specular weight. The two ends of that scale are
     # already covered by metal_on and metal_spec, and only a cell in between
     # can see the metalness term of the correction go wrong.
@@ -205,6 +210,7 @@ PAIRS = [
     ("coat_on", "coat_nodark"),
     ("coat_on", "coat_dark_partial"),
     ("sheen_off", "sheen_on"),
+    ("sheen_on", "sheen_rough"),
     ("emission_off", "emission_on"),
     ("emission_on", "emission_hdr"),
     ("opacity_full", "opacity_half"),

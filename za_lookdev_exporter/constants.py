@@ -213,6 +213,12 @@ OPENPBR_EMISSION_SEMANTIC = "openpbr_emission_luminance"
 # the weight (tests/docs/material_match.md).
 OPENPBR_SPECULAR_SEMANTIC = "openpbr_specular_scales_metal"
 
+# aiStandardSurface's sheen roughness is not on the same scale as Blender's.
+# OpenPBR's fuzz is: measured against Blender 4.1 and 5.2 it agrees within 2%
+# at every roughness, because both follow the same microfiber model. Standard
+# surface does not, so only its record is tagged and only it gets remapped.
+ARNOLD_SHEEN_ROUGHNESS_SEMANTIC = "arnold_standard_sheen_roughness"
+
 # Reflection roughness is the PBR surface roughness. Redshift's diffuse
 # roughness is deliberately not used for Principled BSDF Roughness.
 REDSHIFT_STANDARD_CHANNELS = {

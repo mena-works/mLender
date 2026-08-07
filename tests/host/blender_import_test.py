@@ -556,6 +556,14 @@ def main():
         check("250 nits scaled to emission strength 0.25",
               abs(value(pbr, "Emission Strength") - 0.25) < 1e-5,
               value(pbr, "Emission Strength"))
+        # The same 0.25 the standard surface cube carries. OpenPBR's fuzz is
+        # the lobe Blender already implements, so this one passes straight
+        # through; remapping it would break a match that is already right.
+        fuzz = value(pbr, "Sheen Roughness")
+        check("fuzz roughness 0.25 passed through unremapped",
+              fuzz is not None and abs(fuzz - 0.25) < 1e-5, fuzz)
+        check("and no source value recorded, nothing having been changed",
+              "za_source_sheen_roughness" not in pbr.keys())
 
     print("\naiFlat")
     flat = material_for("flatCube")
@@ -762,6 +770,14 @@ def main():
         check("coat roughness 0.08",
               abs(value(tiled, "Coat Roughness") - 0.08) < 1e-5)
         check("sheen weight 0.4", abs(value(tiled, "Sheen Weight") - 0.4) < 1e-5)
+        # Arnold's standard surface sheen and Blender's are different lobes
+        # read off different scales, so 0.25 there is about 0.51 here.
+        remapped = value(tiled, "Sheen Roughness")
+        check("standard surface sheen roughness remapped off 0.25",
+              remapped is not None and abs(remapped - 0.5065) < 0.01, remapped)
+        check("and the Maya value kept for reference",
+              abs(tiled.get("za_source_sheen_roughness", -1) - 0.25) < 1e-5,
+              tiled.get("za_source_sheen_roughness"))
         check("subsurface weight 0.3",
               abs(value(tiled, "Subsurface Weight") - 0.3) < 1e-5)
         check("subsurface scale 2.5 set explicitly, not left at the version default",

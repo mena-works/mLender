@@ -611,8 +611,16 @@ subsurfaceScale          -> Subsurface Scale
 specularAnisotropy       -> Anisotropic
 ```
 
-Dört not:
+Beş not:
 
+- **`aiStandardSurface`'ın sheen roughness'ı yeniden eşlenir.** Arnold'ın
+  standard surface sheen'i ile Blender'ın mikrolif sheen'i farklı modeller ve
+  roughness girdileri aynı şeyi anlatmıyor: 0.3'te Arnold'ın gösterdiğini
+  Blender neredeyse hiç göstermiyor, 1.0'da ise Blender fazlasını gösteriyor.
+  Üç bakış açısı ve iki taban albedosunda ölçülen bir tabloyla eşlenir
+  (0.25 → ~0.51). Orijinal değer `za_source_sheen_roughness`'ta saklanır.
+  **`aiOpenPBRSurface`'ın `fuzzRoughness`'ı dokunulmadan geçer** — OpenPBR ile
+  Blender aynı modeli kullanıyor ve zaten %2 içinde eşleşiyor.
 - **OpenPBR'ın `specularWeight`'i metal lobunu ölçekler.** OpenPBR'da
   `baseMetalness = 1` ve `specularWeight = 0` olan bir yüzey Arnold'da
   **tamamen siyah** render olur; `aiStandardSurface` böyle değildir ve

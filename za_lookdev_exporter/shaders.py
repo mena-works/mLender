@@ -20,6 +20,7 @@ import maya.cmds as cmds
 
 from .constants import (
     ARNOLD_LAMBERT_CHANNELS,
+    ARNOLD_SHEEN_ROUGHNESS_SEMANTIC,
     ARNOLD_OPENPBR_CHANNELS,
     ARNOLD_STANDARD_CHANNELS,
     BLINN_ROUGHNESS,
@@ -96,6 +97,14 @@ def arnold_channels(shader, channel_map, roughness=None, openpbr=False,
     if openpbr and result.get("emission_strength"):
         # Not a 0..1 weight; the importer scales it.
         result["emission_strength"]["source_semantic"] = OPENPBR_EMISSION_SEMANTIC
+
+    if not openpbr and result.get("sheen_roughness"):
+        # Standard surface's sheen lobe is not OpenPBR's fuzz, and Blender
+        # follows the latter, so this roughness needs remapping and OpenPBR's
+        # does not.
+        result["sheen_roughness"]["source_semantic"] = (
+            ARNOLD_SHEEN_ROUGHNESS_SEMANTIC
+        )
 
     if openpbr and result.get("specular"):
         # OpenPBR's metal lobe is scaled by this weight and standard surface's
