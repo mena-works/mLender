@@ -27,6 +27,7 @@ from .constants import (
     FALLBACK_ROUGHNESS,
     LAMBERT_ROUGHNESS,
     OPENPBR_EMISSION_SEMANTIC,
+    OPENPBR_SPECULAR_SEMANTIC,
     REDSHIFT_GLOSSINESS_FLAGS,
     REDSHIFT_LEGACY_CHANNELS,
     REDSHIFT_STANDARD_CHANNELS,
@@ -95,6 +96,11 @@ def arnold_channels(shader, channel_map, roughness=None, openpbr=False,
     if openpbr and result.get("emission_strength"):
         # Not a 0..1 weight; the importer scales it.
         result["emission_strength"]["source_semantic"] = OPENPBR_EMISSION_SEMANTIC
+
+    if openpbr and result.get("specular"):
+        # OpenPBR's metal lobe is scaled by this weight and standard surface's
+        # is not, so the difference has to travel with the record.
+        result["specular"]["source_semantic"] = OPENPBR_SPECULAR_SEMANTIC
 
     if roughness is not None:
         result["roughness"] = {"value": float(roughness)}

@@ -8,7 +8,7 @@ message shape changes.
 
 import math
 
-BUILD_VERSION = "1.28.0"
+BUILD_VERSION = "1.29.0"
 
 LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
@@ -278,6 +278,13 @@ DEFAULT_LIGHT_POWER_SCALE = 1.0
 # too bright on every OpenPBR emissive surface until this changed.
 OPENPBR_EMISSION_LUMINANCE_SCALE = 1000.0
 OPENPBR_EMISSION_SEMANTIC = "openpbr_emission_luminance"
+
+# OpenPBR scales its metal lobe by the specular weight, so a metal with a
+# weight of zero renders black. Standard surface does not, and Principled
+# has no equivalent, so the record is tagged and the importer folds the
+# weight into the base colour. Measured: reflectance is exactly linear in
+# the weight (tests/docs/material_match.md).
+OPENPBR_SPECULAR_SEMANTIC = "openpbr_specular_scales_metal"
 
 # A light's node tree is a multiplier on top of its energy. Nodes feeding
 # Emission Strength must stay at unit scale, otherwise energy is applied twice.

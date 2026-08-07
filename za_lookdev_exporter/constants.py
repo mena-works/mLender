@@ -206,6 +206,13 @@ ARNOLD_LAMBERT_CHANNELS = {
 # importer can scale it instead of feeding it straight into a Blender socket.
 OPENPBR_EMISSION_SEMANTIC = "openpbr_emission_luminance"
 
+# OpenPBR scales its metal lobe by the specular weight, so a metal with a
+# weight of zero renders black. Standard surface does not, and Principled
+# has no equivalent, so the record is tagged and the importer folds the
+# weight into the base colour. Measured: reflectance is exactly linear in
+# the weight (tests/docs/material_match.md).
+OPENPBR_SPECULAR_SEMANTIC = "openpbr_specular_scales_metal"
+
 # Reflection roughness is the PBR surface roughness. Redshift's diffuse
 # roughness is deliberately not used for Principled BSDF Roughness.
 REDSHIFT_STANDARD_CHANNELS = {

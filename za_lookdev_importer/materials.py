@@ -29,6 +29,7 @@ from .constants import (
     DEFAULT_EMISSION_STRENGTH,
     OPENPBR_EMISSION_LUMINANCE_SCALE,
     OPENPBR_EMISSION_SEMANTIC,
+    OPENPBR_SPECULAR_SEMANTIC,
     GLASS_INPUTS,
     PRINCIPLED_INPUTS,
     SPECULAR_WEIGHT_TO_LEVEL,
@@ -212,7 +213,76 @@ def _build_principled(material, channels, warnings):
         apply_channel(material, bsdf, channel, channels.get(channel), warnings)
 
     _default_emission_strength(bsdf, channels)
+    # Before the coat darkening, so the darkening curve sees the base colour
+    # the metal lobe actually starts from.
+    apply_openpbr_metal_specular(material, bsdf, channels, warnings)
     apply_coat_darkening(material, bsdf, channels, warnings)
+
+
+def apply_openpbr_metal_specular(material, bsdf, channels, warnings):
+    """Scale the base colour where OpenPBR's specular weight scales the metal.
+
+    OpenPBR multiplies its metal lobe by the specular weight, so a metal with
+    the weight at zero renders black; aiStandardSurface keeps its metal and
+    Principled has no input that does this at all. Untouched, such a material
+    arrived as a bright metal where Maya showed nothing.
+
+    Measured against Arnold at five weights and five metalness values: the
+    result is exactly ``base * (1 - metalness * (1 - weight))``. At the
+    default weight of one the factor is one and nothing is touched.
+    """
+    specular = channels.get("specular") or {}
+    if specular.get("source_semantic") != OPENPBR_SPECULAR_SEMANTIC:
+        return
+    if (specular.get("texture") or {}).get("path"):
+        # A mapped weight would need the whole curve as nodes, and a metal
+        # with a textured specular weight has not been seen in practice.
+        warnings.append(
+            "OpenPBR specular weight is textured on {0}; its effect on the "
+            "metal lobe was not applied".format(material.name)
+        )
+        return
+    weight = max(0.0, min(1.0, scalar(specular.get("value"), 1.0)))
+    metallic = channels.get("metallic") or {}
+    if (metallic.get("texture") or {}).get("path"):
+        warnings.append(
+            "OpenPBR metalness is textured on {0}; the specular weight was "
+            "applied at full metalness".format(material.name)
+        )
+        metal = 1.0
+    else:
+        metal = max(0.0, min(1.0, scalar(metallic.get("value"), 0.0)))
+
+    factor = 1.0 - metal * (1.0 - weight)
+    if factor >= 1.0 - 1e-6:
+        return
+    socket = principled_input(bsdf, "base_color")
+    if socket is None:
+        return
+    if socket.is_linked:
+        _insert_colour_scale(material, socket, factor)
+    else:
+        colour = list(socket.default_value)
+        for index in range(3):
+            colour[index] = max(0.0, colour[index]) * factor
+        socket.default_value = colour
+    material["za_openpbr_specular_scale"] = factor
+
+
+def _insert_colour_scale(material, socket, factor):
+    """Put a flat multiply between whatever feeds a colour socket and it."""
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+    source = socket.links[0].from_socket
+    node = nodes.new("ShaderNodeVectorMath")
+    node.operation = "MULTIPLY"
+    node.name = "ZA_SpecularMetalScale"
+    node.label = "OpenPBR Specular Weight"
+    node.location = (socket.node.location[0] - 780,
+                     socket.node.location[1] - 120)
+    node.inputs[1].default_value = (factor, factor, factor)
+    links.new(source, node.inputs[0])
+    links.new(node.outputs[0], socket)
 
 
 def coat_internal_reflectance(ior):

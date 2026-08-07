@@ -126,13 +126,55 @@ zaten kaldırılmış. `aiStandardSurface`'ta böyle değil — orada aynı hüc
 0.8981 okuyor.
 
 Principled'ın metali `Specular IOR Level`'a bu şekilde bağlı olmadığı için
-Blender iki durumda da parlak metal gösteriyor. **Ağırlık aktarılıyor**,
-kullanılışı farklı. Varsayılan `specularWeight` 1.0 olduğu için bu yalnızca
-ağırlığı bilerek kısan sahnelerde görünür; ama görünürse fark büyüktür.
+Blender iki durumda da parlak metal gösteriyordu.
 
-Aynı ayrım `aiStandardSurface`'ta sıyırma açısında zayıf bir biçimde var:
-70°'de `metal_on` → `metal_spec` Arnold'da 0.0802 hareket ederken Blender'da
-0.0006 hareket ediyor. Dik gelişte ikisi de kıpırdamıyor.
+### Ölçüm ve düzeltme
+
+Ağırlıkta **tam doğrusal** (taban 0.9, metalness 1):
+
+```text
+specularWeight   0.00     0.25     0.50     0.75     1.00
+arnold           0.0000   0.2231   0.4460   0.6690   0.8919
+```
+
+Her adımda eğim 0.892. Metalness ile birlikte tarandığında
+(`specularWeight = 0`):
+
+```text
+metalness        0.00     0.25     0.50     0.75     1.00
+arnold           0.9000   0.6750   0.4500   0.2250   0.0000
+```
+
+Bu tam olarak `base·(1 − m)`. İkisi birleşince:
+
+```text
+f = 1 − metalness · (1 − specularWeight)
+```
+
+Beş metalness ve beş ağırlık değerinin hepsinde birebir. Varsayılan ağırlık
+1.0'da `f = 1`, yani hiçbir şeye dokunulmuyor.
+
+Importer bu çarpanı base colour'a uyguluyor. Kayıt exporter'da
+`OPENPBR_SPECULAR_SEMANTIC` ile işaretleniyor, çünkü `aiStandardSurface` aynı
+şeyi yapmıyor ve fark kanalın kendisiyle taşınmalı.
+
+Düzeltmeden sonra:
+
+```text
+hucre         arnold    blender    oran
+metal_on      0.0000    0.0000     —
+metal_half    0.4500    0.4490     0.9977
+metal_spec    0.8915    0.8997     1.0092
+```
+
+Ara metalness'te yaklaşıklık var: base colour'ı ölçeklemek difüzü de
+ölçekliyor, oysa yalnız metal lobu ölçeklenmeli. Toplam enerji doğru, açısal
+dağılım yaklaşık. İki uçta (m=0 ve m=1) tam.
+
+Aynı ayrımın `aiStandardSurface`'taki zayıf hali dokunulmadan bırakıldı:
+70°'de `metal_on` → `metal_spec` Arnold'da 0.0802, Blender'da 0.0006 hareket
+ediyor. Orada metal ağırlıkla sıfırlanmıyor, o yüzden aynı düzeltme yanlış
+olurdu.
 
 ## Coat farkının sebebi `coatDarkening` — ölçüldü ve kapatıldı
 

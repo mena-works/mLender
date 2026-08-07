@@ -27,6 +27,11 @@ if TOOL_ROOT not in sys.path:
 
 PATCH = 6
 
+# Below this a cell counts as black. Sampling noise and the last bits of a
+# float leave a few parts in a hundred thousand behind even where both
+# renderers agree there is nothing.
+BLACK = 1e-3
+
 # Above this the two renderers disagree by more than their BRDFs explain, so
 # it is worth looking at. Chosen from the light rig's experience: real transfer
 # bugs there were factors, not percentages.
@@ -123,7 +128,11 @@ def main():
         ))
         if a_lum > 1e-6 and abs(ratio - 1.0) > SUSPICIOUS:
             flagged.append((name, ratio))
-        elif a_lum <= 1e-6 and b_lum > 1e-6:
+        elif a_lum <= 1e-6 and b_lum > BLACK:
+            # Only when Blender put something real where Arnold put nothing.
+            # A renderer that lands on exact zero against one that lands on a
+            # millionth is agreement, and calling it an infinite ratio buried
+            # the cells that were genuinely wrong.
             flagged.append((name, float("inf")))
 
     # A channel that arrives as zero on both sides would match perfectly, so
@@ -143,7 +152,11 @@ def main():
         b_delta = abs(luminance(b_on) - luminance(b_off))
         print("{0:28s} {1:12.6f} {2:12.6f}".format(
             "{0} -> {1}".format(off_name, on_name), a_delta, b_delta))
-        if a_delta > 1e-6 and b_delta <= a_delta * 0.05:
+        # Against BLACK, not against zero. A pair that does not apply to the
+        # surface being charted still shows a few parts in a million of render
+        # noise, and calling that "Arnold reacts and Blender does not" put a
+        # false line in the report every run.
+        if a_delta > BLACK and b_delta <= a_delta * 0.05:
             lost.append((off_name, on_name, a_delta, b_delta))
 
     if lost:

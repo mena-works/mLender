@@ -611,8 +611,16 @@ subsurfaceScale          -> Subsurface Scale
 specularAnisotropy       -> Anisotropic
 ```
 
-Üç not:
+Dört not:
 
+- **OpenPBR'ın `specularWeight`'i metal lobunu ölçekler.** OpenPBR'da
+  `baseMetalness = 1` ve `specularWeight = 0` olan bir yüzey Arnold'da
+  **tamamen siyah** render olur; `aiStandardSurface` böyle değildir ve
+  Principled'da bunu yapan bir soket yoktur. Ölçüldü: sonuç tam olarak
+  `base · (1 − metalness·(1 − specularWeight))`. Bu çarpan base color'a
+  uygulanır ve `za_openpbr_specular_scale` custom property'sinde saklanır.
+  Varsayılan ağırlık 1.0 olduğu için çarpan 1'dir ve normal sahnelerde
+  hiçbir şey değişmez.
 - **OpenPBR'ın `coatDarkening`'i base color'a katlanır.** OpenPBR coat'un
   altındaki yüzeyi karartır: coat'un iç yüzünden geri dönen ışık tekrar
   yutulur, dolayısıyla koyu bir taban parlak olandan çok daha fazla kaybeder.

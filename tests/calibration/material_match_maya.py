@@ -166,6 +166,12 @@ MATERIALS = [
     ("opacity_half", _cell(base_color=(0.8, 0.8, 0.8),
                            opacity=(0.5, 0.5, 0.5))),
 
+    # Half metal at no specular weight. The two ends of that scale are
+    # already covered by metal_on and metal_spec, and only a cell in between
+    # can see the metalness term of the correction go wrong.
+    ("metal_half", _cell(base_color=(0.9, 0.9, 0.9), metalness=0.5,
+                         roughness=0.3, specular=0.0)),
+
     # A bright base loses far less to the coat than a dark one, so the
     # darkening is checked at both ends; a single albedo would pass on a
     # factor that is only right in the middle.
@@ -194,6 +200,7 @@ PAIRS = [
     ("spec_off", "spec_on"),
     ("metal_off", "metal_on"),
     ("metal_on", "metal_spec"),
+    ("metal_half", "metal_spec"),
     ("coat_off", "coat_on"),
     ("coat_on", "coat_nodark"),
     ("coat_on", "coat_dark_partial"),
