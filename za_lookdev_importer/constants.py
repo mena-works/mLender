@@ -8,7 +8,7 @@ message shape changes.
 
 import math
 
-BUILD_VERSION = "1.27.0"
+BUILD_VERSION = "1.28.0"
 
 LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
@@ -22,6 +22,7 @@ LIVELINK_EVENT = "lookdev_package_ready"
 # branch with both, plus the Arnold channels.
 SUPPORTED_SCHEMA_VERSIONS = (
     1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+    20,
 )
 
 MAX_MESSAGE_BYTES = 32 * 1024 * 1024
@@ -136,6 +137,8 @@ METADATA_CHANNELS = (
     "subsurface_color",
     "thin_walled",
     "transmission_affects_alpha",
+    # Has no socket; it is folded into the base colour instead.
+    "coat_darkening",
 )
 
 # Arnold and Redshift state specular as a 0..1 weight; Blender states it as a
@@ -164,6 +167,10 @@ UNLIT_SHADER_TYPES = ("surfaceShader", "aiFlat")
 # defaulted this socket to 1.0 and 4.x defaults it to 0.0, which would render
 # the same package emissive on one version and black on the other.
 DEFAULT_EMISSION_STRENGTH = 1.0
+
+# Only reached when the Coat IOR socket is missing entirely. OpenPBR's own
+# default is 1.6, which is also what the darkening was measured against.
+DEFAULT_COAT_IOR = 1.6
 
 # Datablock collections cleared before a new package is imported.
 PURGED_DATA_COLLECTIONS = (

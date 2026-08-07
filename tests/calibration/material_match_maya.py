@@ -74,7 +74,7 @@ ATTRS = {
         "coat": "coatWeight", "coat_roughness": "coatRoughness",
         # OpenPBR darkens the base under the coat. Principled has no such
         # input, so this is the suspect for the coat cells disagreeing.
-        "coat_darkening": "coatDarkening",
+        "coat_darkening": "coatDarkening", "coat_ior": "coatIOR",
         # OpenPBR calls the sheen lobe fuzz and states emission in nits.
         "sheen": "fuzzWeight", "sheen_roughness": "fuzzRoughness",
         "emission": "emissionLuminance", "emission_color": "emissionColor",
@@ -166,6 +166,13 @@ MATERIALS = [
     ("opacity_half", _cell(base_color=(0.8, 0.8, 0.8),
                            opacity=(0.5, 0.5, 0.5))),
 
+    # A bright base loses far less to the coat than a dark one, so the
+    # darkening is checked at both ends; a single albedo would pass on a
+    # factor that is only right in the middle.
+    ("coat_dark_bright", _cell(base_color=(0.9, 0.9, 0.9), coat=1.0,
+                               coat_roughness=0.1)),
+    ("coat_dark_partial", _cell(coat=0.5, coat_roughness=0.1)),
+
     # Controls. These repeat a cell from the middle of the chart out at the
     # end, so they differ from their twin in position and in nothing else.
     # If a twin pair disagrees, the chart is reading its own geometry rather
@@ -188,6 +195,8 @@ PAIRS = [
     ("metal_off", "metal_on"),
     ("metal_on", "metal_spec"),
     ("coat_off", "coat_on"),
+    ("coat_on", "coat_nodark"),
+    ("coat_on", "coat_dark_partial"),
     ("sheen_off", "sheen_on"),
     ("emission_off", "emission_on"),
     ("emission_on", "emission_hdr"),

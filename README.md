@@ -611,8 +611,22 @@ subsurfaceScale          -> Subsurface Scale
 specularAnisotropy       -> Anisotropic
 ```
 
-İki not:
+Üç not:
 
+- **OpenPBR'ın `coatDarkening`'i base color'a katlanır.** OpenPBR coat'un
+  altındaki yüzeyi karartır: coat'un iç yüzünden geri dönen ışık tekrar
+  yutulur, dolayısıyla koyu bir taban parlak olandan çok daha fazla kaybeder.
+  Principled'da bunun karşılığı olan bir soket yok, o yüzden karartma base
+  color'ın kendisine uygulanır — texture'lı base color'da bir node zinciriyle,
+  düz renkte doğrudan. Bu yapılmadığında coat'lu OpenPBR materyalleri
+  Maya'nın gösterdiğinin **iki katına kadar parlak** geliyordu.
+
+  Uygulanan eğri Arnold'a karşı ölçüldü (`tests/docs/material_match.md`):
+  karartma miktarında doğrusal, coat ağırlığının **karesinde** (ışık coat'u
+  girerken ve çıkarken olmak üzere iki kez geçer). Paketteki `base_color`
+  sanatçının verdiği değer olarak kalır; karartma yalnız Blender tarafında
+  uygulanır ve `za_coat_darkening` custom property'sinde saklanır.
+  `aiStandardSurface`'ta böyle bir attribute yok, o yüzden etkilenmez.
 - **Principled'da ayrı bir Subsurface Color soketi yok** (4.1 ve 5.2'de
   ölçüldü); base color'dan renklenir. Maya'nın `subsurfaceColor` değeri bu
   yüzden metadata olarak saklanır, sessizce atılmaz.

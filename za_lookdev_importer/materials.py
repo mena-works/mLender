@@ -25,6 +25,7 @@ from .constants import (
     COLOUR_VALUED_CHANNELS,
     UNCLAMPED_COLOUR_CHANNELS,
     DISPLACEMENT_SPACES,
+    DEFAULT_COAT_IOR,
     DEFAULT_EMISSION_STRENGTH,
     OPENPBR_EMISSION_LUMINANCE_SCALE,
     OPENPBR_EMISSION_SEMANTIC,
@@ -211,6 +212,115 @@ def _build_principled(material, channels, warnings):
         apply_channel(material, bsdf, channel, channels.get(channel), warnings)
 
     _default_emission_strength(bsdf, channels)
+    apply_coat_darkening(material, bsdf, channels, warnings)
+
+
+def coat_internal_reflectance(ior):
+    """Fraction of diffuse light the coat reflects back down, from inside.
+
+    The standard approximation, kept rather than a table because it was
+    checked against Arnold at three coat IORs and reproduced every one to
+    about a part in ten thousand (tests/docs/material_match.md).
+    """
+    ior = max(1.0, float(ior))
+    return -1.440 / (ior * ior) + 0.710 / ior + 0.668 + 0.0636 * ior
+
+
+def coat_darkening_amount(channels):
+    """How much of the full darkening this material asks for, nought to one.
+
+    Linear in the darkening attribute, measured; and quadratic in the coat
+    weight, because the light crosses the coat on the way in and again on the
+    way out. Linear in the weight is 17% wrong at half coverage, squared is
+    within half a per cent.
+    """
+    darkening = scalar((channels.get("coat_darkening") or {}).get("value"), 0.0)
+    weight = scalar((channels.get("coat") or {}).get("value"), 0.0)
+    darkening = max(0.0, min(1.0, darkening))
+    weight = max(0.0, min(1.0, weight))
+    return darkening * weight * weight
+
+
+def apply_coat_darkening(material, bsdf, channels, warnings):
+    """Fold OpenPBR's coat darkening into the base colour.
+
+    OpenPBR darkens what is under the coat, by an amount that depends on the
+    base colour itself: light bounced back down by the underside of the coat
+    is absorbed again, so a dark base loses far more than a bright one.
+    Principled has no such input, and without this a coated OpenPBR material
+    arrived up to twice as bright as Maya rendered it.
+
+    Applied here rather than in the exporter so the package keeps reporting
+    the base colour the artist actually set.
+    """
+    amount = coat_darkening_amount(channels)
+    if amount <= 0.0:
+        return
+    socket = principled_input(bsdf, "base_color")
+    if socket is None:
+        return
+    ior_socket = principled_input(bsdf, "coat_ior")
+    ior = getattr(ior_socket, "default_value", DEFAULT_COAT_IOR)
+    reflectance = max(0.0, min(0.99, coat_internal_reflectance(ior)))
+
+    if socket.is_linked:
+        _insert_coat_darkening(material, socket, reflectance, amount)
+    else:
+        colour = list(socket.default_value)
+        for index in range(3):
+            colour[index] = _darkened_channel(
+                colour[index], reflectance, amount
+            )
+        socket.default_value = colour
+    material["za_coat_darkening"] = amount
+    material["za_coat_internal_reflectance"] = reflectance
+
+
+def _darkened_channel(value, reflectance, amount):
+    """base * (1 - amount * (1 - (1 - r) / (1 - r * base)))."""
+    base = max(0.0, float(value))
+    full = (1.0 - reflectance) / max(1e-6, 1.0 - reflectance * min(1.0, base))
+    return base * (1.0 - amount * (1.0 - full))
+
+
+def _insert_coat_darkening(material, socket, reflectance, amount):
+    """Build the same curve as nodes, for a textured base colour.
+
+    Sockets are addressed by index throughout: Vector Math input names have
+    moved between 4.1 and 5.2 while the indices have not.
+
+    Written out, with b the incoming colour, r the coat's internal
+    reflectance and f the amount:
+
+        b * (1 - r * (b * (1 - f) + f)) / (1 - r * b)
+    """
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+    source = socket.links[0].from_socket
+    origin = socket.node.location
+
+    def vector(operation, index, first, second):
+        node = nodes.new("ShaderNodeVectorMath")
+        node.operation = operation
+        node.name = "ZA_CoatDarkening_{0}".format(index)
+        node.label = "Coat Darkening"
+        node.location = (origin[0] - 720 + index * 80, origin[1] - 320)
+        for slot, value in ((0, first), (1, second)):
+            if hasattr(value, "is_output"):
+                links.new(value, node.inputs[slot])
+            else:
+                node.inputs[slot].default_value = (value, value, value)
+        return node.outputs[0]
+
+    scaled = vector("MULTIPLY", 0, source, 1.0 - amount)
+    shifted = vector("ADD", 1, scaled, amount)
+    inner = vector("MULTIPLY", 2, shifted, reflectance)
+    numerator_term = vector("SUBTRACT", 3, 1.0, inner)
+    numerator = vector("MULTIPLY", 4, source, numerator_term)
+    denominator_term = vector("MULTIPLY", 5, source, reflectance)
+    denominator = vector("SUBTRACT", 6, 1.0, denominator_term)
+    result = vector("DIVIDE", 7, numerator, denominator)
+    links.new(result, socket)
 
 
 def _default_emission_strength(bsdf, channels):

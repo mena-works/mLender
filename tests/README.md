@@ -102,14 +102,34 @@ export'un sahneye `file` node bırakmadığı kontrol edilir.
 ```
 
 Işık rig'inin materyal karşılığı: sabit nötr ışık, değişen materyal. Düz
-quad'lar, ışık kameranın arkasında, yani her örnek dik geliş açısında.
+quad'lar, sabit bir dome altında. Sıyırma açısı istendiğinde **kamera** eğilir,
+quad'lar değil.
 
 İki BRDF farklı olduğu için birebir eşleşme beklenmiyor; aranan **aktarım
 hatası**. Kritik tasarım kararı: eşleşmek yeterli değil, çünkü iki tarafta da
 sessizce sıfır olan bir kanal da eşleşir. Bu yüzden her şüpheli kanal için
 **tek o kanalda farklılaşan bir çift** hücre var.
 
+Chart'ın sonundaki iki **kontrol** hücresi ortadaki bir hücrenin kopyasıdır ve
+aynı okumak zorundadır; ayrışırlarsa rig materyali değil kendi geometrisini
+ölçüyordur ve Blender tarafı hata koduyla çıkar. Rig'in geometrisine
+dokunduğunda önce o satırlara bak.
+
 Sonuçlar ve kapsamadıkları `docs/material_match.md` içinde.
+
+## Coat darkening node zinciri (yalnız Blender, ~10 sn)
+
+```bash
+"C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" ^
+    --background --factory-startup --python ^
+    tests/calibration/coat_darkening_nodes.py
+```
+
+OpenPBR'ın coat karartması base color'a uygulanır: düz renkte Python'da,
+texture'lı base color'da sekiz Vector Math node'uyla. Bu rig sabit renkli bir
+görüntüyü node yolundan, aynı rengi düz yoldan geçirip ikisini render eder ve
+eşleşmelerini şart koşar. Chart yalnız düz renk kullandığı için node yolunu
+başka hiçbir şey sınamıyor.
 
 ## Performans ölçümü (gerçek Maya + gerçek Blender, ~1 dk)
 

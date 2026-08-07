@@ -134,11 +134,11 @@ Aynı ayrım `aiStandardSurface`'ta sıyırma açısında zayıf bir biçimde va
 70°'de `metal_on` → `metal_spec` Arnold'da 0.0802 hareket ederken Blender'da
 0.0006 hareket ediyor. Dik gelişte ikisi de kıpırdamıyor.
 
-## Coat farkının sebebi `coatDarkening`
+## Coat farkının sebebi `coatDarkening` — ölçüldü ve kapatıldı
 
-`coat_on` %28 sapıyordu. OpenPBR coat'un altındaki tabanı karartıyor
-(`coatDarkening`, varsayılan 1.0); Principled'da karşılığı yok. Bunu izole
-eden bir hücre eklendi:
+`coat_on` %91 sapıyordu. OpenPBR coat'un altındaki tabanı karartıyor
+(`coatDarkening`, varsayılan **1.0**, yani coat'lu her materyalde);
+Principled'da karşılığı yok. Bunu izole eden bir hücre eklendi:
 
 ```text
                 coatDarkening   arnold    blender    oran
@@ -146,8 +146,78 @@ coat_on              1.0        0.1765    0.3373     1.9112
 coat_nodark          0.0        0.3373    0.3373     1.0000
 ```
 
-Blender **tam olarak karartmasız durumu** üretiyor. Fark tümüyle bu
-attribute'tan geliyor, aktarımdan değil.
+Blender tam olarak karartmasız durumu üretiyordu. Fark tümüyle bu
+attribute'tan geliyordu.
+
+### Eğrinin ölçümü
+
+Karartma **taban albedosuna bağlı**, sabit bir çarpan değil. Dört albedoda,
+coat özgülü (`R₀`) çıkarıldıktan sonra:
+
+```text
+albedo   karartmasiz   karartmali   D
+0.1      0.1479        0.0886       0.374
+0.3      0.3373        0.1765       0.434
+0.6      0.6213        0.3786       0.573
+0.9      0.9053        0.7714       0.843
+```
+
+Bu klasik iç yansıma modeli: `D(b) = (1 − rᵢ) / (1 − rᵢ·b)`. İlk noktadan
+`rᵢ = 0.6503` çıkıyor ve diğer üçünü üç hane tutturuyor.
+
+`rᵢ` coat IOR'una bağlı. Üç IOR'da ölçüldü ve standart yaklaşımla
+karşılaştırıldı:
+
+```text
+eta    olculen rᵢ    -1.440/eta² + 0.710/eta + 0.668 + 0.0636·eta
+1.3    0.44462       0.44476
+1.6    0.65030       0.65110
+2.0    0.79033       0.79020
+```
+
+Bir parça on binde. Formül tahmin değil, bu yüzden tablo yerine formül
+kullanılıyor.
+
+Kısmi değerler ayrıca ölçüldü:
+
+- **Karartma miktarında doğrusal.** b=0.3'te d = 0 / 0.25 / 0.5 / 1 için
+  D = 1.000 / 0.858 / 0.717 / 0.434; doğrusal öngörü üç hane tutuyor. b=0.9'da
+  da öyle.
+- **Coat ağırlığında doğrusal değil, karesel.** Işık coat'u girerken ve
+  çıkarken iki kez geçiyor. Ağırlıkta doğrusal varsaymak yarım kaplamada
+  **%17** yanlış; `w²` yarım yüzde içinde.
+
+Uygulanan biçim:
+
+```text
+D = 1 − d·w²·(1 − (1 − rᵢ)/(1 − rᵢ·b))
+```
+
+### Düzeltmeden sonra
+
+```text
+hucre                arnold    blender    oran
+coat_on              0.1765    0.1764     0.9997
+coat_nodark          0.3373    0.3373     1.0000
+coat_dark_bright     0.7714    0.7714     0.9999
+coat_dark_partial    0.2784    0.2773     0.9959
+```
+
+`coat_dark_partial`'daki %0.4, `w²`'nin bıraktığı bilinen artıktır.
+`aiStandardSurface`'ta `coatDarkening` attribute'u yok, dolayısıyla kanal da
+üretilmiyor ve o yüzey etkilenmiyor — chart'ta coat hücrelerinin hepsi
+1.0000.
+
+### Node zinciri ayrıca sınanır
+
+Düz renk Python'da karartılıyor, texture'lı base color ise sekiz Vector Math
+node'uyla. İkincisini hiçbir şey sınamıyordu; ters çevrilmiş bir çıkarma veya
+baş aşağı bir bölme sessizce yanlış render ederdi. `coat_darkening_nodes.py`
+sabit renkli bir görüntüyü node yolundan, aynı rengi düz yoldan geçirip
+ikisini render ediyor — sabit görüntü iki yolu inşa gereği denk kılar.
+
+Rig'in kendisi de sınandı: bölme node'unun operandları bilerek ters çevrildi
+ve beş vakanın beşi de düştü.
 
 ## Sheen: soketler doğru, loblar farklı
 

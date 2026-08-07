@@ -17,7 +17,7 @@ LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
 LIVELINK_PROTOCOL = "za_lookdev_livelink"
 LIVELINK_VERSION = 2
-EXPORT_SCHEMA_VERSION = 19
+EXPORT_SCHEMA_VERSION = 20
 
 LIGHT_NODE_TYPES = (
     "RedshiftPhysicalLight",
@@ -179,6 +179,9 @@ ARNOLD_OPENPBR_CHANNELS = {
     "coat_roughness": ("coatRoughness",),
     "coat_tint": ("coatColor",),
     "coat_ior": ("coatIOR",),
+    # OpenPBR darkens the base under the coat and Principled has no such
+    # input, so the importer folds it into the base colour instead.
+    "coat_darkening": ("coatDarkening",),
     # OpenPBR calls the sheen lobe fuzz.
     "sheen": ("fuzzWeight",),
     "sheen_roughness": ("fuzzRoughness",),
