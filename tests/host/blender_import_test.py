@@ -148,12 +148,16 @@ def main():
           and props.name in {c.name for c in set_dressing.children})
     grouped = object_named("stdSurfCube")
     ungrouped = object_named("flatCube")
-    # Light linking collections are a mechanism, not scene organisation, so a
-    # mesh can legitimately be in a receiver or a blocker collection too.
+    # Light linking collections, selection sets and display layers all name
+    # objects rather than placing them, so a mesh can legitimately be in one
+    # of those as well as in its group collection. Sets and layers are
+    # recognised by their marker rather than their name, which the user chose.
     def scene_collections(obj):
         return [
             c.name for c in obj.users_collection
             if not c.name.startswith(("ML_Link_", "ML_Shadow_"))
+            and "ml_maya_set" not in c.keys()
+            and "ml_maya_layer" not in c.keys()
         ]
 
     check("the mesh sits in the innermost collection only",
@@ -240,6 +244,50 @@ def main():
               "setDressing" in {c.name
                                 for c in set_dressing_empty.users_collection},
               [c.name for c in set_dressing_empty.users_collection])
+
+    print("\nselection sets and display layers")
+    hero = bpy.data.collections.get("heroSet")
+    check("the set became a collection", hero is not None)
+    check("the import reported it", result["set_count"] == 1,
+          result["set_count"])
+    if hero:
+        names = {obj.name for obj in hero.objects}
+        check("holding the objects Maya had in it",
+              names == {"stdSurfCube", "flatCube"}, sorted(names))
+        # A set names objects that live elsewhere; it must not move them.
+        std_obj = bpy.data.objects.get("stdSurfCube")
+        check("without taking them out of their group collection",
+              std_obj is not None
+              and "props" in {c.name for c in std_obj.users_collection},
+              [c.name for c in std_obj.users_collection] if std_obj else None)
+        check("gathered under their own parent, not the group tree",
+              hero.name in {c.name for c in
+                            bpy.data.collections["mLender Sets"].children},
+              [c.name for c in
+               bpy.data.collections["mLender Sets"].children]
+              if bpy.data.collections.get("mLender Sets") else None)
+
+    hidden_layer = bpy.data.collections.get("hiddenLayer")
+    reference_layer = bpy.data.collections.get("referenceLayer")
+    check("display layers became collections",
+          hidden_layer is not None and reference_layer is not None)
+    check("the import reported them", result["layer_count"] == 2,
+          result["layer_count"])
+    lambert_obj = bpy.data.objects.get("aiLambertCube")
+    if hidden_layer and lambert_obj:
+        # Set on the object as well as the collection: it is in its group
+        # collection too, and Maya hides it however it is reached.
+        check("an invisible layer hides its members",
+              lambert_obj.hide_viewport and lambert_obj.hide_render,
+              (lambert_obj.hide_viewport, lambert_obj.hide_render))
+    disp_obj = bpy.data.objects.get("dispCube")
+    if reference_layer and disp_obj:
+        # Maya's reference display type means "not meant to be grabbed".
+        check("a reference layer makes its members unselectable",
+              disp_obj.hide_select is True, disp_obj.hide_select)
+        check("and the Maya display type is kept for reference",
+              reference_layer.get("ml_source_display_type") == 2,
+              reference_layer.get("ml_source_display_type"))
 
     print("\nrender settings")
     # 1920x804, not 1920x1080: Blender's own default would pass against an

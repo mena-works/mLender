@@ -26,15 +26,20 @@ from .utils import safe_name, scalar
 
 
 def import_curves(package_data, root_collection, import_scale, warnings,
-                  group_cache):
-    """Rebuild every curve record. Returns how many were built."""
+                  group_cache, object_by_path=None):
+    """Rebuild every curve record. Returns how many were built.
+
+    Curves are registered by Maya path like meshes and empties, because a
+    selection set can name one and would otherwise skip it silently.
+    """
     meters_per_unit = scalar(package_data.get("meters_per_maya_unit"), 0.01)
     position_scale = meters_per_unit * max(scalar(import_scale, 1.0), 0.000001)
 
     built = 0
     for record in list(package_data.get("curves") or []):
         try:
-            _build_curve(record, root_collection, position_scale, group_cache)
+            obj = _build_curve(record, root_collection, position_scale,
+                               group_cache)
         except Exception as exc:
             warnings.append(
                 'Curve "{0}" could not be built: {1}'.format(
@@ -42,6 +47,8 @@ def import_curves(package_data, root_collection, import_scale, warnings,
                 )
             )
             continue
+        if object_by_path is not None and record.get("curve_path"):
+            object_by_path[record["curve_path"]] = obj
         built += 1
     return built
 

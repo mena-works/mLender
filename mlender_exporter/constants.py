@@ -17,7 +17,7 @@ LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
 LIVELINK_PROTOCOL = "mlender_livelink"
 LIVELINK_VERSION = 3
-EXPORT_SCHEMA_VERSION = 23
+EXPORT_SCHEMA_VERSION = 24
 
 LIGHT_NODE_TYPES = (
     "RedshiftPhysicalLight",
@@ -123,6 +123,17 @@ LIGHT_DOME_TEXTURE_ATTRS = (
 # Redshift is deliberately absent. Its attribute names cannot be probed on
 # this machine and this project does not write names it has not read off a
 # live session; the same footing as the Redshift light anchor.
+# Sets and layers Maya makes for itself. The first two are genuine object
+# sets rather than shading engines, so a node type filter does not catch
+# them and they have to go by name.
+EXCLUDED_SET_NAMES = (
+    "defaultObjectSet",
+    "defaultLightSet",
+    "initialShadingGroup",
+    "initialParticleSE",
+    "defaultLayer",
+)
+
 ARNOLD_MOTION_BLUR_NODE = "defaultArnoldRenderOptions"
 ARNOLD_MOTION_BLUR_ENABLED_ATTRS = ("motion_blur_enable",)
 ARNOLD_MOTION_BLUR_LENGTH_ATTRS = ("motion_frames",)

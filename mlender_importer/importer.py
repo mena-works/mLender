@@ -17,6 +17,7 @@ from .animation import apply_scene_range
 from .colormanagement import apply_color_management
 from .lights import import_lights
 from .render import apply_render_settings
+from .sets import import_sets
 from .materials import apply_face_assignments, build_material
 from .scene import (
     add_subdivision_modifiers,
@@ -156,6 +157,7 @@ def import_scene_package(
         import_scale,
         warnings,
         group_cache,
+        object_by_path,
     )
 
     # Runs after the empties so both kinds of group transform, the ones the
@@ -186,6 +188,12 @@ def import_scene_package(
         warnings,
     )
 
+    # Sets and layers name objects that already exist, so this runs after
+    # everything that creates them.
+    set_result = import_sets(
+        package_data, root_collection, object_by_path, warnings
+    )
+
     view_transform = apply_color_management(package_data, warnings)
     render_applied = apply_render_settings(package_data, warnings)
 
@@ -212,6 +220,8 @@ def import_scene_package(
         "transform_count": empty_result["transform_count"],
         "curve_count": curve_count,
         "render": render_applied,
+        "set_count": set_result["set_count"],
+        "layer_count": set_result["layer_count"],
         "light_count": light_result["light_count"],
         "light_object_count": light_result["object_count"],
         "dome_count": light_result["dome_count"],

@@ -23,6 +23,12 @@ from .animation import animation_info, sample_records
 from .cameras import camera_record, camera_sample, scene_camera_shapes
 from .curves import curve_records, scene_curve_shapes
 from .render import render_record
+from .sets import (
+    display_layer_records,
+    scene_display_layers,
+    scene_selection_sets,
+    selection_set_records,
+)
 from .transforms import scene_transforms, transform_records
 from .collect import collect_textures
 from .fbx import export_fbx
@@ -124,6 +130,8 @@ def export_scene(
         # dropped entirely.
         transform_list = transform_records(scene_transforms())
         curve_list = curve_records(scene_curve_shapes())
+        set_list = selection_set_records(scene_selection_sets(), warnings)
+        layer_list = display_layer_records(scene_display_layers())
         light_shapes = scene_light_shapes()
         camera_shapes = scene_camera_shapes()
         light_records = [light_record(shape) for shape in light_shapes]
@@ -169,6 +177,8 @@ def export_scene(
             "meshes": mesh_records,
             "transform_count": len(transform_list),
             "render": render_record(),
+            "selection_sets": set_list,
+            "display_layers": layer_list,
             "curve_count": len(curve_list),
             "curves": curve_list,
             "transforms": transform_list,

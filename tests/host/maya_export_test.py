@@ -225,6 +225,18 @@ def build_scene():
     cmds.parent(child_mesh, parent_mesh)
     cmds.setAttr(parent_mesh + "|childMesh.translateY", 3)
 
+    # Selection sets and display layers. The component set is the one that
+    # matters: Blender has no equivalent for "these three faces", so it must
+    # be reported rather than half-built.
+    cmds.sets(["stdSurfCube", "flatCube"], name="heroSet")
+    cmds.sets("glassCube.f[0:2]", name="faceOnlySet")
+    props_layer = cmds.createDisplayLayer(name="hiddenLayer", empty=True)
+    cmds.editDisplayLayerMembers(props_layer, "aiLambertCube", noRecurse=True)
+    cmds.setAttr(props_layer + ".visibility", False)
+    ref_layer = cmds.createDisplayLayer(name="referenceLayer", empty=True)
+    cmds.editDisplayLayerMembers(ref_layer, "dispCube", noRecurse=True)
+    cmds.setAttr(ref_layer + ".displayType", 2)
+
     # Render settings. A deliberately non-default resolution: 1920x1080 would
     # pass against a Blender that ignored the record entirely, since that is
     # Blender's own default.
@@ -598,6 +610,42 @@ def main():
     check("a curve transform is not recorded as an empty",
           "probeCurve" not in by_transform and "probeCircle" not in
           by_transform, sorted(by_transform))
+
+    print("\nselection sets and display layers")
+    by_set = {item.get("set"): item
+              for item in (payload.get("selection_sets") or [])}
+    check("heroSet exported", "heroSet" in by_set, sorted(by_set))
+    # shadingEngine inherits from objectSet, and defaultObjectSet and
+    # defaultLightSet are genuine object sets that a type filter cannot catch.
+    check("shading engines are not mistaken for selection sets",
+          not any(name.endswith("_SG") for name in by_set), sorted(by_set))
+    check("and neither are Maya's own sets",
+          "defaultObjectSet" not in by_set and "defaultLightSet" not in by_set,
+          sorted(by_set))
+    # Blender has no equivalent for a set of faces; it is reported, and a set
+    # with nothing else in it is not written as an empty collection.
+    check("a component only set is not exported",
+          "faceOnlySet" not in by_set, sorted(by_set))
+    check("and it was reported instead",
+          any("faceOnlySet" in str(w) for w in payload["export_warnings"]),
+          payload["export_warnings"])
+    members = (by_set.get("heroSet") or {}).get("members") or []
+    check("set members are full paths, not ambiguous short names",
+          members and all(name.startswith("|") for name in members), members)
+
+    by_layer = {item.get("layer"): item
+                for item in (payload.get("display_layers") or [])}
+    check("display layers exported",
+          "hiddenLayer" in by_layer and "referenceLayer" in by_layer,
+          sorted(by_layer))
+    check("defaultLayer is skipped", "defaultLayer" not in by_layer,
+          sorted(by_layer))
+    check("layer visibility carried",
+          (by_layer.get("hiddenLayer") or {}).get("visible") is False,
+          (by_layer.get("hiddenLayer") or {}).get("visible"))
+    check("reference display type carried",
+          (by_layer.get("referenceLayer") or {}).get("display_type") == 2,
+          (by_layer.get("referenceLayer") or {}).get("display_type"))
 
     print("\nrender settings")
     render = payload.get("render") or {}

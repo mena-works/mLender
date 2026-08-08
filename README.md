@@ -1064,6 +1064,33 @@ scene, which is what you want while iterating on a single asset.
 
 ---
 
+### Selection sets and display layers
+
+Maya sets and display layers become Blender collections, gathered under
+`mLender Sets` and `mLender Layers` so they are never mistaken for the group
+hierarchy. Objects are **added** to them, not moved: a set is a second way of
+naming the same objects, not a different place for them, and a Blender object
+can belong to several collections.
+
+A display layer also carries state a collection cannot, so it is applied to
+the members as well:
+
+```text
+visibility off      -> hide_viewport and hide_render on every member
+displayType 1 or 2  -> hide_select, since Maya means "not meant to be grabbed"
+```
+
+Three exclusions, each measured rather than assumed. `shadingEngine` is its
+own node type, so filtering on `objectSet` keeps material assignments out.
+`defaultObjectSet` and `defaultLightSet` are *not* — they are genuine object
+sets and are excluded by name. And **a set of components is reported, not
+half-built**: Blender has no equivalent for "these three faces", so such a set
+produces a warning rather than a collection that quietly means something else.
+
+Set membership comes back from Maya as short names, which are ambiguous in a
+scene where two meshes share one, so members are resolved to full paths before
+they are written.
+
 ## Render settings
 
 Resolution, pixel aspect and motion blur travel with the package. It is a
