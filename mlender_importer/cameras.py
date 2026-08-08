@@ -8,10 +8,17 @@ distance and orthographic width in scene units, all of which the exporter has
 already converted or carried explicitly.
 """
 
+import os
+
 import bpy
 
 from .animation import animate_object, key_data_value
-from .constants import CAMERA_COLLECTION_NAME, CAMERA_SENSOR_FIT
+from .constants import (
+    CAMERA_COLLECTION_NAME,
+    CAMERA_SENSOR_FIT,
+    IMAGE_PLANE_FIT,
+    IMAGE_PLANE_HIDDEN_MODE,
+)
 from .transforms import maya_matrix_to_blender
 from .utils import namespace_free_name, scalar
 
@@ -30,7 +37,9 @@ def import_cameras(package_data, root_collection, import_scale, warnings):
     for record in records:
         try:
             created.append(
-                (record, create_camera_object(record, collection, position_scale))
+                (record, create_camera_object(
+                    record, collection, position_scale, warnings
+                ))
             )
         except Exception as exc:
             warnings.append(
@@ -44,7 +53,7 @@ def import_cameras(package_data, root_collection, import_scale, warnings):
     return {"camera_count": len(created), "active": active}
 
 
-def create_camera_object(record, collection, position_scale):
+def create_camera_object(record, collection, position_scale, warnings=None):
     name = (
         record.get("name")
         or namespace_free_name(record.get("full_name"))
@@ -90,6 +99,7 @@ def create_camera_object(record, collection, position_scale):
 
     _apply_depth_of_field(data, record, position_scale)
     _animate_camera(obj, data, record, position_scale)
+    apply_image_planes(data, record, warnings if warnings is not None else [])
     _store_camera_metadata(obj, data, record)
     return obj
 
@@ -155,6 +165,72 @@ def _activate_scene_camera(created, warnings):
     chosen = (renderable or created)[0][1]
     bpy.context.scene.camera = chosen
     return chosen.name
+
+
+def apply_image_planes(data, record, warnings):
+    """Rebuild Maya image planes as Blender camera background images.
+
+    Both are viewport reference rather than something that renders, so the
+    mapping is about the image being on the right camera at the right size.
+
+    Two approximations, both recorded rather than hidden. Maya has five fit
+    modes against Blender's three, and Maya's plane depth is a distance while
+    Blender only offers front or back. The Maya values are kept on the camera
+    data so the difference is visible instead of silently lost.
+    """
+    planes = record.get("image_planes") or []
+    if not planes:
+        return 0
+
+    built = 0
+    for plane in planes:
+        path = str(plane.get("image_path") or "")
+        if not path:
+            # A texture or movie driven plane has no file to point Blender at.
+            warnings.append(
+                'Image plane "{0}" has no image file, so nothing was '
+                "attached to the camera.".format(plane.get("plane") or "?")
+            )
+            continue
+        if not os.path.isfile(path):
+            warnings.append(
+                'Image plane file was not found: {0}'.format(path)
+            )
+            continue
+        try:
+            image = bpy.data.images.load(path, check_existing=True)
+        except Exception as exc:
+            warnings.append(
+                "Image plane could not be loaded: {0} ({1})".format(path, exc)
+            )
+            continue
+
+        background = data.background_images.new()
+        background.image = image
+        background.alpha = max(0.0, min(1.0, scalar(plane.get("alpha"), 1.0)))
+        background.display_depth = "BACK"
+        background.frame_method = IMAGE_PLANE_FIT.get(
+            str(plane.get("fit") or ""), "FIT"
+        )
+        background.offset = (
+            scalar(plane.get("offset_x"), 0.0),
+            scalar(plane.get("offset_y"), 0.0),
+        )
+        # Maya's None display mode means the plane exists but is not drawn.
+        if str(plane.get("display_mode") or "") == IMAGE_PLANE_HIDDEN_MODE:
+            background.show_background_image = False
+        built += 1
+
+    if built:
+        data.show_background_images = True
+        data["ml_source_image_plane_count"] = built
+        data["ml_source_image_plane_fit"] = str(
+            (planes[0] or {}).get("fit") or ""
+        )
+        data["ml_source_image_plane_depth"] = scalar(
+            (planes[0] or {}).get("depth"), 0.0
+        )
+    return built
 
 
 def _store_camera_metadata(obj, data, record):

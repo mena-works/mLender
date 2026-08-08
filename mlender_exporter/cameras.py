@@ -20,6 +20,7 @@ from .mayautils import (
     attr_exists,
     current_frame,
     first_existing_attr,
+    maya_path,
     node_label,
     parent_of,
     plug_value,
@@ -44,6 +45,70 @@ def scene_camera_shapes():
             pass
         result.append(shape)
     return unique(result)
+
+
+def image_plane_records(camera_shape):
+    """Image planes attached to a camera, as reference records.
+
+    A plane hangs off ``camera.imagePlane`` through its own message plug,
+    which is how it is found; a camera without one answers nothing at all,
+    so the common case costs a single query.
+
+    Blender has background images, which are viewport reference in the same
+    way, but fewer fit modes: Maya offers Fill, Best, Horizontal, Vertical
+    and To Size against Blender's stretch, fit and crop. The Maya value is
+    recorded alongside so nothing is lost in the approximation.
+    """
+    try:
+        planes = cmds.listConnections(
+            camera_shape + ".imagePlane", source=True, shapes=True
+        ) or []
+    except Exception:
+        return []
+
+    records = []
+    for plane in unique(planes):
+        if not attr_exists(plane, "imageName"):
+            continue
+        size_x = _number(plug_value(plane + ".sizeX"), 0.0)
+        size_y = _number(plug_value(plane + ".sizeY"), 0.0)
+        _t, _a, type_label = first_existing_attr(plane, ("type",))
+        _d, _da, display_label = first_existing_attr(plane, ("displayMode",))
+        _f, _fa, fit_label = first_existing_attr(plane, ("fit",))
+        records.append({
+            "plane": without_namespace(node_label(plane)),
+            # plug_value drops strings by design, so the file name is read
+            # with the string reader; using it turned an empty result into
+            # abspath("") and pointed every plane at the working directory.
+            "image_path": _image_path(plane),
+            "source_type": str(type_label or ""),
+            "display_mode": str(display_label or ""),
+            "fit": str(fit_label or ""),
+            "alpha": _number(plug_value(plane + ".alphaGain"), 1.0),
+            "depth": _number(plug_value(plane + ".depth"), 0.0),
+            # Fractions of the plane, the same treatment the film offset
+            # gets, rather than raw Maya units the importer would guess at.
+            "offset_x": _ratio(plug_value(plane + ".offsetX"), size_x),
+            "offset_y": _ratio(plug_value(plane + ".offsetY"), size_y),
+            "size_x": size_x,
+            "size_y": size_y,
+            "use_frame_extension": bool(
+                plug_value(plane + ".useFrameExtension")
+            ),
+        })
+    return records
+
+
+def _raw_string(node, attr):
+    try:
+        return str(cmds.getAttr(node + "." + attr) or "")
+    except Exception:
+        return ""
+
+
+def _image_path(plane):
+    raw = _raw_string(plane, "imageName").strip()
+    return maya_path(raw) if raw else ""
 
 
 def camera_record(camera_shape):
@@ -81,6 +146,7 @@ def camera_record(camera_shape):
         "shift_y": _ratio(values.get("film_offset_vertical"), vertical_inches),
         "near_clip": _number(values.get("near_clip"), 0.1),
         "far_clip": _number(values.get("far_clip"), 10000.0),
+        "image_planes": image_plane_records(camera_shape),
         "depth_of_field": bool(values.get("depth_of_field")),
         "f_stop": _number(values.get("f_stop"), 5.6),
         "focus_distance": _number(values.get("focus_distance"), 5.0),

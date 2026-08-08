@@ -815,6 +815,30 @@ depthOfField/fStop       -> dof.use_dof / dof.aperture_fstop
 focusDistance            -> dof.focus_distance (scene units -> metres)
 ```
 
+### Image planes
+
+A Maya image plane becomes a Blender camera background image. Both are
+viewport reference rather than something that renders, so the mapping is about
+the right image being on the right camera:
+
+```text
+imageName    -> the loaded image        alphaGain -> alpha
+fit          -> frame_method            (always behind the geometry)
+displayMode  -> None hides the plane without removing it
+offsetX / Y  -> offset, as a fraction of the plane's own size
+```
+
+Two approximations, both recorded rather than hidden. Maya has five fit modes
+(Fill, Best, Horizontal, Vertical, To Size) against Blender's three, so Fill
+becomes crop, To Size becomes stretch and the rest become fit. And Maya's
+plane depth is a distance while Blender only offers front or back. The Maya
+values survive on the camera data as `ml_source_image_plane_fit` and
+`ml_source_image_plane_depth`.
+
+A plane driven by a texture or a movie has no file to point Blender at, and a
+path that is not on disk is refused rather than attached as a broken
+background; both are reported.
+
 The camera marked `renderable` in Maya becomes Blender's active scene camera.
 With several renderable cameras the first is chosen and a warning is issued.
 Originals are stored in `ml_source_*` on the camera data.

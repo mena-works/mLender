@@ -43,6 +43,24 @@ def check(label, condition, detail=""):
         print("  FAIL  {0}  {1}".format(label, detail))
 
 
+def _write_png(path):
+    """A real one pixel PNG.
+
+    The texture fixtures elsewhere write nonsense into a .tx because only the
+    path is ever exported. An image plane is different: the importer loads the
+    file into Blender, so it has to be an image Blender can actually open.
+    """
+    import base64
+
+    data = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8"
+        "z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    )
+    with open(path, "wb") as handle:
+        handle.write(data)
+    return path
+
+
 def shaded_cube(name, shader_type):
     transform = cmds.polyCube(name=name)[0]
     shader = cmds.shadingNode(shader_type, asShader=True, name=name + "_shd")
@@ -531,6 +549,16 @@ def build_scene():
     cmds.setAttr(shot + ".renderable", True)
     cmds.setAttr(shot_tf + ".translate", 0.0, 30.0, 120.0, type="double3")
 
+    # An image plane. A real file on disk, because the importer refuses a path
+    # that is not there rather than attaching a broken background.
+    plane_path = os.path.join(OUT, "ref_plate.png").replace("\\", "/")
+    _write_png(plane_path)
+    plane_shape = cmds.imagePlane(camera=shot, name="refPlane")[1]
+    cmds.setAttr(plane_shape + ".imageName", plane_path, type="string")
+    cmds.setAttr(plane_shape + ".alphaGain", 0.6)
+    cmds.setAttr(plane_shape + ".depth", 120)
+    cmds.setAttr(plane_shape + ".fit", 0)                     # Fill
+
     ortho_tf = cmds.rename(cmds.camera()[0], "orthoCam")
     ortho = cmds.listRelatives(ortho_tf, shapes=True, fullPath=True)[0]
     cmds.setAttr(ortho + ".orthographic", True)
@@ -646,6 +674,38 @@ def main():
     check("a curve transform is not recorded as an empty",
           "probeCurve" not in by_transform and "probeCircle" not in
           by_transform, sorted(by_transform))
+
+    print("\nimage planes")
+    shot_record = next(
+        (item for item in payload["cameras"] if item.get("name") == "shotCam"),
+        {},
+    )
+    planes = shot_record.get("image_planes") or []
+    check("the camera carries its image plane", len(planes) == 1, len(planes))
+    if planes:
+        plane = planes[0]
+        check("the image path is carried",
+              str(plane.get("image_path") or "").endswith("ref_plate.png"),
+              plane.get("image_path"))
+        check("alpha is carried",
+              abs(float(plane.get("alpha") or 0) - 0.6) < 1e-6,
+              plane.get("alpha"))
+        # Enums travel as labels here too, for the same reason as everywhere
+        # else: the indices are not stable.
+        check("the fit mode is carried as its label",
+              plane.get("fit") == "Fill", plane.get("fit"))
+        check("and the display mode too",
+              plane.get("display_mode") in
+              ("RGB", "RGBA", "None", "Outline", "Luminance", "Alpha"),
+              plane.get("display_mode"))
+    # A camera without a plane must not invent one.
+    ortho_record = next(
+        (item for item in payload["cameras"] if item.get("name") == "orthoCam"),
+        {},
+    )
+    check("a camera with no plane records none",
+          not (ortho_record.get("image_planes") or []),
+          ortho_record.get("image_planes"))
 
     print("\nuser attributes")
     attrs = (by_mesh.get("attrCube") or {}).get("custom_attributes") or {}

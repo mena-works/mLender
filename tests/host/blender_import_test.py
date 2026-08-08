@@ -309,6 +309,43 @@ def main():
           abs(render.motion_blur_shutter - 0.75) < 1e-5,
           render.motion_blur_shutter)
 
+    print("\nimage planes")
+    shot_cam = bpy.data.objects.get("shotCam")
+    check("shotCam arrived", shot_cam is not None)
+    if shot_cam:
+        cam_data = shot_cam.data
+        check("its image plane became a background image",
+              len(cam_data.background_images) == 1,
+              len(cam_data.background_images))
+        check("and backgrounds are switched on",
+              cam_data.show_background_images is True)
+        if len(cam_data.background_images):
+            bg = cam_data.background_images[0]
+            check("the image was loaded",
+                  bg.image is not None
+                  and bg.image.name.startswith("ref_plate"),
+                  bg.image.name if bg.image else None)
+            check("alpha came from alphaGain",
+                  abs(bg.alpha - 0.6) < 1e-5, bg.alpha)
+            # Maya Fill crops the overflow, which is Blender's CROP.
+            check("Maya's Fill became CROP",
+                  bg.frame_method == "CROP", bg.frame_method)
+            check("it sits behind the geometry",
+                  bg.display_depth == "BACK", bg.display_depth)
+        # Maya has five fit modes against Blender's three, so the original is
+        # kept rather than lost in the approximation.
+        check("the Maya fit mode is recorded",
+              cam_data.get("ml_source_image_plane_fit") == "Fill",
+              cam_data.get("ml_source_image_plane_fit"))
+        check("and so is the plane depth Blender cannot express",
+              abs(cam_data.get("ml_source_image_plane_depth", 0) - 120.0) < 1e-4,
+              cam_data.get("ml_source_image_plane_depth"))
+    ortho_cam = bpy.data.objects.get("orthoCam")
+    if ortho_cam:
+        check("a camera with no plane gets no background",
+              len(ortho_cam.data.background_images) == 0,
+              len(ortho_cam.data.background_images))
+
     print("\nuser attributes")
     # Under their own names, so a script written against the Maya scene keeps
     # working: obj["assetId"] on both sides.
