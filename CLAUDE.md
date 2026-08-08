@@ -38,6 +38,7 @@ mlender_exporter/     # Maya (import sırası = bağımlılık sırası)
   lights.py              # ışık keşfi ve kayıtları
   cameras.py             # kamera keşfi ve lens kayıtları
   fbx.py                 # MEL FBXExport
+  alembic.py             # deforme mesh + emitter particle için AbcExport
   livelink.py            # TCP istemci
   package.py             # paket klasörü, JSON, atomik temizlik
   ui.py                  # Maya penceresi
@@ -56,6 +57,7 @@ mlender_importer/     # Blender multi-file add-on
   animation.py           # örneklenen animasyonu keyframe olarak kurma
   scene.py               # sahne temizleme, mesh eşleştirme, subdivision
   fbx.py                 # FBX import, paket dosyası çözümleme
+  alembic.py             # paket cache'ini okuma (eksen/ölçek ölçüldü)
   importer.py            # orkestrasyon + şema doğrulaması
   livelink.py            # socket listener + ana thread pompası
   ui.py                  # operator, property, panel
