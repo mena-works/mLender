@@ -23,8 +23,14 @@ from __future__ import absolute_import
 
 import maya.cmds as cmds
 
-from .mayautils import node_label, parent_of, unique, without_namespace, \
-    world_matrix
+from .mayautils import (
+    node_label,
+    parent_of,
+    unique,
+    user_attributes,
+    without_namespace,
+    world_matrix,
+)
 from .meshes import expanded_selection, group_path
 
 # Maya form: 0 open, 1 closed, 2 periodic. Both of the latter close the loop.
@@ -94,6 +100,7 @@ def curve_record(shape):
         "groups": group_path(transform),
         "world_matrix": world_matrix(transform),
         "visible": _visible(transform),
+        "custom_attributes": user_attributes(transform),
     }
 
 

@@ -888,6 +888,35 @@ Maya                              Blender
 Lights and cameras stay together under `mLender Lights` and `mLender Cameras` rather
 than joining this hierarchy, so they stay reachable as a set.
 
+### User attributes
+
+Attributes a pipeline hangs off a Maya node — an asset id, a variant name, a
+LOD level — arrive as Blender custom properties under **their own names**, so a
+script written against the Maya scene keeps working: `obj["assetId"]` on both
+sides. Meshes, locators, empties and curves all carry them, and a mesh's shape
+attributes are merged in alongside its transform's.
+
+```text
+long / double  -> number        string  -> string
+bool           -> bool          double3 -> three numbers
+enum           -> its label, not its index
+```
+
+Three details, each measured rather than assumed:
+
+- **An enum reads back as an integer.** The label is stored instead, for the
+  reason this codebase already matches enums on labels elsewhere: the indices
+  are not stable across versions.
+- **A compound is listed together with its children**, so a `double3` appears
+  four times over. Only the parent is kept, recognised by the children having
+  one.
+- **A name starting with `ml_` is refused and reported.** Everything the tool
+  writes onto an object uses that prefix, and Merge decides what it may adopt
+  by reading `ml_generated` — letting a Maya attribute overwrite it would make
+  the importer lose track of its own objects.
+
+An object with no user attributes costs nothing: Maya returns nothing for it.
+
 ### Hard and soft edges
 
 Also already carried by the FBX, and also asserted rather than assumed. A cube

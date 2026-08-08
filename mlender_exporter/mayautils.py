@@ -135,6 +135,50 @@ def first_existing_attr(node, aliases):
     return None, "", ""
 
 
+def user_attributes(node):
+    """Attributes the user added to a node, as a JSON friendly dict.
+
+    Pipelines hang their own data off Maya nodes -- an asset id, a variant
+    name, a LOD level -- and none of it reached Blender, which has exactly the
+    same idea in custom properties.
+
+    Two things measured rather than assumed. A compound attribute is listed
+    together with its children, so a double3 appears four times over; only the
+    parent is kept, recognised by the children having one. And an enum reads
+    back as an integer, so the label is stored instead: this codebase already
+    matches enums on their label because the indices are not stable across
+    versions.
+    """
+    if not node:
+        return {}
+    try:
+        names = cmds.listAttr(node, userDefined=True) or []
+    except Exception:
+        return {}
+
+    found = {}
+    for name in names:
+        try:
+            if cmds.attributeQuery(name, node=node, listParent=True):
+                # A child of a compound; the parent already carries the value.
+                continue
+        except Exception:
+            pass
+        plug = node + "." + name
+        try:
+            attr_type = cmds.getAttr(plug, type=True)
+        except Exception:
+            continue
+        value = raw_attr_value(plug)
+        if value is None:
+            continue
+        if attr_type == "enum":
+            label = enum_attr_label(node, name, value)
+            value = label if label else value
+        found[name] = value
+    return found
+
+
 def node_visible(node):
     if not node or not attr_exists(node, "visibility"):
         return True

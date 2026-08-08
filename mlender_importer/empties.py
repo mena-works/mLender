@@ -9,6 +9,7 @@ records instead, the way lights and cameras do.
 
 import bpy
 
+from .attributes import apply_custom_attributes
 from .constants import EMPTY_DISPLAY_SIZE, EMPTY_DISPLAY_TYPES
 from .scene import place_in_group
 from .transforms import maya_matrix_to_blender
@@ -74,6 +75,7 @@ def _build_empty(record, root_collection, position_scale, group_cache):
     obj["ml_generated"] = True
     obj["ml_maya_transform"] = record.get("transform_full_name") or name
     obj["ml_source_type"] = record.get("transform_type") or ""
+    apply_custom_attributes(obj, record, [])
 
     root_collection.objects.link(obj)
     # A group's own empty belongs inside the collection that mirrors it, not

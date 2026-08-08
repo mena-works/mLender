@@ -43,6 +43,7 @@ from .mayautils import (
     parents_of,
     plug_value,
     unique,
+    user_attributes,
     without_namespace,
 )
 from .bake import bake_channel
@@ -173,8 +174,17 @@ def mesh_records(mesh_shape, bake_context=None, cache=None):
             "visibility": visibility_info(mesh_shape, transform),
             "subdivision": subdivision,
             "materials": materials,
+            # Shape attributes first so a transform of the same name
+            # wins; the transform is the one users mean.
+            "custom_attributes": _merged_attributes(mesh_shape, transform),
         })
     return records
+
+
+def _merged_attributes(shape, transform):
+    found = dict(user_attributes(shape))
+    found.update(user_attributes(transform))
+    return found
 
 
 def group_path(transform):

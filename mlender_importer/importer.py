@@ -9,6 +9,7 @@ merge would leave stale materials and lights behind.
 import bpy
 
 from .constants import SUPPORTED_SCHEMA_VERSIONS
+from .attributes import apply_custom_attributes
 from .cameras import import_cameras
 from .curves import import_curves
 from .empties import import_empties
@@ -136,6 +137,7 @@ def import_scene_package(
         mode == IMPORT_MODE_MERGE) else {}
     grouped_count = 0
     visibility_count = 0
+    attribute_count = 0
 
     for obj in imported_meshes:
         mesh_record = find_mesh_record(obj, record_index, used_record_ids)
@@ -157,6 +159,9 @@ def import_scene_package(
             visibility_count += 1
         assignments.append(
             assign_mesh_materials(obj, mesh_record, material_cache, warnings)
+        )
+        attribute_count += apply_custom_attributes(
+            obj, mesh_record, warnings
         )
 
     # After the materials, not before: the assignment writes into obj.data,
@@ -259,6 +264,7 @@ def import_scene_package(
         "grouped_mesh_count": grouped_count,
         "subdivision_count": subdivision_count,
         "instanced_count": instanced_count,
+        "custom_attribute_count": attribute_count,
         "transform_count": empty_result["transform_count"],
         "curve_count": curve_count,
         "render": render_applied,

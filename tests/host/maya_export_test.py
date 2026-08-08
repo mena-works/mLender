@@ -252,6 +252,34 @@ def build_scene():
     except Exception as exc:
         print("  note: Arnold render options unavailable: {0}".format(exc))
 
+    # User attributes, the kind a pipeline hangs off a node. One of every type
+    # that reads back differently, plus the two traps: a compound is listed
+    # together with its children, and an enum reads back as an integer.
+    attr_transform, _ = shaded_cube("attrCube", "aiStandardSurface")
+    cmds.addAttr(attr_transform, longName="assetId", attributeType="long")
+    cmds.setAttr(attr_transform + ".assetId", 4271)
+    cmds.addAttr(attr_transform, longName="isHero", attributeType="bool")
+    cmds.setAttr(attr_transform + ".isHero", True)
+    cmds.addAttr(attr_transform, longName="variantName", dataType="string")
+    cmds.setAttr(attr_transform + ".variantName", "rusty", type="string")
+    cmds.addAttr(attr_transform, longName="lodLevel", attributeType="enum",
+                 enumName="low:mid:high")
+    cmds.setAttr(attr_transform + ".lodLevel", 2)
+    cmds.addAttr(attr_transform, longName="offsetVec",
+                 attributeType="double3")
+    for axis in "XYZ":
+        cmds.addAttr(attr_transform, longName="offsetVec" + axis,
+                     attributeType="double", parent="offsetVec")
+    cmds.setAttr(attr_transform + ".offsetVec", 1.0, 2.0, 3.0, type="double3")
+    # Named to collide with the importer's own metadata on purpose.
+    cmds.addAttr(attr_transform, longName="ml_generated",
+                 attributeType="bool")
+    cmds.setAttr(attr_transform + ".ml_generated", False)
+    attr_shape = cmds.listRelatives(attr_transform, shapes=True,
+                                    fullPath=True)[0]
+    cmds.addAttr(attr_shape, longName="shapeTag", dataType="string")
+    cmds.setAttr(attr_shape + ".shapeTag", "onShape", type="string")
+
     # Hard and soft edges. These already survive the FBX, and the pair is the
     # point: one cube alone would pass against an export that flattened every
     # mesh to the same shading.
@@ -549,7 +577,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("25 meshes exported", payload["mesh_count"] == 25,
+    check("26 meshes exported", payload["mesh_count"] == 26,
           payload["mesh_count"])
     # Four: the locator, the empty null, the nested locator, and the group
     # holding only a curve. That last one has no mesh below it either, so
@@ -618,6 +646,34 @@ def main():
     check("a curve transform is not recorded as an empty",
           "probeCurve" not in by_transform and "probeCircle" not in
           by_transform, sorted(by_transform))
+
+    print("\nuser attributes")
+    attrs = (by_mesh.get("attrCube") or {}).get("custom_attributes") or {}
+    check("an integer attribute is carried",
+          attrs.get("assetId") == 4271, attrs.get("assetId"))
+    check("a bool keeps being a bool",
+          attrs.get("isHero") is True, attrs.get("isHero"))
+    check("a string is carried",
+          attrs.get("variantName") == "rusty", attrs.get("variantName"))
+    # An enum reads back as an integer. Indices are not stable across
+    # versions, which is why this codebase matches enums on their label.
+    check("an enum is carried as its label, not its index",
+          attrs.get("lodLevel") == "high", attrs.get("lodLevel"))
+    check("a compound keeps its three components",
+          attrs.get("offsetVec") == [1.0, 2.0, 3.0], attrs.get("offsetVec"))
+    # Maya lists a compound together with its children, so writing every name
+    # would record the same numbers four times over.
+    check("and its children are not recorded separately",
+          "offsetVecX" not in attrs, sorted(attrs))
+    check("a shape attribute comes along too",
+          attrs.get("shapeTag") == "onShape", attrs.get("shapeTag"))
+    # The exporter carries it; refusing it is the importer's job, because the
+    # collision is with Blender-side metadata.
+    check("a name colliding with the importer's own is still exported",
+          "ml_generated" in attrs, sorted(attrs))
+    check("an ordinary mesh records no attributes",
+          not ((by_mesh.get("flatCube") or {}).get("custom_attributes")),
+          (by_mesh.get("flatCube") or {}).get("custom_attributes"))
 
     print("\nselection sets and display layers")
     by_set = {item.get("set"): item

@@ -113,9 +113,9 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("25 meshes imported", result["mesh_count"] == 25,
+    check("26 meshes imported", result["mesh_count"] == 26,
           result["mesh_count"])
-    check("20 materials built", result["material_count"] == 20,
+    check("21 materials built", result["material_count"] == 21,
           result["material_count"])
     # Four of the eight cubes asked for subdivision in Maya, the displaced one
     # among them; the rest must arrive unmodified.
@@ -308,6 +308,38 @@ def main():
     check("with Maya's shutter length, in frames",
           abs(render.motion_blur_shutter - 0.75) < 1e-5,
           render.motion_blur_shutter)
+
+    print("\nuser attributes")
+    # Under their own names, so a script written against the Maya scene keeps
+    # working: obj["assetId"] on both sides.
+    attr_obj = bpy.data.objects.get("attrCube")
+    check("attrCube arrived", attr_obj is not None)
+    if attr_obj:
+        check("an integer arrived", attr_obj.get("assetId") == 4271,
+              attr_obj.get("assetId"))
+        check("a bool arrived", bool(attr_obj.get("isHero")) is True,
+              attr_obj.get("isHero"))
+        check("a string arrived", attr_obj.get("variantName") == "rusty",
+              attr_obj.get("variantName"))
+        check("an enum arrived as its label",
+              attr_obj.get("lodLevel") == "high", attr_obj.get("lodLevel"))
+        check("a compound arrived as three numbers",
+              [round(v, 3) for v in attr_obj.get("offsetVec")] == [1.0, 2.0, 3.0],
+              list(attr_obj.get("offsetVec") or []))
+        check("a shape attribute arrived too",
+              attr_obj.get("shapeTag") == "onShape", attr_obj.get("shapeTag"))
+        # The one that matters. Merge decides what it may adopt by reading
+        # ml_generated, so letting a Maya attribute overwrite it would make
+        # the importer lose track of its own objects.
+        check("a Maya attribute cannot overwrite the importer's marker",
+              attr_obj.get("ml_generated") is True,
+              attr_obj.get("ml_generated"))
+        check("and the refusal is reported",
+              any("ml_generated" in str(w) for w in result["warnings"]),
+              [w for w in result["warnings"] if "ml_" in str(w)])
+        check("the import counted the ones it applied",
+              result["custom_attribute_count"] >= 6,
+              result["custom_attribute_count"])
 
     print("\nhard and soft edges")
     # Nothing in the tool builds these; they ride the FBX. The pair is what

@@ -19,6 +19,7 @@ from .mayautils import (
     node_label,
     node_type,
     unique,
+    user_attributes,
     without_namespace,
     world_matrix,
 )
@@ -106,6 +107,7 @@ def transform_record(transform):
         "groups": group_path(transform),
         "world_matrix": world_matrix(transform),
         "visible": _visible(transform),
+        "custom_attributes": user_attributes(transform),
     }
 
 

@@ -19,6 +19,7 @@ approximation is only in the knot spacing of an unevenly parameterised curve.
 import bpy
 from mathutils import Matrix, Vector
 
+from .attributes import apply_custom_attributes
 from .constants import CURVE_FORM_OPEN
 from .scene import place_in_group
 from .transforms import maya_matrix_to_blender
@@ -88,6 +89,7 @@ def _build_curve(record, root_collection, position_scale, group_cache):
     obj["ml_maya_curve"] = record.get("curve_full_name") or name
     obj["ml_source_type"] = record.get("curve_type") or "nurbsCurve"
     obj["ml_source_degree"] = degree
+    apply_custom_attributes(obj, record, [])
 
     root_collection.objects.link(obj)
     place_in_group(obj, record, root_collection, group_cache)
