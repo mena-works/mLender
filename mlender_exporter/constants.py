@@ -198,13 +198,6 @@ RAMP_TEXTURE_TYPES = (
     "Four Corner Ramp",
     "Tartan Ramp",
 )
-# The types that are a plain one dimensional gradient, so the importer can
-# rebuild them as a Color Ramp and the bake is skipped: no file, no
-# resolution loss, and the gradient stays editable in Blender. This list is a
-# contract with the importer's component map -- adding a type here without
-# adding it there sends a gradient nothing knows how to draw.
-RAMP_TEXTURE_REBUILDABLE = ("U Ramp", "V Ramp")
-
 RAMP_TEXTURE_INTERPOLATIONS = (
     "None",
     "Linear",

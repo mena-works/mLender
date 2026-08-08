@@ -40,7 +40,6 @@ from .constants import (
     RAMP_INPUT_MODES,
     RAMP_INTERP_MODES,
     RAMP_SHADER_TYPE,
-    RAMP_TEXTURE_REBUILDABLE,
     OPENPBR_EMISSION_SEMANTIC,
     OPENPBR_SPECULAR_SEMANTIC,
     REDSHIFT_GLOSSINESS_FLAGS,
@@ -545,16 +544,16 @@ def first_channel_record(shader, attrs, bake_context=None, channel=None):
             "maya_plug": plug,
         }
         texture = texture_from_plug(plug)
-        # A plain U or V gradient is rebuilt natively, so baking it would
-        # write a file and lose resolution for a node Blender already has.
-        rebuildable = (
-            (texture or {}).get("ramp", {}).get("type")
-            in RAMP_TEXTURE_REBUILDABLE
-        )
-        if texture and not texture.get("path") and not rebuildable:
+        if texture and not texture.get("path"):
             # A connection with no file behind it: a checker, a ramp,
             # layered noise. There is nothing to reference, so bake the
             # network down to the mesh's UVs instead.
+            #
+            # A plain U or V ramp could be rebuilt natively, but Bake
+            # Procedurals is the user's choice and baking it does something
+            # the native path cannot: it applies the place2dTexture. So the
+            # option wins here, and the gradient only travels as stops when
+            # the user left baking off.
             baked = bake_channel(
                 bake_context,
                 shader,

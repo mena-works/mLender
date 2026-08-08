@@ -1170,54 +1170,19 @@ def main():
                   feeds == ["Incoming", "Normal"], feeds)
 
     print("\nramp texture")
-    ramp_tex_material = material_for("rampTexCube")
-    check("the ramp texture material exists", ramp_tex_material is not None)
-    if ramp_tex_material:
-        nodes = ramp_tex_material.node_tree.nodes
-        ramps = [n for n in nodes if n.bl_idname == "ShaderNodeValToRGB"]
-        images = [n for n in nodes if n.bl_idname == "ShaderNodeTexImage"]
-        # A Color Ramp and no image: the gradient is rebuilt, not baked.
-        check("built as a Color Ramp with no baked image",
-              len(ramps) == 1 and not images, (len(ramps), len(images)))
-        if ramps:
-            ramp = ramps[0]
-            stops = ramp.color_ramp.elements
-            check("with all three stops in order",
-                  [round(e.position, 3) for e in stops] == [0.0, 0.5, 1.0],
-                  [e.position for e in stops])
-            # Measured by baking a red-to-blue V ramp and reading the image:
-            # position 0 sits at v=0, so nothing is inverted.
-            check("position 0 is the colour Maya had at v=0",
-                  [round(v, 3) for v in stops[0].color[:3]] == [1.0, 0.0, 0.0],
-                  list(stops[0].color)[:3])
-            check("its interpolation came from the node",
-                  ramp.color_ramp.interpolation == "EASE",
-                  ramp.color_ramp.interpolation)
-            # Driven by V, not U: a V ramp read through X would run sideways.
-            source = ramp.inputs[0].links[0].from_node
-            # Not "socket": that name is a helper used all through this file,
-            # and binding it locally shadows it for the whole function.
-            component = ramp.inputs[0].links[0].from_socket.name
-            check("driven by the V component of the UV",
-                  source.bl_idname == "ShaderNodeSeparateXYZ"
-                  and component == "Y",
-                  (source.bl_idname, component))
-            feeder = source.inputs[0].links[0]
-            check("which comes from the texture coordinate UV",
-                  feeder.from_node.bl_idname == "ShaderNodeTexCoord"
-                  and feeder.from_socket.name == "UV",
-                  (feeder.from_node.bl_idname, feeder.from_socket.name))
-
-    radial_material = material_for("radialRampCube")
-    check("the circular ramp material exists", radial_material is not None)
-    if radial_material:
-        nodes = radial_material.node_tree.nodes
-        # It baked, so it arrives as an image and not as a gradient in the
-        # wrong shape.
-        check("a circular ramp arrived as its baked image",
-              any(n.bl_idname == "ShaderNodeTexImage" for n in nodes)
-              and not any(n.bl_idname == "ShaderNodeValToRGB" for n in nodes),
-              [n.bl_idname for n in nodes])
+    # Bake Procedurals is on for this package, and it is the user's choice,
+    # so both ramps arrive as their baked images. The native rebuild is
+    # asserted at the end of this file, against the unbaked package.
+    for ramp_name in ("rampTexCube", "radialRampCube"):
+        ramp_material = material_for(ramp_name)
+        check("{0} material exists".format(ramp_name),
+              ramp_material is not None)
+        if ramp_material:
+            kinds = [n.bl_idname for n in ramp_material.node_tree.nodes]
+            check("{0} arrived as its baked image".format(ramp_name),
+                  "ShaderNodeTexImage" in kinds
+                  and "ShaderNodeValToRGB" not in kinds,
+                  kinds)
 
     print("\ninstancers")
     check("the import reported one instancer",
@@ -1636,6 +1601,61 @@ def main():
     check("dome became the World environment",
           bpy.context.scene.world is not None)
     check("one dome counted", result["dome_count"] == 1, result["dome_count"])
+
+    # Last, because importing replaces the scene: everything above is read
+    # from the baked package and would be gone after this.
+    print("\nramp texture, unbaked package")
+    packages = sorted(
+        glob.glob(os.path.join(TEST_ROOT, "unbaked", "mLender_*"))
+    )
+    check("the unbaked package is there", bool(packages), TEST_ROOT)
+    if packages:
+        unbaked_result = zi.import_scene_package(packages[-1], import_scale=1.0)
+        unbaked_material = material_for("rampTexCube")
+        check("its ramp material exists", unbaked_material is not None)
+        if unbaked_material:
+            nodes = unbaked_material.node_tree.nodes
+            ramps = [n for n in nodes if n.bl_idname == "ShaderNodeValToRGB"]
+            images = [n for n in nodes if n.bl_idname == "ShaderNodeTexImage"]
+            # A Color Ramp and no image: rebuilt, not baked.
+            check("built as a Color Ramp with no image",
+                  len(ramps) == 1 and not images, (len(ramps), len(images)))
+            if ramps:
+                unbaked_ramp = ramps[0]
+                stops = unbaked_ramp.color_ramp.elements
+                check("with all three stops in order",
+                      [round(e.position, 3) for e in stops] == [0.0, 0.5, 1.0],
+                      [e.position for e in stops])
+                # Measured by baking a red-to-blue V ramp and reading the
+                # image: position 0 sits at v = 0, so nothing is inverted.
+                check("position 0 is the colour Maya had at v = 0",
+                      [round(v, 3) for v in stops[0].color[:3]]
+                      == [1.0, 0.0, 0.0],
+                      list(stops[0].color)[:3])
+                check("its interpolation came from the node",
+                      unbaked_ramp.color_ramp.interpolation == "EASE",
+                      unbaked_ramp.color_ramp.interpolation)
+                # Driven by V, not U: read through X it would run sideways.
+                driver = unbaked_ramp.inputs[0].links[0].from_node
+                # Not "socket": that name is a helper used throughout this
+                # file, and binding it locally shadows it for the whole
+                # function.
+                component = unbaked_ramp.inputs[0].links[0].from_socket.name
+                check("driven by the V component of the UV",
+                      driver.bl_idname == "ShaderNodeSeparateXYZ"
+                      and component == "Y",
+                      (driver.bl_idname, component))
+                feeder = driver.inputs[0].links[0]
+                check("which comes from the texture coordinate UV",
+                      feeder.from_node.bl_idname == "ShaderNodeTexCoord"
+                      and feeder.from_socket.name == "UV",
+                      (feeder.from_node.bl_idname, feeder.from_socket.name))
+        # A shape one Color Ramp cannot make must say so rather than arrive
+        # as a gradient in the wrong shape.
+        check("a circular ramp is refused with a warning",
+              any("Circular Ramp" in item
+                  for item in unbaked_result["warnings"]),
+              [w for w in unbaked_result["warnings"] if "Ramp" in w])
 
     print()
     if failures:

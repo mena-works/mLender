@@ -460,20 +460,27 @@ artist's intent, which a pinned value did not.
 A `ramp` texture node is a different thing from a `rampShader`: a gradient
 wired into any channel of any shader.
 
-A **U Ramp** or **V Ramp** is rebuilt natively as a Color Ramp driven by that
-UV component, and is **not baked** — no extra file, no resolution loss, and it
-stays editable in Blender. The direction was measured by baking a red-to-blue
-ramp through the tool's own bake path and reading the image: position 0 sits
-at `v = 0` for a V Ramp and `u = 0` for a U Ramp, so neither is inverted.
+**Bake Procedurals decides.** With it on, a ramp is baked like any other
+fileless network — that is what the option is for, and baking is the only path
+that applies the ramp's `place2dTexture`.
+
+With it off, a **U Ramp** or **V Ramp** is rebuilt natively as a Color Ramp
+driven by that UV component: no extra file, no resolution loss, and the
+gradient stays editable in Blender. Before this it simply collapsed to the
+ramp's first colour with nothing said.
+
+The direction was measured by baking a red-to-blue ramp through the tool's own
+bake path and reading the image: position 0 sits at `v = 0` for a V Ramp and
+`u = 0` for a U Ramp, so neither is inverted.
 
 Maya keeps one interpolation on the node here, unlike a rampShader's per-stop
 one. `None`, `Linear` and `Smooth` have Color Ramp equivalents; `Exponential
 Up`, `Exponential Down`, `Bump` and `Spike` do not and fall back to linear.
 
 The other seven types — Diagonal, Radial, Circular, Box, UV, Four Corner and
-Tartan — are shapes one Color Ramp cannot make. They keep going through
-**Bake Procedurals**, which is what that option is for. With baking off they
-arrive as a flat colour and now say so:
+Tartan — are shapes one Color Ramp cannot make, so **Bake Procedurals** is the
+only way they travel. With baking off they arrive as a flat colour and now say
+so:
 
 ```text
 mLender warning: Maya ramp texture "radialRampTex" is a Circular Ramp, which

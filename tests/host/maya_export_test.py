@@ -1675,15 +1675,45 @@ def main():
           (ramp_channels.get("roughness") or {}).get("value"))
 
     print("\nramp texture")
-    tex_record = (
-        (by_material.get("rampTexCube_shd") or {}).get("channels", {})
-        .get("base_color") or {}
-    ).get("texture") or {}
+
+    def base_texture(payload_by_material, material):
+        return (
+            (payload_by_material.get(material) or {}).get("channels", {})
+            .get("base_color") or {}
+        ).get("texture") or {}
+
+    # Bake Procedurals is on for this export, and it is the user's choice, so
+    # it wins: baking a ramp also applies its place2dTexture, which the
+    # native rebuild cannot.
+    tex_record = base_texture(by_material, "rampTexCube_shd")
+    check("with baking on, a V ramp is baked like any other procedural",
+          tex_record.get("baked") is True, tex_record.get("baked"))
+    radial = base_texture(by_material, "radialRampCube_shd")
+    check("and so is a circular one", radial.get("baked") is True,
+          radial.get("baked"))
+
+    # With baking off there is nothing to reference, and this is where the
+    # gradient itself has to travel. Its own folder, so the package the
+    # Blender import test reads from is left alone.
+    unbaked_result = za.export_scene(
+        os.path.join(OUT, "unbaked"), bake_procedurals=False
+    )
+    with open(unbaked_result["json_path"], "r") as handle:
+        unbaked_payload = json.load(handle)
+    unbaked_by_material = {}
+    for mesh in unbaked_payload["meshes"]:
+        for material in mesh.get("materials") or []:
+            unbaked_by_material[material["material"]] = material
+
+    tex_record = base_texture(unbaked_by_material, "rampTexCube_shd")
     tex_ramp = tex_record.get("ramp") or {}
     tex_entries = tex_ramp.get("entries") or []
-    # A ramp texture has no file, so the record is still "unsupported"; what
-    # changed is that the gradient now travels with it.
-    check("the ramp texture is still reported as unresolvable",
+    check("with baking off it is not baked",
+          not tex_record.get("baked") and not (tex_record.get("path") or ""),
+          (tex_record.get("baked"), tex_record.get("path")))
+    # The record stays marked unresolvable; what changed is that the stops
+    # now come with it instead of the channel collapsing to one colour.
+    check("and is still reported as unresolvable",
           tex_record.get("unsupported_network") is True,
           tex_record.get("unsupported_network"))
     check("but its gradient travels", len(tex_entries) == 3, len(tex_entries))
@@ -1702,20 +1732,12 @@ def main():
     check("and its single interpolation",
           tex_ramp.get("interpolation") == "Smooth",
           tex_ramp.get("interpolation"))
-
-    radial = (
-        (by_material.get("radialRampCube_shd") or {}).get("channels", {})
-        .get("base_color") or {}
-    ).get("texture") or {}
-    # A shape one Color Ramp cannot make still goes through the bake, which
-    # is the point of only skipping it for the plain gradients.
-    check("a circular ramp is baked instead of sent as a gradient",
-          radial.get("baked") is True and not radial.get("ramp"),
-          (radial.get("baked"), bool(radial.get("ramp"))))
-    check("and the V ramp was not baked at all",
-          not tex_record.get("baked")
-          and not (tex_record.get("path") or ""),
-          (tex_record.get("baked"), tex_record.get("path")))
+    # A circular ramp travels the same way; the importer is the one that
+    # knows it cannot draw it, and says so.
+    unbaked_radial = base_texture(unbaked_by_material, "radialRampCube_shd")
+    check("a circular ramp travels too, for the importer to refuse",
+          (unbaked_radial.get("ramp") or {}).get("type") == "Circular Ramp",
+          (unbaked_radial.get("ramp") or {}).get("type"))
 
     print("\ninstancers")
     instancers = payload.get("instancers") or []
