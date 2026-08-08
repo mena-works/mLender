@@ -1069,6 +1069,30 @@ by FBX import order, so the name is the same every time a package is re-sent.
 The instances are counted on the panel's status line, and each linked object
 records `ml_instance_of`.
 
+### Referenced assets
+
+Two references of one asset are the hardest naming case in Maya: both meshes
+are called `body`, both sit in a group called `assetGrp`, and both use a
+material called `assetShader`. The namespace is the only thing that separates
+them, and stripping it left a scene of `body`, `body.001`, `body.002` with no
+way to say which reference any of them came from.
+
+The namespace is treated as part of the identity now:
+
+- **The group trail leads with it**, so each reference becomes its own
+  collection subtree. This also gives the same-name tie-break something to
+  work with — without it two references share a trail as well as a name.
+- **A name keeps its namespace only when it would otherwise collide.** A scene
+  with one reference keeps clean short names; only the clashing ones become
+  `heroA:body` and `heroB:body`.
+
+Materials were already safe, being cached on their full name.
+
+An FBX-brought group empty is placed in its collection when there is one
+candidate and left alone when there are several: two references give two
+collections whose last segment is `assetGrp`, and nothing in the empty's name
+says which one it belongs to, so putting it in either would be a guess.
+
 ### Meshes with the same name
 
 Two meshes under different groups sharing a short name (`|setA|twin` and

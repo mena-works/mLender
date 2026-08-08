@@ -42,6 +42,21 @@ def without_namespace(value):
     return str(value or "").rsplit(":", 1)[-1]
 
 
+def namespace_of(value):
+    """The namespace a node sits in, or an empty string.
+
+    A referenced asset carries its namespace as the only thing telling it
+    apart from another reference of the same file: two references of one asset
+    give two meshes both called ``body``, in groups both called ``assetGrp``.
+    Stripping it left a scene of ``body.001``, ``body.002`` and no way to say
+    which reference any of them came from.
+    """
+    tail = str(value or "").split("|")[-1]
+    if ":" not in tail:
+        return ""
+    return tail.rsplit(":", 1)[0]
+
+
 def unique(items):
     """Order preserving de-duplication."""
     result = []

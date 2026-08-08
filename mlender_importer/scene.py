@@ -175,6 +175,27 @@ def place_in_group(obj, record, root, cache):
     return True
 
 
+def _collection_for_group_empty(obj, group_cache):
+    """The collection mirroring this group, when there is only one candidate.
+
+    Cache keys are the whole trail, so a referenced asset's group is keyed
+    "heroA/assetGrp" while the FBX brings the empty back as plain "assetGrp".
+    Matching on the last segment finds it again -- but two references of one
+    asset give two collections with the same last segment, and there is
+    nothing in the empty's name to say which reference it belongs to. Placing
+    it in either would be a guess, so it stays where it is.
+    """
+    name = safe_name(obj.name)
+    exact = group_cache.get(name)
+    if exact is not None:
+        return exact
+    matches = [
+        collection for key, collection in group_cache.items()
+        if key.rsplit("/", 1)[-1] == name
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
 def place_group_empties(imported_objects, group_cache):
     """Move an FBX-brought group empty into the collection that mirrors it.
 
@@ -191,7 +212,7 @@ def place_group_empties(imported_objects, group_cache):
     for obj in imported_objects:
         if obj.type != "EMPTY":
             continue
-        collection = group_cache.get(safe_name(obj.name))
+        collection = _collection_for_group_empty(obj, group_cache)
         if collection is None or collection in obj.users_collection:
             continue
         for current in list(obj.users_collection):

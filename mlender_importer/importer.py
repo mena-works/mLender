@@ -179,8 +179,16 @@ def import_scene_package(
             item for item in imported_objects if id(item) not in retired
         ]
 
+    # Only what the FBX left mangled. A mesh that matched a record already
+    # carries the name the record asked for, and for a referenced asset
+    # that name deliberately keeps its namespace: two references of one
+    # asset are both "body" without it, and stripping it here undid the
+    # only thing telling them apart.
+    named_from_record = {id(obj) for obj, _record in matched_meshes}
     namespace_prefixes = package_namespace_prefixes(package_data)
     for obj in imported_objects:
+        if id(obj) in named_from_record:
+            continue
         remove_object_namespace(obj, namespace_prefixes)
 
     # Locators and empty nulls, which the FBX never carried. Built after

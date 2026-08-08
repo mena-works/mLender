@@ -150,6 +150,14 @@ def export_scene(
         layer_list = display_layer_records(
             scene_display_layers(), exported_paths
         )
+        # Referenced assets repeat their names, so the ones that clash keep
+        # their namespace rather than arriving as body.001.
+        disambiguate_names(mesh_records, "mesh", "mesh_full_name")
+        disambiguate_names(curve_list, "curve", "curve_full_name")
+        disambiguate_names(volume_list, "volume", "volume_full_name")
+        disambiguate_names(
+            transform_list, "transform", "transform_full_name"
+        )
         light_shapes = scene_light_shapes()
         camera_shapes = scene_camera_shapes()
         light_records = [light_record(shape) for shape in light_shapes]
@@ -247,6 +255,29 @@ def export_scene(
         "animated": animation["enabled"],
         "warnings": warnings,
     }
+
+
+def disambiguate_names(records, name_key, full_key):
+    """Keep the namespace on names that would otherwise collide.
+
+    A single referenced asset keeps clean short names. Two references of
+    the same asset would both be "body", so both become "heroA:body" and
+    "heroB:body" instead -- otherwise Blender numbers them body.001 and
+    nothing says which reference either came from.
+
+    Only the colliding ones change, so the common scene is untouched.
+    """
+    seen = {}
+    for record in records:
+        seen.setdefault(record.get(name_key), []).append(record)
+    for name, group in seen.items():
+        if len(group) < 2:
+            continue
+        for record in group:
+            full = str(record.get(full_key) or "")
+            if ":" in full:
+                record[name_key] = full
+    return records
 
 
 def _apply_light_linking(light_records, light_shapes, mesh_records):

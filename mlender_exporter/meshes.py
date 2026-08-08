@@ -42,6 +42,7 @@ from .mayautils import (
     parent_of,
     parents_of,
     plug_value,
+    namespace_of,
     unique,
     user_attributes,
     without_namespace,
@@ -196,9 +197,17 @@ def group_path(transform):
 
     The mesh's own transform is the last element of the path and is excluded;
     the result is the folder trail, which the importer mirrors as collections.
+
+    A referenced node's namespace leads the trail. Two references of one
+    asset otherwise give two meshes with the same short name in groups with
+    the same short name, which leaves nothing to tell them apart -- not even
+    the group trail the same-name tie-break relies on.
     """
     parts = [part for part in str(transform or "").split("|") if part]
     groups = []
+    namespace = namespace_of(transform)
+    if namespace:
+        groups.append(namespace)
     path = ""
     for part in parts[:-1]:
         path = path + "|" + part

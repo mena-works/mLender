@@ -67,6 +67,19 @@ ağaçlarına, ışık data'sına assert eder. Önce 2. adımı çalıştır.
 Birden fazla Blender sürümünde çalıştırmak sürüm uyum kodunu sınar; bu araç
 3.6'dan 5.2'ye kadar iddia ediyor.
 
+## Referanslı sahne (gerçek Maya + gerçek Blender, ~1 dk)
+
+```bash
+"C:\Program Files\Autodesk\Maya2023in\mayapy.exe" tests/host/maya_reference_test.py
+"C:\Program Files\Blender Foundation\Blender 5.2lender.exe" ^
+    --background --factory-startup --python tests/host/blender_reference_test.py
+```
+
+Referans, referanslanabilmek için önce diskte bir dosya olmak zorunda; bu
+yüzden ayrı bir test. Bir asset kurar, kaydeder, aynı dosyayı iki namespace
+ile referanslar. Diğer testlerin ulaşamadığı durum bu: iki mesh de `body`, iki
+grup da `assetGrp`, iki materyal de `assetShader`. Ayıran tek şey namespace.
+
 ## Import modları (gerçek Blender, ~40 sn)
 
 ```bash
