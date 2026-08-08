@@ -113,9 +113,9 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("39 meshes imported", result["mesh_count"] == 39,
+    check("40 meshes imported", result["mesh_count"] == 40,
           result["mesh_count"])
-    check("31 materials built", result["material_count"] == 31,
+    check("32 materials built", result["material_count"] == 32,
           result["material_count"])
     # Four of the eight cubes asked for subdivision in Maya, the displaced one
     # among them; the rest must arrive unmodified.
@@ -1751,6 +1751,25 @@ def main():
                   any(n.bl_idname == "ShaderNodeSeparateXYZ" for n in nodes)
                   and any(n.bl_idname == "ShaderNodeCombineXYZ"
                           for n in nodes))
+
+        # Cylindrical sweeps a half turn, so its image wraps where a
+        # planar one clamps. Measured: EXTEND scored 0.22 and REPEAT 0.02.
+        cylindrical = material_for("cylProjCube")
+        check("the cylindrical material exists", cylindrical is not None)
+        if cylindrical:
+            nodes = cylindrical.node_tree.nodes
+            image = next((n for n in nodes
+                          if n.bl_idname == "ShaderNodeTexImage"), None)
+            check("its image wraps rather than clamping",
+                  image is not None and image.extension == "REPEAT",
+                  getattr(image, "extension", None))
+            operations = [n.operation for n in nodes
+                          if n.bl_idname == "ShaderNodeMath"]
+            # An angle for u and a plain height for v: no arcsine, which is
+            # what separates this from the spherical chain.
+            check("built from an angle and a height, not a latitude",
+                  "ARCTAN2" in operations and "ARCSINE" not in operations,
+                  sorted(set(operations)))
 
         # A type this build does not reproduce must say so.
         check("a Ball projection is refused with a warning",

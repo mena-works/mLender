@@ -64,11 +64,46 @@ görüntüyle `atan2(x,z)` ile aynadaki eşi `atan2(x,-z)` **0.0216'ya karşı
 geçilince kazanan 0.0189, ikincisi 0.1229 oldu ve seçim kesinleşti. Üstelik
 kazanan, dört çeyreğin işaret ettiğinin **tersi** çıktı.
 
-Cylindrical aynı yöntemle tarandı, en iyi 0.248'de kaldı ve ilk dört aday
-0.001 içinde toplandı — yani hiçbiri doğru değil. `projection` node'unda
-`uAngle = 180` ve `vAngle = 90` var; spherical'da bu tam tur demek ve
-formülü doğruluyor, cylindrical'ın dikey ölçeği ise bunlarla açıklanamadı.
-Devam edecek olan için iz burada.
+## Formülü tahmin etmeyi bırakmak
+
+Cylindrical bu aramayla çözülmedi: en iyi aday 0.248'de kaldı ve ilk dördü
+0.001 içinde toplandı, yani arama yanlış yerde geziyordu.
+
+Yöntem değiştirildi. Formül denemek yerine **Maya'nın u,v'si doğrudan
+okundu**: u'yu kırmızıya, v'yi yeşile kodlayan bir görüntü projekte edilip
+bake edildi, böylece her yüzey noktası Maya'nın kendisi için hesapladığı
+çifti bildirdi. Aynı noktaların yerleştirme-yerel koordinatları Blender'da
+bakelendi ve ikisi yan yana kondu.
+
+Tablo okununca formüller çıktı:
+
+| tip | u | v |
+|---|---|---|
+| Spherical | `0.5 + atan2(x, z) / 2π` | `0.5 + asin(y/\|p\|) / π` |
+| Cylindrical | `0.5 + atan2(x, z) / π` | `0.5 + y / 2` |
+
+Cylindrical'ın u'su spherical'ınkinin **tam iki katı eksi yarım** — beş
+örnekte de tutuyor (0.285→0.067, 0.583→0.663, 0.981→0.459). Yani görüntü
+360° değil **180°** sarıyor. `uAngle = 180` bu; spherical'da aynı sayı tam
+tur anlamına geliyor.
+
+## Uzatma davranışı tipe göre değişiyor
+
+| tip | EXTEND | REPEAT | CLIP |
+|---|---|---|---|
+| Planar | **0.028** | 0.504 | 0.362 |
+| Cylindrical | 0.219 | **0.020** | 0.278 |
+
+Planar kenarında sabitliyor; cylindrical'ın yarım turu nesneyi iki kez
+dolaştığı için sarıyor. Tek kural ikisine de uygulanırsa hangisi olursa
+olsun 0.2 kaybediliyor.
+
+## Kalanlar
+
+Cubic, TriPlanar, Ball, Concentric ve Perspective için u,v tablosu da
+okundu ama tek bir kapalı formüle oturmadı — Cubic yüzeye göre yüz seçiyor,
+Ball bir yansıma küresi eşlemesi. Bunlar bake'e bırakıldı; okunmuş u,v
+tablosu elde olduğu için devam edecek olanın başlangıç noktası hazır.
 
 Planar'ın 0.028'i sıfır değil çünkü bake küre dikişinde filtreleme yapıyor;
 eşleme hatası değil.

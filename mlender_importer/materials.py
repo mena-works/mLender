@@ -35,7 +35,8 @@ from .constants import (
     SHEEN_ROUGHNESS_REMAP,
     GLASS_INPUTS,
     PRINCIPLED_INPUTS,
-    PROJECTION_EXTENSION,
+    PROJECTION_DEFAULT_EXTENSION,
+    PROJECTION_EXTENSIONS,
     PROJECTION_MAPPING_OFFSET,
     PROJECTION_MAPPING_ROTATION,
     PROJECTION_MODES,
@@ -821,10 +822,12 @@ def build_projection(material, texture, warnings):
     node.label = "Maya {0} Projection".format(kind)
     node.image = image
     node.projection = PROJECTION_MODES[kind]
-    # Maya clamps a projection at its extent; it does not tile. Measured on
-    # a sphere wider than the projection: Blender's default REPEAT scored
-    # 0.50 against Maya's bake, CLIP 0.36 and EXTEND 0.03.
-    node.extension = PROJECTION_EXTENSION
+    # Per type, and measured for each: a planar projection clamps at its
+    # extent while a cylindrical one wraps, because its half turn goes round
+    # the object twice. Using one rule for both costs 0.2 either way.
+    node.extension = PROJECTION_EXTENSIONS.get(
+        kind, PROJECTION_DEFAULT_EXTENSION
+    )
     node.location = (-500, 0)
 
     empty = _placement_empty(projection)
@@ -847,6 +850,8 @@ def build_projection(material, texture, warnings):
 
     if kind == "Spherical":
         vector = _spherical_vector(material, mapping.outputs["Vector"])
+    elif kind == "Cylindrical":
+        vector = _cylindrical_vector(material, mapping.outputs["Vector"])
     else:
         vector = mapping.outputs["Vector"]
     links.new(vector, node.inputs["Vector"])
@@ -890,6 +895,44 @@ def _spherical_vector(material, vector_socket):
     latitude = _math(material, "ARCSINE", (-360, -160), sine)
     half = _math(material, "DIVIDE", (-260, -160), latitude, None, math.pi)
     v = _math(material, "ADD", (-160, -160), half, None, 0.5)
+
+    combine = nodes.new("ShaderNodeCombineXYZ")
+    combine.name = "ML_Projection_UV"
+    combine.location = (-60, 0)
+    links.new(u, combine.inputs["X"])
+    links.new(v, combine.inputs["Y"])
+    return combine.outputs[0]
+
+
+def _cylindrical_vector(material, vector_socket):
+    """An angle around the placement's Y, and the height straight up it.
+
+    Read off Maya rather than guessed at: an image encoding u in red and v in
+    green was projected and baked, so every surface point reported the pair
+    Maya had computed for it. Against the placement-local coordinates of the
+    same points, v is ``y / 2 + 0.5`` exactly, and u is twice the spherical
+    longitude less a half -- that is, the image wraps over a **half** turn
+    rather than a whole one, which is why the sweep divides by pi.
+
+    Guessing a full turn scored 0.30 against Maya's bake and the half turn
+    scores 0.02.
+    """
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+
+    separate = nodes.new("ShaderNodeSeparateXYZ")
+    separate.name = "ML_Projection_Axes"
+    separate.location = (-700, 0)
+    links.new(vector_socket, separate.inputs[0])
+
+    longitude = _math(material, "ARCTAN2", (-520, 80),
+                      separate.outputs["X"], separate.outputs["Z"])
+    swept = _math(material, "DIVIDE", (-360, 80), longitude, None, math.pi)
+    u = _math(material, "ADD", (-200, 80), swept, None, 0.5)
+
+    half = _math(material, "MULTIPLY", (-360, -160),
+                 separate.outputs["Y"], None, 0.5)
+    v = _math(material, "ADD", (-200, -160), half, None, 0.5)
 
     combine = nodes.new("ShaderNodeCombineXYZ")
     combine.name = "ML_Projection_UV"

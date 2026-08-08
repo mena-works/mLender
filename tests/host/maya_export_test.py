@@ -304,6 +304,19 @@ def build_scene():
                      sph + ".placementMatrix", force=True)
     cmds.connectAttr(sph + ".outColor", sph_shd + ".baseColor", force=True)
 
+    # Cylindrical, whose sweep is a half turn rather than a whole one.
+    _, cyl_shd = shaded_cube("cylProjCube", "aiStandardSurface")
+    cyl = cmds.shadingNode("projection", asTexture=True, name="cylProjection")
+    cmds.setAttr(cyl + ".projType", 3)                 # Cylindrical
+    cyl_file = cmds.shadingNode("file", asTexture=True, name="cylFile")
+    cmds.setAttr(cyl_file + ".fileTextureName", texture, type="string")
+    cmds.connectAttr(cyl_file + ".outColor", cyl + ".image", force=True)
+    cyl_place = cmds.shadingNode("place3dTexture", asUtility=True,
+                                 name="cylPlacement")
+    cmds.connectAttr(cyl_place + ".worldInverseMatrix[0]",
+                     cyl + ".placementMatrix", force=True)
+    cmds.connectAttr(cyl + ".outColor", cyl_shd + ".baseColor", force=True)
+
     # And a projection type this build does not reproduce, which must say so.
     _, ball_shd = shaded_cube("ballProjCube", "aiStandardSurface")
     ball = cmds.shadingNode("projection", asTexture=True, name="ballProjection")
@@ -837,7 +850,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("39 meshes exported", payload["mesh_count"] == 39,
+    check("40 meshes exported", payload["mesh_count"] == 40,
           payload["mesh_count"])
     # Four: the locator, the empty null, the nested locator, and the group
     # holding only a curve. That last one has no mesh below it either, so
@@ -1819,6 +1832,11 @@ def main():
                 .get("projection") or {})
     check("a Spherical projection travels with its type",
           sph_proj.get("type") == "Spherical", sph_proj.get("type"))
+
+    cyl_proj = (base_texture(unbaked_by_material, "cylProjCube_shd")
+                .get("projection") or {})
+    check("a Cylindrical projection travels with its type",
+          cyl_proj.get("type") == "Cylindrical", cyl_proj.get("type"))
 
     ball_proj = (base_texture(unbaked_by_material, "ballProjCube_shd")
                  .get("projection") or {})

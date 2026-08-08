@@ -495,8 +495,8 @@ compared against a candidate Blender node tree baked into the same UV space
 |---|---|---|---|
 | Planar | `FLAT` | **0.028** | matches |
 | Spherical | Math nodes | **0.019** | matches |
+| Cylindrical | Math nodes | **0.020** | matches |
 | Ball | `SPHERE` | 0.107 | no |
-| Cylindrical | `TUBE` | 0.415 | no |
 | Cubic | `BOX` | 0.412 | no |
 | TriPlanar | `BOX` | 0.412 | no |
 | Concentric | — | — | no equivalent |
@@ -512,6 +512,15 @@ Establishing that needed the reference image to be changed. Against four
 coloured quadrants the winner and its mirror scored 0.0216 and 0.0217, which
 is a coin toss, and the coin came down on the wrong side; against a sixteen
 cell grid it is 0.019 against 0.123.
+
+**Cylindrical** is `u = 0.5 + atan2(x, z) / π` and `v = 0.5 + y / 2`: its
+image sweeps a **half** turn, not a whole one, which is the piece guessing
+kept missing. It also wraps where a planar projection clamps — measured,
+`REPEAT` 0.02 against `EXTEND` 0.22 — so the extension is per type.
+
+Both formulas were read off Maya rather than guessed at, by projecting an
+image that encodes u in red and v in green and baking it: every surface
+point then reports the pair Maya computed for it.
 
 The rest still need the bake, and say so:
 

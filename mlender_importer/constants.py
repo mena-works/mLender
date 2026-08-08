@@ -8,7 +8,7 @@ message shape changes.
 
 import math
 
-BUILD_VERSION = "2.21.0"
+BUILD_VERSION = "2.22.0"
 
 LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
@@ -49,12 +49,20 @@ RAMP_INTERPOLATION = {
 PROJECTION_MODES = {
     "Planar": "FLAT",
     "Spherical": "FLAT",
+    "Cylindrical": "FLAT",
 }
 
-# Maya clamps a projection at its extent rather than tiling it. Measured on
-# a sphere wider than the projection, against Maya's own bake: Blender's
-# default REPEAT scored 0.50, CLIP 0.36 and EXTEND 0.03.
-PROJECTION_EXTENSION = "EXTEND"
+# How the image behaves outside the projection, which is not the same for
+# every type and was measured for each. A planar projection clamps at its
+# extent: REPEAT scored 0.50 against Maya's bake, CLIP 0.36, EXTEND 0.03. A
+# cylindrical one wraps, because its half turn goes round the object twice:
+# EXTEND scored 0.22 and REPEAT 0.02.
+PROJECTION_EXTENSIONS = {
+    "Planar": "EXTEND",
+    "Spherical": "EXTEND",
+    "Cylindrical": "REPEAT",
+}
+PROJECTION_DEFAULT_EXTENSION = "EXTEND"
 
 # Measured with the tool's own bake as ground truth. Maya's planar projection
 # covers the placement's local -0.5..0.5 with u along +X and v along +Y, so
