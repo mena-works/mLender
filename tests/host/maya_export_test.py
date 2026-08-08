@@ -210,6 +210,21 @@ def build_scene():
     instance_copy = cmds.duplicate(instance_source, name="instCopy")[0]
     cmds.setAttr(instance_copy + ".translateX", 12)
 
+    # Transforms carrying no geometry. None of these ride the FBX: it only
+    # carries what sits above an exported mesh, so on their own they used to
+    # vanish. The mesh parented under another mesh is the control — that one
+    # the FBX does carry, and it must keep its parent.
+    probe_locator = cmds.spaceLocator(name="probeLocator")[0]
+    cmds.setAttr(probe_locator + ".translateY", 7)
+    control_group = cmds.group(empty=True, name="controlGroup")
+    nested_locator = cmds.spaceLocator(name="nestedLocator")[0]
+    cmds.parent(nested_locator, control_group)
+
+    parent_mesh, _ = shaded_cube("parentMesh", "aiStandardSurface")
+    child_mesh, _ = shaded_cube("childMesh", "aiStandardSurface")
+    cmds.parent(child_mesh, parent_mesh)
+    cmds.setAttr(parent_mesh + "|childMesh.translateY", 3)
+
     # Values deliberately outside the ranges the rest of the scene uses. The
     # emission clamp bug survived every test because nothing ever asked for a
     # value on the far side of a limit, so this cube does nothing else.
@@ -466,8 +481,10 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("20 meshes exported", payload["mesh_count"] == 20,
+    check("22 meshes exported", payload["mesh_count"] == 22,
           payload["mesh_count"])
+    check("3 geometry-free transforms exported",
+          payload["transform_count"] == 3, payload["transform_count"])
 
     print("\ninstances")
     # An instanced shape hangs under several transforms. Reading only the
@@ -491,6 +508,41 @@ def main():
     check("each instance keeps its own transform",
           len({(by_mesh.get(n) or {}).get("mesh_path")
                for n in ("instSource", "instA", "instB")}) == 3)
+
+    print("\ntransforms with no geometry")
+    by_transform = {
+        item.get("transform"): item
+        for item in (payload.get("transforms") or [])
+    }
+    for name in ("probeLocator", "controlGroup", "nestedLocator"):
+        check("{0} was recorded".format(name), name in by_transform,
+              sorted(by_transform))
+    check("a locator is recorded as one",
+          (by_transform.get("probeLocator") or {}).get("transform_type")
+          == "locator",
+          (by_transform.get("probeLocator") or {}).get("transform_type"))
+    check("an empty null is recorded as a group",
+          (by_transform.get("controlGroup") or {}).get("transform_type")
+          == "group")
+    check("a nested locator keeps its parent",
+          (by_transform.get("nestedLocator") or {}).get("parent_path", "")
+          .endswith("controlGroup"),
+          (by_transform.get("nestedLocator") or {}).get("parent_path"))
+    check("and its group trail",
+          (by_transform.get("nestedLocator") or {}).get("groups")
+          == ["controlGroup"],
+          (by_transform.get("nestedLocator") or {}).get("groups"))
+    # The world matrix is what places it; a locator 7 units up in Maya has
+    # that in the translation row.
+    matrix = (by_transform.get("probeLocator") or {}).get("world_matrix") or []
+    check("the world matrix carries the position",
+          len(matrix) == 16 and abs(matrix[13] - 7.0) < 1e-4,
+          matrix[12:15] if len(matrix) == 16 else matrix)
+    # A transform with a mesh under it already rides the FBX. Recording it
+    # here as well would build two Blender objects for one Maya node.
+    check("a group holding meshes is not recorded twice",
+          "setDressing" not in by_transform and "parentMesh" not in
+          by_transform, sorted(by_transform))
 
     print("\naiStandardSurface")
     std = channels("stdSurfCube")

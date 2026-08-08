@@ -10,6 +10,7 @@ import bpy
 
 from .constants import SUPPORTED_SCHEMA_VERSIONS
 from .cameras import import_cameras
+from .empties import import_empties
 from .fbx import import_fbx, read_package_json, resolve_fbx_path
 from .animation import apply_scene_range
 from .colormanagement import apply_color_management
@@ -21,6 +22,7 @@ from .scene import (
     build_record_index,
     clear_scene_and_purge,
     find_mesh_record,
+    place_group_empties,
     link_instance_duplicates,
     organize_imported_objects,
     place_in_group,
@@ -130,6 +132,26 @@ def import_scene_package(
     for obj in imported_objects:
         remove_object_namespace(obj, namespace_prefixes)
 
+    # Locators and empty nulls, which the FBX never carried. Built after
+    # the meshes so a locator parented under one finds it, and sharing the
+    # group cache so both land in the same collections.
+    object_by_path = {
+        record.get("mesh_path"): obj
+        for obj, record in matched_meshes if record.get("mesh_path")
+    }
+    empty_result = import_empties(
+        package_data,
+        root_collection,
+        import_scale,
+        warnings,
+        group_cache,
+        object_by_path,
+    )
+
+    # Runs after the empties so both kinds of group transform, the ones the
+    # FBX brought and the ones the JSON did, end up in the same place.
+    place_group_empties(imported_objects, group_cache)
+
     # Only meshes that matched a Maya record can say whether they want to be
     # subdivided, so unmatched objects are deliberately left alone.
     subdivision_count = add_subdivision_modifiers(matched_meshes, warnings)
@@ -176,6 +198,7 @@ def import_scene_package(
         "grouped_mesh_count": grouped_count,
         "subdivision_count": subdivision_count,
         "instanced_count": instanced_count,
+        "transform_count": empty_result["transform_count"],
         "light_count": light_result["light_count"],
         "light_object_count": light_result["object_count"],
         "dome_count": light_result["dome_count"],

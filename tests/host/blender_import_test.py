@@ -113,9 +113,9 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("20 meshes imported", result["mesh_count"] == 20,
+    check("22 meshes imported", result["mesh_count"] == 22,
           result["mesh_count"])
-    check("15 materials built", result["material_count"] == 15,
+    check("17 materials built", result["material_count"] == 17,
           result["material_count"])
     # Four of the eight cubes asked for subdivision in Maya, the displaced one
     # among them; the rest must arrive unmodified.
@@ -165,8 +165,8 @@ def main():
           ungrouped is not None
           and scene_collections(ungrouped) == [result["root_collection"]],
           [c.name for c in ungrouped.users_collection] if ungrouped else None)
-    check("four collections were reported",
-          result["group_collection_count"] == 4,
+    check("five collections were reported",
+          result["group_collection_count"] == 5,
           result["group_collection_count"])
 
     print("\ninstances")
@@ -196,6 +196,50 @@ def main():
         check("each instance kept its own transform", len(set(xs)) == 4, xs)
         check("the import reported the instances",
               result["instanced_count"] == 2, result["instanced_count"])
+
+    print("\ntransforms with no geometry")
+    # None of these ride the FBX, so before they were exported they simply
+    # were not here. The mesh under a mesh is the control: that one the FBX
+    # does carry, and its parent must survive.
+    locator = bpy.data.objects.get("probeLocator")
+    control_group = bpy.data.objects.get("controlGroup")
+    nested = bpy.data.objects.get("nestedLocator")
+    child_mesh = bpy.data.objects.get("childMesh")
+    parent_mesh = bpy.data.objects.get("parentMesh")
+    for name, obj in (("probeLocator", locator), ("controlGroup", control_group),
+                      ("nestedLocator", nested)):
+        check("{0} arrived".format(name), obj is not None)
+        if obj is not None:
+            check("{0} is an empty".format(name), obj.type == "EMPTY", obj.type)
+    check("the import reported them", result["transform_count"] == 3,
+          result["transform_count"])
+    if locator:
+        # Maya Y becomes Blender Z, and the scene is in centimetres, so 7
+        # units up is 0.07 m. Passing the raw import scale instead of the unit
+        # conversion put it a hundred times too far out.
+        z = locator.matrix_world.translation.z
+        check("a locator lands where Maya had it", abs(z - 0.07) < 1e-4, z)
+    if nested and control_group:
+        check("a nested locator keeps its parent",
+              nested.parent is control_group,
+              nested.parent.name if nested.parent else None)
+        # The group's own empty belongs with its contents, not beside them.
+        names = {c.name for c in nested.users_collection}
+        check("and shares its group's collection",
+              names == {c.name for c in control_group.users_collection}
+              and "controlGroup" in names, sorted(names))
+    if child_mesh and parent_mesh:
+        check("a mesh parented under a mesh keeps its parent",
+              child_mesh.parent is parent_mesh,
+              child_mesh.parent.name if child_mesh.parent else None)
+    # An FBX-brought group empty must land in its collection too, or the
+    # outliner shows the control at the root and its contents a level down.
+    set_dressing_empty = bpy.data.objects.get("setDressing")
+    if set_dressing_empty:
+        check("an FBX group empty sits in its own collection",
+              "setDressing" in {c.name
+                                for c in set_dressing_empty.users_collection},
+              [c.name for c in set_dressing_empty.users_collection])
 
     print("\nvalues outside the usual range")
     # The emission clamp survived every test because nothing ever asked for a
@@ -238,18 +282,24 @@ def main():
     # silent swap would happen. They sit at opposite x, so a swap is visible.
     set_a = bpy.data.collections.get("setA")
     set_b = bpy.data.collections.get("setB")
+    # Meshes only: a group's collection also holds the group's own empty, so
+    # indexing objects[0] would silently test whichever came first.
+    def meshes_in(collection):
+        if collection is None:
+            return []
+        return [obj for obj in collection.objects if obj.type == "MESH"]
+
+    a_meshes = meshes_in(set_a)
+    b_meshes = meshes_in(set_b)
     check("both same-named meshes got their own collection",
-          set_a is not None and set_b is not None
-          and len(set_a.objects) == 1 and len(set_b.objects) == 1,
-          (len(set_a.objects) if set_a else None,
-           len(set_b.objects) if set_b else None))
-    if set_a and set_b and set_a.objects and set_b.objects:
-        a_x = set_a.objects[0].matrix_world.translation.x
-        b_x = set_b.objects[0].matrix_world.translation.x
+          len(a_meshes) == 1 and len(b_meshes) == 1,
+          (len(a_meshes), len(b_meshes)))
+    if a_meshes and b_meshes:
+        a_x = a_meshes[0].matrix_world.translation.x
+        b_x = b_meshes[0].matrix_world.translation.x
         check("the mesh in setA is the one Maya had in setA",
               a_x > 0.0 and b_x < 0.0, (round(a_x, 4), round(b_x, 4)))
-        check("they are two distinct objects",
-              set_a.objects[0] is not set_b.objects[0])
+        check("they are two distinct objects", a_meshes[0] is not b_meshes[0])
 
     accented = next(
         (obj for obj in bpy.data.objects

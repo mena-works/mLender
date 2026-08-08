@@ -886,6 +886,27 @@ Maya                              Blender
 Lights and cameras stay together under `mLender Lights` and `mLender Cameras` rather
 than joining this hierarchy, so they stay reachable as a set.
 
+### Locators and empty nulls
+
+The FBX only carries what sits above an exported mesh. A locator used as a
+placement control, and any group holding nothing but locators, therefore never
+reached Blender at all — no object, no warning. They travel as their own JSON
+records now, the way lights and cameras do, and arrive as Blender empties with
+their Maya transform, their parent and their place in the group hierarchy.
+
+A transform that *does* have a mesh below it is deliberately not recorded:
+FBX already brings it as an empty, being an ancestor of an exported mesh, and
+recording it twice would build two Blender objects for one Maya node.
+
+A Maya group ends up represented twice on purpose. The collection is the
+organisation, and the empty is what still lets the group be moved as a unit,
+which a collection cannot do. Both now sit together: the group's empty is
+inside the collection that mirrors it, rather than at the root while its
+contents sit a level down.
+
+Meshes parented under other meshes keep their parent — that relationship the
+FBX does carry, and the test asserts it rather than assuming it.
+
 ### Instances
 
 A Maya instance is several transforms sharing one shape. The exporter used to

@@ -149,6 +149,33 @@ def place_in_group(obj, record, root, cache):
     return True
 
 
+def place_group_empties(imported_objects, group_cache):
+    """Move an FBX-brought group empty into the collection that mirrors it.
+
+    A Maya group holding meshes arrives twice over: the FBX brings the
+    transform as an empty, because it is an ancestor of an exported mesh, and
+    the importer builds a collection of the same name for the organisation.
+    Both are wanted — a collection cannot hold a transform, and the empty is
+    what lets the group still be moved as a unit — but the empty was being
+    left at the root while everything it holds sat a level down.
+
+    Returns the number of empties moved.
+    """
+    moved = 0
+    for obj in imported_objects:
+        if obj.type != "EMPTY":
+            continue
+        collection = group_cache.get(safe_name(obj.name))
+        if collection is None or collection in obj.users_collection:
+            continue
+        for current in list(obj.users_collection):
+            current.objects.unlink(obj)
+        collection.objects.link(obj)
+        obj["ml_maya_group"] = obj.name
+        moved += 1
+    return moved
+
+
 def link_instance_duplicates(matched_meshes, mesh_records=None):
     """Point every instance of one Maya shape at a single mesh datablock.
 

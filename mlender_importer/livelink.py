@@ -184,7 +184,7 @@ def process_messages():
         _status = (
             "Imported {0} mesh(es), {1} material(s), "
             "{2} subdivision modifier(s), {3} light(s), {4} camera(s), "
-            "{5} collection(s), {6} instance(s)."
+            "{5} collection(s), {6} instance(s), {7} empty(ies)."
         ).format(
             result["mesh_count"],
             result["material_count"],
@@ -193,6 +193,7 @@ def process_messages():
             result["camera_count"],
             result["group_collection_count"],
             result["instanced_count"],
+            result["transform_count"],
         )
         for warning in result.get("warnings") or []:
             print("mLender warning: {0}".format(warning))

@@ -21,6 +21,7 @@ from .constants import (
 )
 from .animation import animation_info, sample_records
 from .cameras import camera_record, camera_sample, scene_camera_shapes
+from .transforms import scene_transforms, transform_records
 from .collect import collect_textures
 from .fbx import export_fbx
 from .lights import (
@@ -116,6 +117,10 @@ def export_scene(
             for record in mesh_records_for(shape, bake_context,
                                            export_cache)
         ]
+        # Locators and empty nulls ride the JSON: the FBX only carries
+        # what sits above an exported mesh, so on their own they were
+        # dropped entirely.
+        transform_list = transform_records(scene_transforms())
         light_shapes = scene_light_shapes()
         camera_shapes = scene_camera_shapes()
         light_records = [light_record(shape) for shape in light_shapes]
@@ -159,6 +164,8 @@ def export_scene(
             "selected_only": bool(selected_only),
             "mesh_count": len(mesh_records),
             "meshes": mesh_records,
+            "transform_count": len(transform_list),
+            "transforms": transform_list,
             "light_count": len(light_records),
             "lights": light_records,
             "camera_count": len(camera_records),
