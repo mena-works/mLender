@@ -854,6 +854,32 @@ def main():
           (selected_payload["light_count"], payload["light_count"]))
     check("cameras still travel whole",
           selected_payload["camera_count"] == payload["camera_count"])
+    # Everything added after Export Scope existed ignored it at first, so a
+    # scoped export sent every locator, curve and set in the scene alongside
+    # the one asset that had been selected.
+    check("no unselected locator or empty came along",
+          selected_payload["transform_count"] == 0,
+          [item.get("transform")
+           for item in selected_payload.get("transforms") or []])
+    check("no unselected curve came along",
+          selected_payload["curve_count"] == 0,
+          [item.get("curve")
+           for item in selected_payload.get("curves") or []])
+    # A set may only name what the package also carries, or it arrives in
+    # Blender as a warning and an empty collection. heroSet holds two meshes
+    # and one of them is in the selection, so it comes through trimmed rather
+    # than dropped, which is the case worth pinning.
+    scoped_sets = {item.get("set"): item
+                   for item in selected_payload.get("selection_sets") or []}
+    check("a set keeps only the members the package carries",
+          (scoped_sets.get("heroSet") or {}).get("members") == [
+              "|setDressing|props|stdSurfCube"
+          ],
+          (scoped_sets.get("heroSet") or {}).get("members"))
+    check("and so are display layers",
+          not (selected_payload.get("display_layers") or []),
+          [item.get("layer")
+           for item in selected_payload.get("display_layers") or []])
 
     cmds.select(clear=True)
     failed = False

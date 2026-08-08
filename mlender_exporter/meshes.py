@@ -60,12 +60,17 @@ def scene_mesh_shapes(selected_only=False):
     ])
 
 
-def selected_mesh_shapes():
-    """Mesh shapes under the current selection, with groups expanded.
+def expanded_selection():
+    """Everything under the current selection, the selection itself included.
 
     Selecting the group that holds an asset is the normal way to pick it, so
     the selection is expanded to its descendants rather than taken literally;
     a literal reading would export nothing for the most common selection.
+
+    Shared with the curve and transform discovery so that Export Scope means
+    the same thing for all of them. It did not, once: only meshes honoured the
+    selection while every locator, curve and set in the scene went along
+    regardless.
     """
     selection = cmds.ls(selection=True, long=True) or []
     if not selection:
@@ -79,8 +84,13 @@ def selected_mesh_shapes():
         )
     except Exception:
         pass
+    return unique(nodes)
+
+
+def selected_mesh_shapes():
+    """Mesh shapes under the current selection, with groups expanded."""
     return unique([
-        node for node in nodes
+        node for node in expanded_selection()
         if node_type(node) == "mesh" and usable_mesh_shape(node)
     ])
 

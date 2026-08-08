@@ -1063,6 +1063,11 @@ scene, which is what you want while iterating on a single asset.
   mentioned in a warning rather than silently ignored.
 - If the selection contains no meshes at all, the export **fails loudly**
   rather than leaving half a package behind.
+- **Everything else obeys the scope too.** Locators, curves, sets and display
+  layers are filtered by the same expanded selection, and a set or layer is
+  trimmed to the members the package actually carries — one naming nothing in
+  it is dropped rather than arriving in Blender as a warning and an empty
+  collection.
 
 ---
 

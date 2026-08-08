@@ -25,23 +25,26 @@ import maya.cmds as cmds
 
 from .mayautils import node_label, parent_of, unique, without_namespace, \
     world_matrix
-from .meshes import group_path
+from .meshes import expanded_selection, group_path
 
 # Maya form: 0 open, 1 closed, 2 periodic. Both of the latter close the loop.
 CURVE_FORM_OPEN = 0
 
 
-def scene_curve_shapes():
+def scene_curve_shapes(selected_only=False):
     """Every curve shape in the scene, intermediates excluded.
 
     ``bezierCurve`` inherits from ``nurbsCurve``, so listing the base type
     catches both and listing them separately would count beziers twice.
+
+    Export Scope applies. It did not once, and a scoped export sent every
+    curve in the scene alongside the one asset that had been selected.
     """
-    found = []
-    for shape in cmds.ls(type="nurbsCurve", long=True, noIntermediate=True) or []:
-        if parent_of(shape):
-            found.append(shape)
-    return unique(found)
+    shapes = cmds.ls(type="nurbsCurve", long=True, noIntermediate=True) or []
+    if selected_only:
+        allowed = set(expanded_selection())
+        shapes = [shape for shape in shapes if shape in allowed]
+    return unique([shape for shape in shapes if parent_of(shape)])
 
 
 def curve_control_points(shape):

@@ -15,8 +15,14 @@ from __future__ import absolute_import
 
 import maya.cmds as cmds
 
-from .mayautils import node_label, unique, without_namespace, world_matrix
-from .meshes import group_path
+from .mayautils import (
+    node_label,
+    node_type,
+    unique,
+    without_namespace,
+    world_matrix,
+)
+from .meshes import expanded_selection, group_path
 
 
 # Shape types that make a transform worth carrying on its own. A transform
@@ -25,14 +31,24 @@ from .meshes import group_path
 STANDALONE_SHAPE_TYPES = ("locator",)
 
 
-def scene_transforms():
+def scene_transforms(selected_only=False):
     """Locators and empty nulls, as full paths, outermost first.
 
     Sorted by depth so a parent is always created before its children on the
     Blender side, which lets parenting be applied in one pass.
+
+    Export Scope applies here too. It did not once, and a scoped export
+    sent every locator in the scene alongside the one asset that had been
+    selected.
     """
+    candidates = (
+        expanded_selection() if selected_only
+        else cmds.ls(type="transform", long=True) or []
+    )
     found = []
-    for transform in cmds.ls(type="transform", long=True) or []:
+    for transform in candidates:
+        if node_type(transform) != "transform":
+            continue
         if is_standalone_transform(transform):
             found.append(transform)
     return sorted(unique(found), key=lambda path: path.count("|"))

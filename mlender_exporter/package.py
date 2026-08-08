@@ -128,10 +128,23 @@ def export_scene(
         # Locators and empty nulls ride the JSON: the FBX only carries
         # what sits above an exported mesh, so on their own they were
         # dropped entirely.
-        transform_list = transform_records(scene_transforms())
-        curve_list = curve_records(scene_curve_shapes())
-        set_list = selection_set_records(scene_selection_sets(), warnings)
-        layer_list = display_layer_records(scene_display_layers())
+        transform_list = transform_records(scene_transforms(selected_only))
+        curve_list = curve_records(scene_curve_shapes(selected_only))
+        # Sets and layers may only name what this export carries. A scoped
+        # export otherwise sent sets whose members were never in it.
+        exported_paths = set(mesh_transforms(mesh_shapes))
+        exported_paths.update(
+            record["transform_path"] for record in transform_list
+        )
+        exported_paths.update(
+            record["curve_path"] for record in curve_list
+        )
+        set_list = selection_set_records(
+            scene_selection_sets(), warnings, exported_paths
+        )
+        layer_list = display_layer_records(
+            scene_display_layers(), exported_paths
+        )
         light_shapes = scene_light_shapes()
         camera_shapes = scene_camera_shapes()
         light_records = [light_record(shape) for shape in light_shapes]

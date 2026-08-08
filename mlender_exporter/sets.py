@@ -66,12 +66,24 @@ def selection_set_record(node, warnings=None):
     }
 
 
-def selection_set_records(nodes, warnings=None):
+def selection_set_records(nodes, warnings=None, allowed=None):
+    """Records for the sets worth sending.
+
+    ``allowed`` is the set of node paths this export actually carries. A
+    scoped export used to send every set in the scene, including ones whose
+    members were never exported, which arrived in Blender as a warning and
+    an empty collection. Filtering here means the package only names what
+    it also contains.
+    """
     records = []
     for node in nodes:
         record = selection_set_record(node, warnings)
-        # A set with nothing but components would arrive as an empty
-        # collection, which says less than the warning already does.
+        if allowed is not None:
+            record["members"] = [
+                member for member in record["members"] if member in allowed
+            ]
+        # A set with nothing but components, or nothing this export carries,
+        # would arrive as an empty collection; that says less than nothing.
         if record["members"]:
             records.append(record)
     return records
@@ -114,8 +126,17 @@ def display_layer_record(node):
     }
 
 
-def display_layer_records(nodes):
-    return [display_layer_record(node) for node in nodes]
+def display_layer_records(nodes, allowed=None):
+    records = []
+    for node in nodes:
+        record = display_layer_record(node)
+        if allowed is not None:
+            record["members"] = [
+                member for member in record["members"] if member in allowed
+            ]
+        if record["members"]:
+            records.append(record)
+    return records
 
 
 def _attr(node, attr, fallback):
