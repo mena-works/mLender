@@ -226,6 +226,38 @@ def build_scene():
     cmds.setAttr(phong_e_native + ".color", 0.6, 0.2, 0.2, type="double3")
     cmds.setAttr(phong_e_native + ".roughness", 0.8)
 
+    # A mix of two real shaders. Measured: Arnold's mix is the weight of
+    # shader2, so 0.25 means a quarter of the green one. The two sub-shaders
+    # differ in more than colour so a swapped slot is visible.
+    mix_a = cmds.shadingNode("aiStandardSurface", asShader=True, name="mixLower")
+    cmds.setAttr(mix_a + ".baseColor", 0.9, 0.1, 0.1, type="double3")
+    cmds.setAttr(mix_a + ".specularRoughness", 0.15)
+    mix_b = cmds.shadingNode("aiStandardSurface", asShader=True, name="mixUpper")
+    cmds.setAttr(mix_b + ".baseColor", 0.1, 0.8, 0.2, type="double3")
+    cmds.setAttr(mix_b + ".specularRoughness", 0.65)
+    _, mixer = shaded_cube("mixCube", "aiMixShader")
+    cmds.connectAttr(mix_a + ".outColor", mixer + ".shader1", force=True)
+    cmds.connectAttr(mix_b + ".outColor", mixer + ".shader2", force=True)
+    cmds.setAttr(mixer + ".mix", 0.25)
+
+    # And a layer shader, whose disabled slot must not travel: an enabled
+    # count that ignores the flag would put a shader nobody asked for on top.
+    layer_a = cmds.shadingNode("aiStandardSurface", asShader=True,
+                               name="layerBase")
+    cmds.setAttr(layer_a + ".baseColor", 0.2, 0.2, 0.8, type="double3")
+    layer_b = cmds.shadingNode("aiStandardSurface", asShader=True,
+                               name="layerTop")
+    cmds.setAttr(layer_b + ".baseColor", 0.8, 0.8, 0.2, type="double3")
+    layer_off = cmds.shadingNode("aiStandardSurface", asShader=True,
+                                 name="layerDisabled")
+    _, layered = shaded_cube("layerCube", "aiLayerShader")
+    cmds.connectAttr(layer_a + ".outColor", layered + ".input1", force=True)
+    cmds.connectAttr(layer_b + ".outColor", layered + ".input2", force=True)
+    cmds.connectAttr(layer_off + ".outColor", layered + ".input3", force=True)
+    cmds.setAttr(layered + ".enable2", True)
+    cmds.setAttr(layered + ".enable3", False)
+    cmds.setAttr(layered + ".mix2", 0.4)
+
     _, surface_native = shaded_cube("surfaceCube", "surfaceShader")
     cmds.setAttr(surface_native + ".outColor", 0.9, 0.3, 0.1, type="double3")
     cmds.setAttr(surface_native + ".outTransparency", 0.2, 0.2, 0.2,
@@ -681,7 +713,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("29 meshes exported", payload["mesh_count"] == 29,
+    check("31 meshes exported", payload["mesh_count"] == 31,
           payload["mesh_count"])
     # Four: the locator, the empty null, the nested locator, and the group
     # holding only a curve. That last one has no mesh below it either, so
@@ -1520,6 +1552,59 @@ def main():
         check("{0} is reported as supported".format(name),
               (by_material.get(name) or {}).get("supported") is True,
               (by_material.get(name) or {}).get("supported"))
+
+    print("\nblend shaders")
+    mix_record = by_material.get("mixCube_shd") or {}
+    mix_layers = mix_record.get("layers") or []
+    check("aiMixShader is supported", mix_record.get("supported") is True,
+          mix_record.get("supported"))
+    check("and carries both sub shaders", len(mix_layers) == 2,
+          len(mix_layers))
+    if len(mix_layers) == 2:
+        # shader1 is the base and must come first; a swapped pair would
+        # invert the blend and is exactly what the two distinct roughnesses
+        # make visible.
+        check("shader1 is the bottom layer",
+              mix_layers[0].get("shader", "").endswith("mixLower"),
+              mix_layers[0].get("shader"))
+        check("and shader2 is the one on top",
+              mix_layers[1].get("shader", "").endswith("mixUpper"),
+              mix_layers[1].get("shader"))
+        check("the base layer has no weight of its own",
+              "mix" not in mix_layers[0], mix_layers[0].get("mix"))
+        check("the upper layer carries the mix as its weight",
+              abs((mix_layers[1].get("mix") or {}).get("value", -1) - 0.25)
+              < 1e-6,
+              (mix_layers[1].get("mix") or {}).get("value"))
+        # The sub shaders are real materials, not names.
+        check("each layer carries its own channels",
+              abs((mix_layers[0]["channels"]["roughness"]["value"] - 0.15))
+              < 1e-6
+              and abs((mix_layers[1]["channels"]["roughness"]["value"] - 0.65))
+              < 1e-6,
+              [mix_layers[0]["channels"]["roughness"]["value"],
+               mix_layers[1]["channels"]["roughness"]["value"]])
+
+    layer_record = by_material.get("layerCube_shd") or {}
+    layers = layer_record.get("layers") or []
+    check("aiLayerShader is supported",
+          layer_record.get("supported") is True, layer_record.get("supported"))
+    # Three inputs are connected but one is disabled, so a count that ignores
+    # enable3 would put a shader on top that Maya was not rendering.
+    check("a disabled slot does not travel", len(layers) == 2,
+          [item.get("shader") for item in layers])
+    if len(layers) == 2:
+        check("its enabled layer keeps its own mix",
+              abs((layers[1].get("mix") or {}).get("value", -1) - 0.4) < 1e-6,
+              (layers[1].get("mix") or {}).get("value"))
+        check("and the disabled one is not in the list",
+              not any("layerDisabled" in item.get("shader", "")
+                      for item in layers),
+              [item.get("shader") for item in layers])
+    # An ordinary shader must not grow a layer list.
+    check("a plain shader carries no layers",
+          not (by_material.get("stdSurfCube_shd") or {}).get("layers"),
+          (by_material.get("stdSurfCube_shd") or {}).get("layers"))
 
     surface_channels = (
         (by_material.get("surfaceCube_shd") or {}).get("channels", {})

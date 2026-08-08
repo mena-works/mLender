@@ -113,9 +113,9 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("29 meshes imported", result["mesh_count"] == 29,
+    check("31 meshes imported", result["mesh_count"] == 31,
           result["mesh_count"])
-    check("23 materials built", result["material_count"] == 23,
+    check("25 materials built", result["material_count"] == 25,
           result["material_count"])
     # Four of the eight cubes asked for subdivision in Maya, the displaced one
     # among them; the rest must arrive unmodified.
@@ -1122,6 +1122,56 @@ def main():
         check("roughness came from the blinn's eccentricity",
               abs(value(native_blinn, "Roughness") - 0.45) < 1e-5,
               value(native_blinn, "Roughness"))
+
+    print("\nblend shaders")
+    mixed = material_for("mixCube")
+    check("the mix material exists", mixed is not None)
+    if mixed:
+        nodes = mixed.node_tree.nodes
+        mix_nodes = [n for n in nodes if n.bl_idname == "ShaderNodeMixShader"]
+        bsdfs = [n for n in nodes
+                 if n.bl_idname == "ShaderNodeBsdfPrincipled"]
+        check("built as one Mix Shader over two Principled BSDFs",
+              len(mix_nodes) == 1 and len(bsdfs) == 2,
+              (len(mix_nodes), len(bsdfs)))
+        outputs = [n for n in nodes
+                   if n.bl_idname == "ShaderNodeOutputMaterial"]
+        # Each layer builder makes its own output; all but one must go, or
+        # Blender renders whichever it decides is active.
+        check("with exactly one material output", len(outputs) == 1,
+              len(outputs))
+        if mix_nodes:
+            mix = mix_nodes[0]
+            check("the factor is Maya's mix, unflipped",
+                  abs(mix.inputs[0].default_value - 0.25) < 1e-5,
+                  mix.inputs[0].default_value)
+            # Slot 1 is the base, slot 2 the upper: the two roughnesses tell
+            # them apart, so a swap cannot pass.
+            lower = mix.inputs[1].links[0].from_node
+            upper = mix.inputs[2].links[0].from_node
+            check("shader1 landed in the lower slot",
+                  abs(lower.inputs["Roughness"].default_value - 0.15) < 1e-4,
+                  lower.inputs["Roughness"].default_value)
+            check("and shader2 in the upper one",
+                  abs(upper.inputs["Roughness"].default_value - 0.65) < 1e-4,
+                  upper.inputs["Roughness"].default_value)
+
+    layered = material_for("layerCube")
+    check("the layer material exists", layered is not None)
+    if layered:
+        nodes = layered.node_tree.nodes
+        mix_nodes = [n for n in nodes if n.bl_idname == "ShaderNodeMixShader"]
+        bsdfs = [n for n in nodes
+                 if n.bl_idname == "ShaderNodeBsdfPrincipled"]
+        # Two enabled layers, one disabled: three BSDFs would mean the
+        # disabled slot came along.
+        check("only the enabled layers were built",
+              len(bsdfs) == 2 and len(mix_nodes) == 1,
+              (len(bsdfs), len(mix_nodes)))
+        if mix_nodes:
+            check("its factor is mix2",
+                  abs(mix_nodes[0].inputs[0].default_value - 0.4) < 1e-5,
+                  mix_nodes[0].inputs[0].default_value)
 
     print("\nphong and phongE")
     # Both were unsupported until measured, so their materials arrived from

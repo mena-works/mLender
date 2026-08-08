@@ -311,9 +311,27 @@ tests/
 **Redshift** — `RedshiftStandardMaterial`, `RedshiftMaterial` (legacy)
 
 **Arnold** (verified against MtoA 5.4.8) — `aiStandardSurface`,
-`aiOpenPBRSurface`, `aiLambert`, `aiFlat`
+`aiOpenPBRSurface`, `aiLambert`, `aiFlat`, `aiMixShader`, `aiLayerShader`
 
 **Native Maya** — `lambert`, `blinn`, `phong`, `phongE`, `rampShader`, `surfaceShader`
+
+### Blend shaders
+
+`aiMixShader` and `aiLayerShader` do not describe a surface, they blend other
+shaders. They arrive as a **Mix Shader** chain: the bottom layer first, each
+layer above it mixed over the accumulated result by its own weight. Every
+sub-shader is built by the same code as a standalone material, so a glass or
+an unlit shader inside a mix behaves the way it would outside one, and a blend
+shader nested inside another one keeps its structure.
+
+The direction was measured rather than assumed. Rendering an unlit red under
+an unlit green at `mix 0.25` gives `(0.75, 0.25, 0)`, so Arnold's `mix` is the
+weight of the **upper** shader. Blender's Mix Shader factor runs the same way,
+so the number travels unchanged.
+
+`aiLayerShader` slots that are switched off do not travel. Three connected
+inputs with `enable3` unticked produce two layers, not three, because a layer
+Maya was not rendering has no business appearing on top in Blender.
 
 Transferred channels: base colour, reflection roughness, metalness,
 normal/bump, opacity, emission colour and strength, specular weight,

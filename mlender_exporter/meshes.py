@@ -48,7 +48,7 @@ from .mayautils import (
     without_namespace,
 )
 from .bake import bake_channel
-from .shaders import shader_channels
+from .shaders import blend_layers, shader_channels
 from .textures import texture_from_plug
 
 
@@ -410,13 +410,19 @@ def mesh_materials(mesh_shape, bake_context=None, cache=None):
             # One material usually covers many meshes, and re-reading it per
             # mesh was the single largest cost in the export: with 60 shaders
             # across 400 meshes each shader was read about seven times.
-            channels = None
+            cached = None
             if shader_cache is not None:
-                channels = shader_cache.get(shader)
-            if channels is None:
+                cached = shader_cache.get(shader)
+            if cached is None:
                 channels = shader_channels(shader, shader_type, bake_context)
+                # Cached together: a mix shader walks its whole sub-graph, so
+                # reading it once per mesh would put back the quadratic cost
+                # the channel cache was added to remove.
+                layers = blend_layers(shader, shader_type, bake_context)
                 if shader_cache is not None and not baked_channels(channels):
-                    shader_cache[shader] = channels
+                    shader_cache[shader] = (channels, layers)
+            else:
+                channels, layers = cached
             result.append(
                 {
                     "material": without_namespace(node_label(shader)),
@@ -431,6 +437,10 @@ def mesh_materials(mesh_shape, bake_context=None, cache=None):
                         set_cache,
                     ),
                     "channels": channels,
+                    # Empty for an ordinary shader. A mix or layer shader
+                    # puts its sub-shaders here, bottom layer first, and the
+                    # importer builds a Mix Shader chain from them.
+                    "layers": layers,
                     "displacement": displacement_info(
                         mesh_shape,
                         shading_engine,

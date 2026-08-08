@@ -74,6 +74,14 @@ def build_material(material_record, warnings):
     material.node_tree.nodes.clear()
 
     channels = material_record.get("channels") or {}
+    # A mix or layer shader blends other shaders rather than describing a
+    # surface, so its own channels are empty and the layers are the material.
+    layers = material_record.get("layers") or []
+    if layers:
+        _build_layered(material, layers, warnings)
+        apply_displacement(material, material_record, warnings)
+        return material
+
     if material_record.get("shader_type") in UNLIT_SHADER_TYPES:
         _build_unlit(material, channels, warnings)
         apply_displacement(material, material_record, warnings)
@@ -95,6 +103,102 @@ def build_material(material_record, warnings):
             )
         )
     return material
+
+
+def _build_layered(material, layers, warnings):
+    """Build a blended material: the layer chain, then one output for it."""
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+
+    top = build_layer_chain(material, layers, warnings)
+    output = nodes.new("ShaderNodeOutputMaterial")
+    output.location = (300 + len(layers) * 200, 0)
+    if top is not None:
+        links.new(top.outputs[0], output.inputs.get("Surface"))
+    return output
+
+
+def build_layer_chain(material, layers, warnings):
+    """Stack blended shaders into a Mix Shader chain, bottom layer first.
+
+    Arnold's mix is the weight of the upper shader -- rendered, an unlit red
+    under an unlit green at 0.25 gives (0.75, 0.25, 0) -- and Blender's Mix
+    Shader factor runs the same way, so the number is used unchanged.
+
+    Returns the node the material output should read from.
+    """
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+
+    top = _layer_shader_node(material, layers[0], warnings)
+    for index, layer in enumerate(layers[1:], start=1):
+        upper = _layer_shader_node(material, layer, warnings)
+        if upper is None:
+            continue
+        if top is None:
+            top = upper
+            continue
+        mix = nodes.new("ShaderNodeMixShader")
+        mix.name = "ML_Layer_Mix_{0}".format(index)
+        mix.label = "Maya Layer {0}".format(index)
+        mix.location = (300 + index * 200, 0)
+        links.new(top.outputs[0], mix.inputs[1])
+        links.new(upper.outputs[0], mix.inputs[2])
+        # Index, not name: the factor socket is "Fac" on every build measured,
+        # but the project has been bitten by socket names moving before.
+        apply_record_to_socket(
+            material, mix, mix.inputs[0], "mix",
+            layer.get("mix") or {"value": 1.0}, warnings,
+        )
+        top = mix
+    return top
+
+
+def _layer_shader_node(material, layer_record, warnings):
+    """Build one layer inside this material's tree, return its top node.
+
+    The three surface builders each create their own material output, which
+    is right when they are the whole material and wrong when they are one
+    layer of it. Rather than split all three, the layer is built as usual and
+    its output node is then removed, which keeps every per-type behaviour --
+    glass, unlit, coat darkening -- reachable from here for free.
+    """
+    nodes = material.node_tree.nodes
+    before = set(nodes)
+
+    sub_layers = layer_record.get("layers") or []
+    if sub_layers:
+        return build_layer_chain(material, sub_layers, warnings)
+
+    channels = layer_record.get("channels") or {}
+    if layer_record.get("shader_type") in UNLIT_SHADER_TYPES:
+        _build_unlit(material, channels, warnings)
+    elif channel_is_active(channels.get("transmission")):
+        _build_glass(material, channels, warnings)
+    else:
+        _build_principled(material, channels, warnings)
+    return _detach_output(material, before)
+
+
+def _detach_output(material, before):
+    """Remove the output a layer builder made and return what fed it."""
+    nodes = material.node_tree.nodes
+    output = next(
+        (
+            node for node in nodes
+            if node not in before
+            and node.bl_idname == "ShaderNodeOutputMaterial"
+        ),
+        None,
+    )
+    if output is None:
+        return None
+    surface = output.inputs.get("Surface")
+    source = None
+    if surface is not None and surface.is_linked:
+        source = surface.links[0].from_node
+    nodes.remove(output)
+    return source
 
 
 def apply_displacement(material, material_record, warnings):

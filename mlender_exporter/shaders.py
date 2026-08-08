@@ -27,6 +27,12 @@ from .constants import (
     DEFAULT_IOR,
     FALLBACK_ROUGHNESS,
     LAMBERT_ROUGHNESS,
+    LAYER_SHADER_SLOTS,
+    LAYER_SHADER_TYPE,
+    MAX_BLEND_DEPTH,
+    MIX_SHADER_INPUTS,
+    MIX_SHADER_TYPE,
+    MIX_SHADER_WEIGHT,
     NATIVE_ROUGHNESS_ATTRS,
     PHONG_EXPONENT_ATTRS,
     OPENPBR_EMISSION_SEMANTIC,
@@ -34,6 +40,7 @@ from .constants import (
     REDSHIFT_GLOSSINESS_FLAGS,
     REDSHIFT_LEGACY_CHANNELS,
     REDSHIFT_STANDARD_CHANNELS,
+    SUPPORTED_SHADER_TYPES,
 )
 from .bake import bake_channel
 from .mayautils import attr_exists, invert_color, plug_value
@@ -187,6 +194,93 @@ def apply_glossiness_conversion(shader, roughness_record):
         roughness_record["invert"] = True
     elif "value" in roughness_record:
         roughness_record["value"] = 1.0 - float(roughness_record["value"])
+
+
+def upstream_shader(shader, attr):
+    """The shader feeding an input, or None.
+
+    Arnold wires these as ``outColor`` into a float3 input, so the connection
+    looks like any other colour link; what makes it a shader is the node on
+    the other end, which is why the type comes back with it.
+    """
+    try:
+        sources = cmds.listConnections(
+            shader + "." + attr, source=True, destination=False,
+            shapes=False, skipConversionNodes=True
+        ) or []
+    except Exception:
+        return None
+    for node in sources:
+        try:
+            kind = cmds.nodeType(node)
+        except Exception:
+            continue
+        if kind in SUPPORTED_SHADER_TYPES or kind in NATIVE_ROUGHNESS_ATTRS:
+            return node, kind
+    return None
+
+
+def is_blend_shader(shader_type):
+    return shader_type in (MIX_SHADER_TYPE, LAYER_SHADER_TYPE)
+
+
+def blend_layers(shader, shader_type, bake_context=None, depth=0):
+    """The shaders a mix or layer shader blends, bottom layer first.
+
+    The first entry is the base. Every entry after it carries a ``mix``
+    record holding that layer's weight over everything below, which is the
+    measured meaning of Arnold's number and the same direction as Blender's
+    Mix Shader factor.
+
+    A layer that is itself a blend shader carries its own ``layers``, so a
+    nested lookdev survives instead of collapsing to whichever leaf was
+    found first.
+    """
+    if depth >= MAX_BLEND_DEPTH or not is_blend_shader(shader_type):
+        return []
+    if shader_type == MIX_SHADER_TYPE:
+        slots = [
+            (MIX_SHADER_INPUTS[0], None, None),
+            (MIX_SHADER_INPUTS[1], MIX_SHADER_WEIGHT, None),
+        ]
+    else:
+        slots = [
+            (
+                "input{0}".format(index),
+                None if index == 1 else "mix{0}".format(index),
+                "enable{0}".format(index),
+            )
+            for index in range(1, LAYER_SHADER_SLOTS + 1)
+        ]
+
+    layers = []
+    for input_attr, weight_attr, enable_attr in slots:
+        if enable_attr and attr_exists(shader, enable_attr):
+            try:
+                if not bool(cmds.getAttr(shader + "." + enable_attr)):
+                    continue
+            except Exception:
+                pass
+        found = upstream_shader(shader, input_attr)
+        if not found:
+            continue
+        node, kind = found
+        layer = {
+            "shader": node,
+            "shader_type": kind,
+            "channels": shader_channels(node, kind, bake_context),
+            "layers": blend_layers(node, kind, bake_context, depth + 1),
+        }
+        if weight_attr:
+            # A textured mix is common, so this goes through the same reader
+            # as any other channel rather than reading a bare number.
+            layer["mix"] = first_channel_record(
+                shader, (weight_attr,), bake_context, "mix"
+            ) or {"value": 1.0}
+        layers.append(layer)
+    # One layer is not a blend; the caller builds it directly and skips the
+    # Mix Shader that would otherwise sit there doing nothing.
+    return layers
 
 
 def native_roughness(shader, shader_type, default):

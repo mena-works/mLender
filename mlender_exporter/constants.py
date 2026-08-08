@@ -17,7 +17,7 @@ LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
 LIVELINK_PROTOCOL = "mlender_livelink"
 LIVELINK_VERSION = 3
-EXPORT_SCHEMA_VERSION = 30
+EXPORT_SCHEMA_VERSION = 31
 
 LIGHT_NODE_TYPES = (
     "RedshiftPhysicalLight",
@@ -138,7 +138,29 @@ ARNOLD_MOTION_BLUR_NODE = "defaultArnoldRenderOptions"
 ARNOLD_MOTION_BLUR_ENABLED_ATTRS = ("motion_blur_enable",)
 ARNOLD_MOTION_BLUR_LENGTH_ATTRS = ("motion_frames",)
 
+# Shaders that blend other shaders rather than describing a surface. Names
+# read from a live MtoA 5.4.8 session: aiMixShader has shader1/shader2/mix,
+# aiLayerShader has input1..8 with mix1..8, enable1..8 and name1..8.
+#
+# Measured, not assumed: rendering an unlit red under an unlit green at
+# mix 0.25 gives (0.75, 0.25, 0), so mix is the weight of the *upper* shader.
+# Blender's Mix Shader Fac runs the same direction, so the number travels
+# unchanged rather than being flipped.
+MIX_SHADER_TYPE = "aiMixShader"
+MIX_SHADER_INPUTS = ("shader1", "shader2")
+MIX_SHADER_WEIGHT = "mix"
+MIX_SHADER_MODE = "mode"
+
+LAYER_SHADER_TYPE = "aiLayerShader"
+LAYER_SHADER_SLOTS = 8
+
+# A blend shader may hold another blend shader. The limit is a loop guard,
+# not a judgement about how deep a lookdev artist should go.
+MAX_BLEND_DEPTH = 8
+
 SUPPORTED_SHADER_TYPES = (
+    MIX_SHADER_TYPE,
+    LAYER_SHADER_TYPE,
     "RedshiftStandardMaterial",
     "RedshiftMaterial",
     "aiStandardSurface",
