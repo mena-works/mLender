@@ -113,9 +113,9 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("34 meshes imported", result["mesh_count"] == 34,
+    check("36 meshes imported", result["mesh_count"] == 36,
           result["mesh_count"])
-    check("26 materials built", result["material_count"] == 26,
+    check("28 materials built", result["material_count"] == 28,
           result["material_count"])
     # Four of the eight cubes asked for subdivision in Maya, the displaced one
     # among them; the rest must arrive unmodified.
@@ -1168,6 +1168,56 @@ def main():
             )
             check("fed by the geometry normal and incoming vector",
                   feeds == ["Incoming", "Normal"], feeds)
+
+    print("\nramp texture")
+    ramp_tex_material = material_for("rampTexCube")
+    check("the ramp texture material exists", ramp_tex_material is not None)
+    if ramp_tex_material:
+        nodes = ramp_tex_material.node_tree.nodes
+        ramps = [n for n in nodes if n.bl_idname == "ShaderNodeValToRGB"]
+        images = [n for n in nodes if n.bl_idname == "ShaderNodeTexImage"]
+        # A Color Ramp and no image: the gradient is rebuilt, not baked.
+        check("built as a Color Ramp with no baked image",
+              len(ramps) == 1 and not images, (len(ramps), len(images)))
+        if ramps:
+            ramp = ramps[0]
+            stops = ramp.color_ramp.elements
+            check("with all three stops in order",
+                  [round(e.position, 3) for e in stops] == [0.0, 0.5, 1.0],
+                  [e.position for e in stops])
+            # Measured by baking a red-to-blue V ramp and reading the image:
+            # position 0 sits at v=0, so nothing is inverted.
+            check("position 0 is the colour Maya had at v=0",
+                  [round(v, 3) for v in stops[0].color[:3]] == [1.0, 0.0, 0.0],
+                  list(stops[0].color)[:3])
+            check("its interpolation came from the node",
+                  ramp.color_ramp.interpolation == "EASE",
+                  ramp.color_ramp.interpolation)
+            # Driven by V, not U: a V ramp read through X would run sideways.
+            source = ramp.inputs[0].links[0].from_node
+            # Not "socket": that name is a helper used all through this file,
+            # and binding it locally shadows it for the whole function.
+            component = ramp.inputs[0].links[0].from_socket.name
+            check("driven by the V component of the UV",
+                  source.bl_idname == "ShaderNodeSeparateXYZ"
+                  and component == "Y",
+                  (source.bl_idname, component))
+            feeder = source.inputs[0].links[0]
+            check("which comes from the texture coordinate UV",
+                  feeder.from_node.bl_idname == "ShaderNodeTexCoord"
+                  and feeder.from_socket.name == "UV",
+                  (feeder.from_node.bl_idname, feeder.from_socket.name))
+
+    radial_material = material_for("radialRampCube")
+    check("the circular ramp material exists", radial_material is not None)
+    if radial_material:
+        nodes = radial_material.node_tree.nodes
+        # It baked, so it arrives as an image and not as a gradient in the
+        # wrong shape.
+        check("a circular ramp arrived as its baked image",
+              any(n.bl_idname == "ShaderNodeTexImage" for n in nodes)
+              and not any(n.bl_idname == "ShaderNodeValToRGB" for n in nodes),
+              [n.bl_idname for n in nodes])
 
     print("\ninstancers")
     check("the import reported one instancer",

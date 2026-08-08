@@ -8,7 +8,7 @@ message shape changes.
 
 import math
 
-BUILD_VERSION = "2.18.0"
+BUILD_VERSION = "2.19.0"
 
 LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
@@ -22,7 +22,7 @@ LIVELINK_EVENT = "scene_package_ready"
 # branch with both, plus the Arnold channels.
 SUPPORTED_SCHEMA_VERSIONS = (
     1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
-    20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34,
+    20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35,
 )
 
 # rampShader. The mode name the exporter writes when Maya's single colorInput
@@ -36,6 +36,24 @@ RAMP_INTERPOLATION = {
     "Linear": "LINEAR",
     "Smooth": "EASE",
     "Spline": "B_SPLINE",
+}
+
+# Which UV component drives a Maya ramp texture. Measured by baking a
+# red-to-blue ramp and reading the image: a V Ramp puts position 0 at v=0 and
+# a U Ramp puts it at u=0, so neither is inverted. The other seven types are
+# shapes one Color Ramp cannot make and are deliberately absent, which is what
+# sends them back to the bake instead of arriving wrong.
+RAMP_TEXTURE_COMPONENTS = {
+    "U Ramp": "X",
+    "V Ramp": "Y",
+}
+
+# A ramp texture keeps one interpolation on the node. Only three of Maya's
+# seven have a Color Ramp equivalent; the rest fall back to linear.
+RAMP_TEXTURE_INTERPOLATION = {
+    "None": "CONSTANT",
+    "Linear": "LINEAR",
+    "Smooth": "EASE",
 }
 
 # The key the exporter writes the cache filename under.

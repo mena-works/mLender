@@ -17,7 +17,7 @@ LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
 LIVELINK_PROTOCOL = "mlender_livelink"
 LIVELINK_VERSION = 3
-EXPORT_SCHEMA_VERSION = 34
+EXPORT_SCHEMA_VERSION = 35
 
 LIGHT_NODE_TYPES = (
     "RedshiftPhysicalLight",
@@ -179,6 +179,41 @@ RAMP_CHANNEL_ATTRS = (
 # is the cosine itself -- 0.988 facing, 0.771 toward the rim -- so that is
 # what the importer builds.
 RAMP_FACING_SEMANTIC = "maya_ramp_facing_angle"
+
+# The ramp *texture* node, which is a different thing from a rampShader: a
+# gradient wired into any channel. Enum labels and the entry children were
+# read from a live Maya 2023 node. Note two differences from rampShader:
+# interpolation belongs to the node rather than to each stop, and a freshly
+# created node has no entries at all.
+RAMP_TEXTURE_TYPE = "ramp"
+RAMP_TEXTURE_ENTRIES = "colorEntryList"
+RAMP_TEXTURE_TYPES = (
+    "V Ramp",
+    "U Ramp",
+    "Diagonal Ramp",
+    "Radial Ramp",
+    "Circular Ramp",
+    "Box Ramp",
+    "UV Ramp",
+    "Four Corner Ramp",
+    "Tartan Ramp",
+)
+# The types that are a plain one dimensional gradient, so the importer can
+# rebuild them as a Color Ramp and the bake is skipped: no file, no
+# resolution loss, and the gradient stays editable in Blender. This list is a
+# contract with the importer's component map -- adding a type here without
+# adding it there sends a gradient nothing knows how to draw.
+RAMP_TEXTURE_REBUILDABLE = ("U Ramp", "V Ramp")
+
+RAMP_TEXTURE_INTERPOLATIONS = (
+    "None",
+    "Linear",
+    "Exponential Up",
+    "Exponential Down",
+    "Smooth",
+    "Bump",
+    "Spike",
+)
 
 # Shaders that blend other shaders rather than describing a surface. Names
 # read from a live MtoA 5.4.8 session: aiMixShader has shader1/shader2/mix,

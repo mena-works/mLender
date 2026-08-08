@@ -250,6 +250,40 @@ def build_scene():
                  0.5, 0.5, 0.5, type="double3")
     cmds.setAttr(ramp_native + ".eccentricity", 0.6)
 
+    # A ramp *texture*, which is a different node from a rampShader: a
+    # gradient wired into a channel. Measured before this: with Bake
+    # Procedurals off it collapsed to a flat colour with no warning.
+    _, ramptex_shd = shaded_cube("rampTexCube", "aiStandardSurface")
+    ramp_tex = cmds.shadingNode("ramp", asTexture=True, name="vRampTex")
+    cmds.setAttr(ramp_tex + ".type", 0)            # V Ramp
+    cmds.setAttr(ramp_tex + ".interpolation", 4)   # Smooth
+    # Written out of order on purpose, as for the rampShader.
+    cmds.setAttr(ramp_tex + ".colorEntryList[0].position", 0.0)
+    cmds.setAttr(ramp_tex + ".colorEntryList[0].color", 1, 0, 0,
+                 type="double3")
+    cmds.setAttr(ramp_tex + ".colorEntryList[2].position", 1.0)
+    cmds.setAttr(ramp_tex + ".colorEntryList[2].color", 0, 0, 1,
+                 type="double3")
+    cmds.setAttr(ramp_tex + ".colorEntryList[1].position", 0.5)
+    cmds.setAttr(ramp_tex + ".colorEntryList[1].color", 0, 1, 0,
+                 type="double3")
+    cmds.connectAttr(ramp_tex + ".outColor", ramptex_shd + ".baseColor",
+                     force=True)
+
+    # And a type one Color Ramp cannot make, which must say so rather than
+    # arrive as a gradient in the wrong shape.
+    _, radial_shd = shaded_cube("radialRampCube", "aiStandardSurface")
+    radial_tex = cmds.shadingNode("ramp", asTexture=True, name="radialRampTex")
+    cmds.setAttr(radial_tex + ".type", 4)          # Circular Ramp
+    cmds.setAttr(radial_tex + ".colorEntryList[0].position", 0.0)
+    cmds.setAttr(radial_tex + ".colorEntryList[0].color", 1, 1, 0,
+                 type="double3")
+    cmds.setAttr(radial_tex + ".colorEntryList[1].position", 1.0)
+    cmds.setAttr(radial_tex + ".colorEntryList[1].color", 0, 1, 1,
+                 type="double3")
+    cmds.connectAttr(radial_tex + ".outColor", radial_shd + ".baseColor",
+                     force=True)
+
     # A mix of two real shaders. Measured: Arnold's mix is the weight of
     # shader2, so 0.25 means a quarter of the green one. The two sub-shaders
     # differ in more than colour so a swapped slot is visible.
@@ -756,7 +790,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("34 meshes exported", payload["mesh_count"] == 34,
+    check("36 meshes exported", payload["mesh_count"] == 36,
           payload["mesh_count"])
     # Four: the locator, the empty null, the nested locator, and the group
     # holding only a curve. That last one has no mesh below it either, so
@@ -1639,6 +1673,49 @@ def main():
           abs((ramp_channels.get("roughness") or {}).get("value", -1) - 0.6)
           < 1e-6,
           (ramp_channels.get("roughness") or {}).get("value"))
+
+    print("\nramp texture")
+    tex_record = (
+        (by_material.get("rampTexCube_shd") or {}).get("channels", {})
+        .get("base_color") or {}
+    ).get("texture") or {}
+    tex_ramp = tex_record.get("ramp") or {}
+    tex_entries = tex_ramp.get("entries") or []
+    # A ramp texture has no file, so the record is still "unsupported"; what
+    # changed is that the gradient now travels with it.
+    check("the ramp texture is still reported as unresolvable",
+          tex_record.get("unsupported_network") is True,
+          tex_record.get("unsupported_network"))
+    check("but its gradient travels", len(tex_entries) == 3, len(tex_entries))
+    if len(tex_entries) == 3:
+        check("with the stops sorted by position",
+              [round(item["position"], 3) for item in tex_entries]
+              == [0.0, 0.5, 1.0],
+              [item["position"] for item in tex_entries])
+        check("and the colours Maya had at each end",
+              tex_entries[0]["color"] == [1.0, 0.0, 0.0]
+              and tex_entries[2]["color"] == [0.0, 0.0, 1.0],
+              [tex_entries[0]["color"], tex_entries[2]["color"]])
+    check("the ramp type is recorded", tex_ramp.get("type") == "V Ramp",
+          tex_ramp.get("type"))
+    # One interpolation per node here, unlike a rampShader's per stop.
+    check("and its single interpolation",
+          tex_ramp.get("interpolation") == "Smooth",
+          tex_ramp.get("interpolation"))
+
+    radial = (
+        (by_material.get("radialRampCube_shd") or {}).get("channels", {})
+        .get("base_color") or {}
+    ).get("texture") or {}
+    # A shape one Color Ramp cannot make still goes through the bake, which
+    # is the point of only skipping it for the plain gradients.
+    check("a circular ramp is baked instead of sent as a gradient",
+          radial.get("baked") is True and not radial.get("ramp"),
+          (radial.get("baked"), bool(radial.get("ramp"))))
+    check("and the V ramp was not baked at all",
+          not tex_record.get("baked")
+          and not (tex_record.get("path") or ""),
+          (tex_record.get("baked"), tex_record.get("path")))
 
     print("\ninstancers")
     instancers = payload.get("instancers") or []

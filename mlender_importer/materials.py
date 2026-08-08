@@ -35,6 +35,8 @@ from .constants import (
     GLASS_INPUTS,
     PRINCIPLED_INPUTS,
     RAMP_FACING_MODE,
+    RAMP_TEXTURE_COMPONENTS,
+    RAMP_TEXTURE_INTERPOLATION,
     RAMP_INTERPOLATION,
     SPECULAR_WEIGHT_TO_LEVEL,
     TEXTURE_EXTENSION_CLAMP,
@@ -772,6 +774,61 @@ def apply_channel(material, bsdf, channel, record, warnings):
     )
 
 
+def build_texture_ramp(material, texture, warnings):
+    """A Maya ramp *texture* as a Color Ramp driven by a UV coordinate.
+
+    Different node from a rampShader and a different driver: this one is a
+    function of the surface's UVs rather than of the viewing angle.
+
+    Measured by baking a red-to-blue ramp through the tool's own bake path
+    and reading the image: a V Ramp puts position 0 at v=0 and a U Ramp puts
+    it at u=0, so neither is inverted. Only those two are reproduced; the
+    radial, box and tartan types are shapes a single Color Ramp cannot make,
+    and they keep falling back to the bake rather than arriving wrong.
+
+    Returns the Color Ramp node, or None.
+    """
+    ramp_record = texture.get("ramp") or {}
+    entries = ramp_record.get("entries") or []
+    kind = str(ramp_record.get("type") or "")
+    if len(entries) < 2:
+        return None
+    component = RAMP_TEXTURE_COMPONENTS.get(kind)
+    if component is None:
+        warnings.append(
+            'Maya ramp texture "{0}" is a {1}, which one Color Ramp cannot '
+            "reproduce; it needs Bake Procedurals to travel.".format(
+                texture.get("node") or "?", kind or "ramp"
+            )
+        )
+        return None
+
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+
+    coords = nodes.new("ShaderNodeTexCoord")
+    coords.name = "ML_RampTex_Coord"
+    coords.location = (-1100, 0)
+    split = nodes.new("ShaderNodeSeparateXYZ")
+    split.name = "ML_RampTex_Split"
+    split.location = (-900, 0)
+    links.new(coords.outputs["UV"], split.inputs[0])
+
+    ramp = nodes.new("ShaderNodeValToRGB")
+    ramp.name = "ML_RampTex"
+    ramp.label = "Maya {0}".format(kind)
+    ramp.location = (-700, 0)
+    links.new(split.outputs[component], ramp.inputs[0])
+    _fill_ramp(
+        ramp,
+        entries,
+        RAMP_TEXTURE_INTERPOLATION.get(
+            str(ramp_record.get("interpolation") or "Linear"), "LINEAR"
+        ),
+    )
+    return ramp
+
+
 def build_ramp(material, record, warnings):
     """A rampShader gradient as a Color Ramp driven by the facing angle.
 
@@ -829,7 +886,7 @@ def build_ramp(material, record, warnings):
     return ramp
 
 
-def _fill_ramp(ramp, entries):
+def _fill_ramp(ramp, entries, interpolation=None):
     """Write the stops, keeping the ones Blender cannot hold out of the way.
 
     A new Color Ramp starts with two stops and its first cannot be removed,
@@ -848,11 +905,13 @@ def _fill_ramp(ramp, entries):
         element.position = position
         element.color = (colour[0], colour[1], colour[2], 1.0)
 
-    # Maya keeps an interpolation per stop and Blender one per ramp, so the
-    # first stop's decides. Writing per stop is not available to choose from.
-    interpolation = RAMP_INTERPOLATION.get(
-        str(entries[0].get("interp") or "Linear"), "LINEAR"
-    )
+    # A rampShader keeps an interpolation per stop and Blender keeps one per
+    # ramp, so the first stop's decides; a ramp texture keeps one on the node
+    # and the caller passes it in.
+    if interpolation is None:
+        interpolation = RAMP_INTERPOLATION.get(
+            str(entries[0].get("interp") or "Linear"), "LINEAR"
+        )
     try:
         ramp.color_ramp.interpolation = interpolation
     except Exception:
@@ -877,6 +936,14 @@ def apply_record_to_socket(material, shader, target, channel, record, warnings):
             return
 
     texture = record.get("texture") or {}
+    # A ramp texture has no file to load, so this has to come before the path
+    # check or the gradient is skipped and the flat value wins.
+    if texture.get("ramp") and not texture.get("path"):
+        ramp = build_texture_ramp(material, texture, warnings)
+        if ramp is not None:
+            material.node_tree.links.new(ramp.outputs["Color"], target)
+            return
+
     if texture.get("path"):
         image = load_image(texture, channel, warnings)
         if image:

@@ -40,6 +40,7 @@ from .constants import (
     RAMP_INPUT_MODES,
     RAMP_INTERP_MODES,
     RAMP_SHADER_TYPE,
+    RAMP_TEXTURE_REBUILDABLE,
     OPENPBR_EMISSION_SEMANTIC,
     OPENPBR_SPECULAR_SEMANTIC,
     REDSHIFT_GLOSSINESS_FLAGS,
@@ -544,7 +545,13 @@ def first_channel_record(shader, attrs, bake_context=None, channel=None):
             "maya_plug": plug,
         }
         texture = texture_from_plug(plug)
-        if texture and not texture.get("path"):
+        # A plain U or V gradient is rebuilt natively, so baking it would
+        # write a file and lose resolution for a node Blender already has.
+        rebuildable = (
+            (texture or {}).get("ramp", {}).get("type")
+            in RAMP_TEXTURE_REBUILDABLE
+        )
+        if texture and not texture.get("path") and not rebuildable:
             # A connection with no file behind it: a checker, a ramp,
             # layered noise. There is nothing to reference, so bake the
             # network down to the mesh's UVs instead.

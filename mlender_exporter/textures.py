@@ -14,6 +14,10 @@ import re
 import maya.cmds as cmds
 
 from .constants import (
+    RAMP_TEXTURE_ENTRIES,
+    RAMP_TEXTURE_INTERPOLATIONS,
+    RAMP_TEXTURE_TYPE,
+    RAMP_TEXTURE_TYPES,
     BUMP_DEPTH_ATTR,
     BUMP_INTERP_ATTR,
     BUMP_NODE_TYPES,
@@ -97,13 +101,77 @@ def texture_from_plug(plug):
             if unsupported:
                 record["unsupported_corrections"] = unsupported
             return record
-    return {
+    record = {
         "path": "",
         "node": node_label(source_node),
         "node_type": node_type(source_node),
         "source_plug": source_plug,
         "unsupported_network": True,
     }
+    # A ramp texture is a gradient, and Blender has a Color Ramp; baking it to
+    # an image loses resolution and editability for nothing. The stops travel
+    # so the importer can rebuild it, and the record stays marked unsupported
+    # so a type this cannot reproduce still falls back to the bake.
+    ramp = texture_ramp(source_node)
+    if ramp:
+        record["ramp"] = ramp
+    return record
+
+
+def texture_ramp(node):
+    """A ramp texture node as stops plus its type, or None.
+
+    Unlike a rampShader, the interpolation here belongs to the node rather
+    than to each stop, and the entry list of a freshly created node is empty
+    rather than holding defaults.
+    """
+    if node_type(node) != RAMP_TEXTURE_TYPE:
+        return {}
+    try:
+        indices = cmds.getAttr(
+            node + "." + RAMP_TEXTURE_ENTRIES, multiIndices=True
+        ) or []
+    except Exception:
+        return {}
+
+    entries = []
+    for index in indices:
+        base = "{0}.{1}[{2}]".format(node, RAMP_TEXTURE_ENTRIES, index)
+        try:
+            position = float(cmds.getAttr(base + ".position"))
+            raw = cmds.getAttr(base + ".color")
+            values = list(raw[0]) if isinstance(raw, list) else list(raw)
+        except Exception:
+            continue
+        entries.append({
+            "position": position,
+            "color": [float(item) for item in values[:3]],
+        })
+    if len(entries) < 2:
+        return {}
+    # Maya returns the indices in creation order, so an edited ramp comes
+    # back shuffled; sorting is what makes it the gradient the artist drew.
+    entries.sort(key=lambda item: item["position"])
+
+    return {
+        "type": _enum_label(node, "type", RAMP_TEXTURE_TYPES),
+        "interpolation": _enum_label(
+            node, "interpolation", RAMP_TEXTURE_INTERPOLATIONS
+        ),
+        "entries": entries,
+    }
+
+
+def _enum_label(node, attr, labels):
+    if not attr_exists(node, attr):
+        return labels[0]
+    try:
+        index = int(cmds.getAttr(node + "." + attr))
+    except Exception:
+        return labels[0]
+    if 0 <= index < len(labels):
+        return labels[index]
+    return labels[0]
 
 
 def placement_info(texture_node):
