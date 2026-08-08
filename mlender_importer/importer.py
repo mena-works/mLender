@@ -10,6 +10,7 @@ import bpy
 
 from .constants import SUPPORTED_SCHEMA_VERSIONS
 from .cameras import import_cameras
+from .curves import import_curves
 from .empties import import_empties
 from .fbx import import_fbx, read_package_json, resolve_fbx_path
 from .animation import apply_scene_range
@@ -148,6 +149,14 @@ def import_scene_package(
         object_by_path,
     )
 
+    curve_count = import_curves(
+        package_data,
+        root_collection,
+        import_scale,
+        warnings,
+        group_cache,
+    )
+
     # Runs after the empties so both kinds of group transform, the ones the
     # FBX brought and the ones the JSON did, end up in the same place.
     place_group_empties(imported_objects, group_cache)
@@ -199,6 +208,7 @@ def import_scene_package(
         "subdivision_count": subdivision_count,
         "instanced_count": instanced_count,
         "transform_count": empty_result["transform_count"],
+        "curve_count": curve_count,
         "light_count": light_result["light_count"],
         "light_object_count": light_result["object_count"],
         "dome_count": light_result["dome_count"],

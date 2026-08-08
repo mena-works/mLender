@@ -165,8 +165,8 @@ def main():
           ungrouped is not None
           and scene_collections(ungrouped) == [result["root_collection"]],
           [c.name for c in ungrouped.users_collection] if ungrouped else None)
-    check("five collections were reported",
-          result["group_collection_count"] == 5,
+    check("six collections were reported",
+          result["group_collection_count"] == 6,
           result["group_collection_count"])
 
     print("\ninstances")
@@ -211,7 +211,7 @@ def main():
         check("{0} arrived".format(name), obj is not None)
         if obj is not None:
             check("{0} is an empty".format(name), obj.type == "EMPTY", obj.type)
-    check("the import reported them", result["transform_count"] == 3,
+    check("the import reported them", result["transform_count"] == 4,
           result["transform_count"])
     if locator:
         # Maya Y becomes Blender Z, and the scene is in centimetres, so 7
@@ -240,6 +240,55 @@ def main():
               "setDressing" in {c.name
                                 for c in set_dressing_empty.users_collection},
               [c.name for c in set_dressing_empty.users_collection])
+
+    print("\ncurves")
+    # Curves never rode the FBX, so before this they were simply absent.
+    probe_curve = bpy.data.objects.get("probeCurve")
+    probe_line = bpy.data.objects.get("probeLine")
+    probe_circle = bpy.data.objects.get("probeCircle")
+    check("the import reported 3 curves", result["curve_count"] == 3,
+          result["curve_count"])
+    for name, obj in (("probeCurve", probe_curve), ("probeLine", probe_line),
+                      ("probeCircle", probe_circle)):
+        check("{0} arrived as a curve".format(name),
+              obj is not None and obj.type == "CURVE",
+              obj.type if obj else None)
+    if probe_line:
+        spline = probe_line.data.splines[0]
+        check("a degree 1 curve becomes a poly spline",
+              spline.type == "POLY", spline.type)
+        check("with its three points", len(spline.points) == 3,
+              len(spline.points))
+    if probe_curve:
+        spline = probe_curve.data.splines[0]
+        check("a cubic becomes a NURBS spline of order 4",
+              spline.type == "NURBS" and spline.order_u == 4,
+              (spline.type, spline.order_u))
+        check("open, so endpoint knots and no cycle",
+              spline.use_endpoint_u and not spline.use_cyclic_u,
+              (spline.use_endpoint_u, spline.use_cyclic_u))
+        # Maya had this ten units up on a transform scaled by two. Setting
+        # matrix_world and then obj.scale looks equivalent and is not; it came
+        # through at half size.
+        world = probe_curve.matrix_world @ spline.points[1].co.to_3d()
+        check("a scaled transform reaches the control points",
+              abs(world.x - 0.0346) < 1e-3 and abs(world.z - 0.14) < 1e-3,
+              [round(v, 4) for v in world])
+    if probe_circle:
+        spline = probe_circle.data.splines[0]
+        check("a periodic circle is cyclic", spline.use_cyclic_u)
+        check("and endpoint knots are off, which would kink the seam",
+              not spline.use_endpoint_u)
+        check("with 8 points, not the 11 Maya reports",
+              len(spline.points) == 8, len(spline.points))
+        # Reading control points the obvious way returns zeros for a curve
+        # built by construction history, which a circle is.
+        moved = any(abs(p.co[i]) > 1e-6 for p in spline.points
+                    for i in range(3))
+        check("its points are not all at the origin", moved)
+        check("a grouped curve lands in its collection",
+              "curveGroup" in {c.name for c in probe_circle.users_collection},
+              [c.name for c in probe_circle.users_collection])
 
     print("\nvalues outside the usual range")
     # The emission clamp survived every test because nothing ever asked for a

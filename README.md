@@ -886,6 +886,40 @@ Maya                              Blender
 Lights and cameras stay together under `mLender Lights` and `mLender Cameras` rather
 than joining this hierarchy, so they stay reachable as a set.
 
+### Curves
+
+NURBS and bezier curves never rode the FBX either — the export selects mesh
+transforms, so a curve was not even offered to it. They travel as their own
+records, carrying their control points in local space plus the transform's
+world matrix.
+
+Blender does not accept an arbitrary knot vector; it offers uniform, endpoint
+and bezier knots. What Maya reports maps onto that cleanly:
+
+```text
+degree 1          -> POLY spline
+degree 2 and up   -> NURBS spline, order = degree + 1
+form 0 (open)     -> use_endpoint_u, the clamped curve Maya's (0,0,0,1,1,1)
+                     knots describe
+form 1 or 2       -> use_cyclic_u
+```
+
+Two measured details decide whether this works at all:
+
+- **Control points are read one at a time, not in bulk.** Asking for them in
+  one go returns **zeros** for any curve with construction history, because
+  the attribute is unused and the geometry arrives through the input
+  connection. A circle came back as eight points at the origin, which would
+  have collapsed every procedurally built curve in a scene to a dot.
+- **A periodic curve reports more control points than it has.** Maya repeats
+  degree many of them to close the loop: a circle reports 11 while the unique
+  count is 8. Eight is what Blender wants for a cyclic spline, so the other
+  reading stacks three duplicates on the seam.
+
+Round-tripped against Maya at three curves — one open cubic moved, rotated and
+scaled, one linear, one grouped periodic circle — every control point lands
+within 1e-6 of where Maya had it.
+
 ### Locators and empty nulls
 
 The FBX only carries what sits above an exported mesh. A locator used as a

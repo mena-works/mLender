@@ -225,6 +225,21 @@ def build_scene():
     cmds.parent(child_mesh, parent_mesh)
     cmds.setAttr(parent_mesh + "|childMesh.translateY", 3)
 
+    # Curves. The circle is the one that matters: it is driven by construction
+    # history, and reading control points the obvious way returns zeros for
+    # exactly that case. It is also periodic, where Maya repeats control
+    # points to close the loop, and grouped, so placement is covered too.
+    probe_curve = cmds.curve(name="probeCurve", degree=3,
+                             point=[(0, 0, 0), (2, 4, 0), (6, 4, 0), (8, 0, 0)])
+    # Moved, turned and scaled: each of the three hides a different bug.
+    cmds.setAttr(probe_curve + ".translateY", 10)
+    cmds.setAttr(probe_curve + ".rotateY", 30)
+    cmds.setAttr(probe_curve + ".scaleX", 2)
+    cmds.curve(name="probeLine", degree=1,
+               point=[(0, 0, 0), (3, 0, 0), (3, 3, 0)])
+    probe_circle = cmds.circle(name="probeCircle", radius=5, sections=8)[0]
+    cmds.group(probe_circle, name="curveGroup")
+
     # Values deliberately outside the ranges the rest of the scene uses. The
     # emission clamp bug survived every test because nothing ever asked for a
     # value on the far side of a limit, so this cube does nothing else.
@@ -483,8 +498,11 @@ def main():
     check("FBX written", os.path.isfile(result["fbx_path"]))
     check("22 meshes exported", payload["mesh_count"] == 22,
           payload["mesh_count"])
-    check("3 geometry-free transforms exported",
-          payload["transform_count"] == 3, payload["transform_count"])
+    # Four: the locator, the empty null, the nested locator, and the group
+    # holding only a curve. That last one has no mesh below it either, so
+    # the FBX does not carry it any more than it carries the others.
+    check("4 geometry-free transforms exported",
+          payload["transform_count"] == 4, payload["transform_count"])
 
     print("\ninstances")
     # An instanced shape hangs under several transforms. Reading only the
@@ -543,6 +561,53 @@ def main():
     check("a group holding meshes is not recorded twice",
           "setDressing" not in by_transform and "parentMesh" not in
           by_transform, sorted(by_transform))
+    # A curve's transform has a shape, so it must not be swept up as an empty.
+    check("a curve transform is not recorded as an empty",
+          "probeCurve" not in by_transform and "probeCircle" not in
+          by_transform, sorted(by_transform))
+
+    print("\ncurves")
+    by_curve = {
+        item.get("curve"): item for item in (payload.get("curves") or [])
+    }
+    check("3 curves exported", payload["curve_count"] == 3,
+          payload["curve_count"])
+    for name in ("probeCurve", "probeLine", "probeCircle"):
+        check("{0} was exported".format(name), name in by_curve,
+              sorted(by_curve))
+    check("degree is carried",
+          (by_curve.get("probeCurve") or {}).get("degree") == 3
+          and (by_curve.get("probeLine") or {}).get("degree") == 1,
+          [(by_curve.get(n) or {}).get("degree")
+           for n in ("probeCurve", "probeLine")])
+    check("an open curve reports form 0",
+          (by_curve.get("probeCurve") or {}).get("form") == 0,
+          (by_curve.get("probeCurve") or {}).get("form"))
+    check("a circle reports a closed form",
+          (by_curve.get("probeCircle") or {}).get("form") in (1, 2),
+          (by_curve.get("probeCircle") or {}).get("form"))
+    # Maya repeats degree many control points to close a periodic curve. The
+    # unique count is what Blender wants; reading controlPoints instead gives
+    # 11 and stacks three duplicates on the seam.
+    circle_points = (by_curve.get("probeCircle") or {}).get("control_points")
+    check("a periodic circle carries its 8 unique control points",
+          circle_points is not None and len(circle_points) == 8,
+          len(circle_points) if circle_points is not None else None)
+    # The circle is built by construction history, and the obvious way of
+    # reading control points returns zeros for exactly that case.
+    check("and they are not all at the origin",
+          circle_points and any(any(abs(v) > 1e-6 for v in point)
+                                for point in circle_points),
+          circle_points[0] if circle_points else None)
+    # Control points are local: this curve sits ten units up, and its first
+    # point is still the origin.
+    first = ((by_curve.get("probeCurve") or {}).get("control_points")
+             or [[None]])[0]
+    check("control points are local, not world",
+          first is not None and max(abs(v) for v in first) < 1e-6, first)
+    check("a grouped curve keeps its group trail",
+          (by_curve.get("probeCircle") or {}).get("groups") == ["curveGroup"],
+          (by_curve.get("probeCircle") or {}).get("groups"))
 
     print("\naiStandardSurface")
     std = channels("stdSurfCube")
