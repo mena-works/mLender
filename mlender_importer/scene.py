@@ -97,15 +97,41 @@ def purge_orphans():
         pass
 
 
-def organize_imported_objects(objects):
-    """Move every imported object under a single root collection."""
-    root = bpy.data.collections.new(ROOT_COLLECTION_NAME)
-    bpy.context.scene.collection.children.link(root)
+def organize_imported_objects(objects, reuse=False):
+    """Move every imported object under a single root collection.
+
+    ``reuse`` picks up the root an earlier import left, which is what Merge
+    wants: a fresh one each time would stack "mLender Import.001" on every
+    send. Add deliberately does not reuse, since a new root per package is
+    the whole point of that mode.
+    """
+    root = bpy.data.collections.get(ROOT_COLLECTION_NAME) if reuse else None
+    if root is None:
+        root = bpy.data.collections.new(ROOT_COLLECTION_NAME)
+    if root.name not in bpy.context.scene.collection.children:
+        try:
+            bpy.context.scene.collection.children.link(root)
+        except RuntimeError:
+            pass
     for obj in objects:
         for collection in list(obj.users_collection):
             collection.objects.unlink(obj)
         root.objects.link(obj)
     return root
+
+
+def seed_group_cache(root):
+    """Group collections an earlier import made, keyed as the cache keys them.
+
+    Without this a merge builds "props.001" beside the "props" already
+    holding the same meshes, because the cache starts empty every import.
+    """
+    cache = {}
+    for collection in bpy.data.collections:
+        key = collection.get("ml_maya_group")
+        if key:
+            cache[key] = collection
+    return cache
 
 
 def group_collection(root, groups, cache):
@@ -460,6 +486,15 @@ def group_trail_score(ancestor_keys, group_key_sets):
 
 
 def rename_mesh_from_record(obj, mesh_record):
+    """Name the object after its Maya node, and record where it came from.
+
+    The marker and the Maya path are what let a later merge find this same
+    object again. Keyed on the path rather than the name because a name can
+    be changed in Blender and two meshes can share a short one.
+    """
+    obj["ml_generated"] = True
+    if mesh_record.get("mesh_path"):
+        obj["ml_maya_path"] = mesh_record["mesh_path"]
     clean_name = (
         mesh_record.get("mesh")
         or namespace_free_name(mesh_record.get("mesh_full_name"))

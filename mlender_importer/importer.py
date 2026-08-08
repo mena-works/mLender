@@ -16,6 +16,14 @@ from .fbx import import_fbx, read_package_json, resolve_fbx_path
 from .animation import apply_scene_range
 from .colormanagement import apply_color_management
 from .lights import import_lights
+from .merge import (
+    IMPORT_MODE_MERGE,
+    IMPORT_MODE_REPLACE,
+    adopt,
+    generated_objects_by_path,
+    mark_stale,
+    normalize_mode,
+)
 from .render import apply_render_settings
 from .sets import import_sets
 from .materials import apply_face_assignments, build_material
@@ -28,6 +36,7 @@ from .scene import (
     place_group_empties,
     link_instance_duplicates,
     organize_imported_objects,
+    seed_group_cache,
     place_in_group,
     purge_orphans,
     remove_object_namespace,
@@ -69,6 +78,7 @@ def import_scene_package(
     package_data=None,
     import_scale=1.0,
     power_scale=None,
+    import_mode=None,
 ):
     package_folder = normalize_folder(package_folder)
     if package_data is None:
@@ -78,7 +88,16 @@ def import_scene_package(
 
     if bpy.data.filepath:
         bpy.ops.wm.save_mainfile()
-    clear_scene_and_purge()
+
+    mode = normalize_mode(import_mode)
+    # Only Replace clears. Merge and Add skip the wipe; neither weakens
+    # the check inside it, which still raises if a clear leaves anything.
+    existing_by_path = {}
+    if mode == IMPORT_MODE_REPLACE:
+        clear_scene_and_purge()
+    elif mode == IMPORT_MODE_MERGE:
+        # Recorded before the FBX lands, or the new objects would be in it.
+        existing_by_path = generated_objects_by_path()
 
     # Materials carrying a fake user survive the purge, so the pre-import set
     # is recorded and those materials are left alone afterwards.
@@ -95,7 +114,9 @@ def import_scene_package(
     # The frame range is set before anything is keyed, so the keys land inside
     # a range the user can actually scrub.
     animated = apply_scene_range(package_data)
-    root_collection = organize_imported_objects(imported_objects)
+    root_collection = organize_imported_objects(
+        imported_objects, reuse=mode == IMPORT_MODE_MERGE
+    )
     material_cache = {}
     assignments = []
     warnings = []
@@ -105,7 +126,14 @@ def import_scene_package(
     record_index = build_record_index(mesh_records)
     used_record_ids = set()
     matched_meshes = []
-    group_cache = {}
+    adopted_paths = set()
+    # Adoption deletes the object the FBX brought, and imported_objects
+    # still holds it; touching a removed one afterwards raises.
+    retired_objects = []
+    # Merge reuses the collections already standing; a fresh cache would
+    # build "props.001" beside the props holding the same meshes.
+    group_cache = seed_group_cache(root_collection) if (
+        mode == IMPORT_MODE_MERGE) else {}
     grouped_count = 0
     visibility_count = 0
 
@@ -117,6 +145,10 @@ def import_scene_package(
             remove_object_namespace(obj)
             continue
         used_record_ids.add(id(mesh_record))
+        # In Merge the object already standing keeps its identity, so any
+        # modifier or parent the user put on it survives the update.
+        obj = adopt(obj, mesh_record, existing_by_path, retired_objects)
+        adopted_paths.add(mesh_record.get("mesh_path"))
         rename_mesh_from_record(obj, mesh_record)
         matched_meshes.append((obj, mesh_record))
         if place_in_group(obj, mesh_record, root_collection, group_cache):
@@ -130,6 +162,12 @@ def import_scene_package(
     # After the materials, not before: the assignment writes into obj.data,
     # and instances share a shape in Maya so they share its materials anyway.
     instanced_count = link_instance_duplicates(matched_meshes, mesh_records)
+
+    if retired_objects:
+        retired = {id(item) for item in retired_objects}
+        imported_objects = [
+            item for item in imported_objects if id(item) not in retired
+        ]
 
     namespace_prefixes = package_namespace_prefixes(package_data)
     for obj in imported_objects:
@@ -194,6 +232,10 @@ def import_scene_package(
         package_data, root_collection, object_by_path, warnings
     )
 
+    # Nothing is deleted for having left the package. It is marked and
+    # counted; removing it is a button the user presses.
+    stale_objects = mark_stale(existing_by_path, adopted_paths)
+
     view_transform = apply_color_management(package_data, warnings)
     render_applied = apply_render_settings(package_data, warnings)
 
@@ -220,6 +262,8 @@ def import_scene_package(
         "transform_count": empty_result["transform_count"],
         "curve_count": curve_count,
         "render": render_applied,
+        "import_mode": mode,
+        "stale_count": len(stale_objects),
         "set_count": set_result["set_count"],
         "layer_count": set_result["layer_count"],
         "light_count": light_result["light_count"],

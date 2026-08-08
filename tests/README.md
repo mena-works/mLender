@@ -67,6 +67,19 @@ ağaçlarına, ışık data'sına assert eder. Önce 2. adımı çalıştır.
 Birden fazla Blender sürümünde çalıştırmak sürüm uyum kodunu sınar; bu araç
 3.6'dan 5.2'ye kadar iddia ediyor.
 
+## Import modları (gerçek Blender, ~40 sn)
+
+```bash
+"C:\Program Files\Blender Foundation\Blender 5.2lender.exe" ^
+    --background --factory-startup --python tests/host/blender_modes_test.py
+```
+
+Replace / Merge / Add üçünü de sınar. Merge yalnız **ikinci** import'ta
+tanımlı olduğu için paketi birden fazla kez import eder: kullanıcının kendi
+objesi ile import edilmiş bir objeye eklediği modifier, ikinci import'tan
+sonra hâlâ orada mı diye bakar. Bayat obje sayılıyor ama silinmiyor; silme
+ayrı bir adım ve o da sınanıyor.
+
 ## 5. Render eşleşmesi (gerçek Arnold + gerçek Cycles, ~2 dk)
 
 ```bash

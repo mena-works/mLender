@@ -8,7 +8,7 @@ message shape changes.
 
 import math
 
-BUILD_VERSION = "2.5.0"
+BUILD_VERSION = "2.6.0"
 
 LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
@@ -32,6 +32,16 @@ TIMER_INTERVAL_SECONDS = 0.1
 ROOT_COLLECTION_NAME = "mLender Import"
 LIGHT_COLLECTION_NAME = "mLender Lights"
 CAMERA_COLLECTION_NAME = "mLender Cameras"
+# Import modes. Replace is the original behaviour and stays the default:
+# it is what makes the Maya scene the single source of truth.
+IMPORT_MODE_REPLACE = "REPLACE"
+IMPORT_MODE_MERGE = "MERGE"
+IMPORT_MODE_ADD = "ADD"
+
+# Marks an object a previous import made that the current package no
+# longer has. Marked and counted, never deleted without being asked.
+STALE_PROPERTY = "ml_stale"
+
 SET_COLLECTION_NAME = "mLender Sets"
 LAYER_COLLECTION_NAME = "mLender Layers"
 

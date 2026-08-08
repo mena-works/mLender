@@ -10,6 +10,7 @@ from .constants import (
     DEFAULT_LIGHT_POWER_SCALE,
 )
 from .livelink import get_status, start_listener, stop_listener
+from .merge import count_stale_objects, remove_stale_objects
 
 
 SCENE_PROPERTIES = (
@@ -49,6 +50,27 @@ class ML_OT_stop_listener(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class ML_OT_remove_stale(bpy.types.Operator):
+    """Delete what a merge found no longer in the package.
+
+    A separate button on purpose. An import arriving over a socket is no
+    place to destroy work unasked, so a merge marks and counts these and
+    the decision stays with the user.
+    """
+    bl_idname = "mlender.remove_stale"
+    bl_label = "Remove Stale Objects"
+    bl_description = (
+        "Delete objects an earlier import created that the last package "
+        "no longer contains"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        removed = remove_stale_objects()
+        self.report({"INFO"}, "Removed {0} stale object(s).".format(removed))
+        return {"FINISHED"}
+
+
 class ML_PT_lookdev(bpy.types.Panel):
     bl_label = "mLender Import"
     bl_idname = "ML_PT_lookdev"
@@ -60,6 +82,7 @@ class ML_PT_lookdev(bpy.types.Panel):
         layout = self.layout
         scene = context.scene
         layout.label(text="Build {0}".format(BUILD_VERSION), icon="FILE_REFRESH")
+        layout.prop(scene, "ml_import_mode", text="Mode")
         layout.prop(scene, "ml_import_scale", text="FBX Scale")
         layout.prop(scene, "ml_light_power_scale", text="Light Power Scale")
         layout.prop(scene, "ml_livelink_host", text="Host")
@@ -68,13 +91,28 @@ class ML_PT_lookdev(bpy.types.Panel):
         row.operator(ML_OT_start_listener.bl_idname, icon="PLAY")
         row.operator(ML_OT_stop_listener.bl_idname, icon="PAUSE")
         layout.label(text=get_status(), icon="INFO")
+        stale = count_stale_objects()
+        if stale:
+            box = layout.box()
+            box.label(
+                text="{0} object(s) left the package.".format(stale),
+                icon="ERROR",
+            )
+            box.operator(ML_OT_remove_stale.bl_idname, icon="TRASH")
         layout.separator()
-        layout.label(text="New packages replace the complete scene.")
-        layout.label(text="Unused data is purged after every import.")
+        if scene.ml_import_mode == "REPLACE":
+            layout.label(text="Replace: new packages wipe the scene.")
+        elif scene.ml_import_mode == "MERGE":
+            layout.label(text="Merge: imported objects are updated in")
+            layout.label(text="place; your own objects are untouched.")
+        else:
+            layout.label(text="Add: each package lands in its own")
+            layout.label(text="collection and nothing is updated.")
 
 
 CLASSES = (
     ML_OT_start_listener,
+    ML_OT_remove_stale,
     ML_OT_stop_listener,
     ML_PT_lookdev,
 )
@@ -84,6 +122,19 @@ def register_ui():
     for cls in CLASSES:
         _safe_register(cls)
     unregister_properties()
+    bpy.types.Scene.ml_import_mode = bpy.props.EnumProperty(
+        name="Import Mode",
+        description="What a new package does to the current scene",
+        items=(
+            ("REPLACE", "Replace",
+             "Wipe the scene and rebuild it from the package"),
+            ("MERGE", "Merge",
+             "Update objects an earlier import made, leave your own alone"),
+            ("ADD", "Add",
+             "Bring the package in beside what is already there"),
+        ),
+        default="REPLACE",
+    )
     bpy.types.Scene.ml_import_scale = bpy.props.FloatProperty(
         name="FBX Scale",
         default=1.0,

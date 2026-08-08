@@ -21,6 +21,7 @@ recorded under [`tests/docs/`](tests/docs/).
 - [Installation](#installation)
 - [Usage](#usage)
 - [Scope](#scope)
+- [Import modes](#import-modes)
 - [How it works](#how-it-works)
 - [Materials](#materials)
 - [Lights](#lights)
@@ -178,9 +179,10 @@ Deliberately **not** included:
 - No template `.blend` selection.
 - No turntable generator — whatever is animated in the scene is what arrives.
 
-**Import is destructive by design.** Every package wipes the Blender scene and
-purges unused data-blocks before rebuilding. This is the documented behaviour,
-not a bug; a merge mode would be a separate feature.
+**Replace is the default and it is destructive by design.** It wipes the
+Blender scene and purges unused data-blocks before rebuilding, which is what
+makes the Maya scene the single source of truth. Two other modes are available
+from the N panel; see [Import modes](#import-modes).
 
 ---
 
@@ -1090,6 +1092,37 @@ produces a warning rather than a collection that quietly means something else.
 Set membership comes back from Maya as short names, which are ambiguous in a
 scene where two meshes share one, so members are resolved to full paths before
 they are written.
+
+## Import modes
+
+Chosen in the N panel. **Replace** is the default and unchanged.
+
+| Mode | What a new package does |
+|---|---|
+| Replace | Wipes the scene and rebuilds it |
+| Merge | Updates what an earlier import made, leaves your own work alone |
+| Add | Brings the package in beside what is already there |
+
+**Merge keeps the object.** A mesh that came from an earlier import of the
+same Maya node has its geometry, materials, transform and visibility replaced
+while the Blender object itself stays, so a modifier, a parent or a driver you
+put on it survives. Only objects carrying the `ml_generated` marker are
+adopted, so anything you made yourself is never touched.
+
+Objects are matched on the Maya node they came from (`ml_maya_path`), not on
+their Blender name. A name can be changed in Blender, and two Maya meshes can
+share a short one — the same reason mesh matching needs a tie-break.
+
+**Nothing is deleted for having left the package.** If a Maya node is gone,
+the object it made is marked and counted, and the panel offers a button to
+remove them. An import arriving over a socket is no place to destroy work
+unasked, and that is exactly what Replace is for.
+
+Merge also reuses the collections already standing rather than building
+`mLender Import.001` and `props.001` beside the ones holding the same meshes.
+
+The three-pass scene clear, which raises if anything survives it, is not
+softened by any of this. Merge and Add skip it; they do not weaken it.
 
 ## Render settings
 

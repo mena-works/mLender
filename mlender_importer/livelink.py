@@ -179,6 +179,7 @@ def process_messages():
             payload.get("package_folder") or "",
             package_data=payload.get("package_json"),
             import_scale=scene.ml_import_scale,
+            import_mode=scene.ml_import_mode,
             power_scale=scene.ml_light_power_scale,
         )
         _status = (
