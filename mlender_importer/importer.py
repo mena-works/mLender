@@ -217,7 +217,7 @@ def import_scene_package(
         object_by_path,
     )
 
-    particle_count = import_particles(
+    particle_count, particle_baked_count = import_particles(
         package_data,
         root_collection,
         import_scale,
@@ -300,6 +300,7 @@ def import_scene_package(
         "curve_count": curve_count,
         "volume_count": volume_count,
         "particle_count": particle_count,
+        "particle_baked_count": particle_baked_count,
         "render": render_applied,
         "import_mode": mode,
         "stale_count": len(stale_objects),

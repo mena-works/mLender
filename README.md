@@ -985,8 +985,35 @@ numbers are **local**, so they pair with the world matrix rather than
 replacing it — applying the transform twice is exactly what the test guards
 against.
 
-This is a snapshot at the exported frame, not a simulation. A particle system
-that moves needs the frame range, like everything else animated.
+#### Baking a simulation
+
+With **Export Animation** on, the positions are sampled across the frame range
+and arrive as keyframes on the mesh vertices, linear rather than eased, so the
+simulation plays back in Blender.
+
+That bake is only possible when the particle count never changes. A Blender
+mesh has a fixed vertex count, and measured on 4.1 and 5.2 an object's mesh
+datablock cannot be keyframed either, so there is no representation on the
+other side for a set of points that grows. An emitter-driven system does grow —
+measured 0, 3, 7 and 15 particles at frames 1, 5, 10 and 20 — and rather than
+shipping a bake that drops the particles born later, such an object travels as
+a snapshot of the exported frame and says so:
+
+```text
+mLender warning: Particle object "sparkParticle" changes count over the
+frame range, so only the exported frame travels.
+```
+
+A very dense simulation is refused the same way, with its own message, because
+three numbers per point per frame would otherwise exceed the live link's 32 MB
+message limit and fail as a transfer instead of as a bake.
+
+To bring an emitting simulation across in full, cache it in Maya and read the
+cache in Blender; that is a different job from a live scene transfer, and this
+tool does not pretend to do it.
+
+The panel's status line reports how many particle objects arrived and how many
+of them were baked.
 
 ### Volumes
 

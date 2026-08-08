@@ -314,7 +314,7 @@ def main():
     # cannot be built from Python at all, so they arrive as loose vertices.
     dust = bpy.data.objects.get("dustParticle")
     check("the particle object arrived", dust is not None)
-    check("the import reported it", result["particle_count"] == 1,
+    check("the import reported it", result["particle_count"] == 2,
           result["particle_count"])
     if dust:
         check("as a mesh of loose vertices",
@@ -333,6 +333,58 @@ def main():
               (round(world[1].x, 4), round(world[1].z, 4)))
         check("the Maya count is recorded",
               dust.get("ml_source_count") == 4, dust.get("ml_source_count"))
+
+    print("\nparticle bake")
+    check("the import reported one bake",
+          result["particle_baked_count"] == 1,
+          result["particle_baked_count"])
+    if dust:
+        action = getattr(
+            getattr(dust.data, "animation_data", None), "action", None
+        )
+        curves = zi.animation.action_fcurves(action)
+        # Three curves per vertex, one per component, or the bake reached
+        # only some of the points.
+        check("every vertex component is keyed",
+              len(curves) == 12, len(curves))
+        check("and the keys are linear, not eased",
+              all(point.interpolation == "LINEAR"
+                  for curve in curves for point in curve.keyframe_points),
+              sorted(set(point.interpolation
+                         for curve in curves
+                         for point in curve.keyframe_points)))
+        # The rest state must be the snapshot, not wherever the loop
+        # happened to stop keying.
+        check("the rest position is the first frame",
+              abs((dust.matrix_world @ dust.data.vertices[0].co).z - 0.1)
+              < 1e-4,
+              round((dust.matrix_world @ dust.data.vertices[0].co).z, 4))
+        # Gravity was connected in Maya, so the points must fall between the
+        # two ends of the range rather than sit still. The fall is in the
+        # object's local Y, since the positions carry no axis swap of their
+        # own; it is the matrix that turns them, so this reads world space.
+        scene = bpy.context.scene
+        original_frame = scene.frame_current
+        scene.frame_set(scene.frame_start)
+        start_z = (dust.matrix_world @ dust.data.vertices[0].co).z
+        scene.frame_set(scene.frame_end)
+        end_z = (dust.matrix_world @ dust.data.vertices[0].co).z
+        scene.frame_set(original_frame)
+        # Maya fell 5.1 units, a centimetre scene, so about five centimetres
+        # down. Asserting the direction and size catches a swapped axis, not
+        # merely a bake that moved something.
+        check("and the simulation plays back downward",
+              abs(start_z - 0.1) < 1e-4 and abs(end_z - 0.049) < 5e-3,
+              (round(start_z, 5), round(end_z, 5)))
+
+    # The emitter driven object changes count, so it must arrive as a
+    # snapshot with no animation rather than a bake missing its later births.
+    spark = bpy.data.objects.get("sparkParticle")
+    check("the varying count object still arrived", spark is not None)
+    if spark:
+        check("but carries no vertex animation",
+              getattr(spark.data, "animation_data", None) is None
+              or spark.data.animation_data.action is None)
 
     print("\nvolumes")
     volume_obj = bpy.data.objects.get("smokeVolume")

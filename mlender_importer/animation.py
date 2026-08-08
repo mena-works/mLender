@@ -94,8 +94,8 @@ def animate_object(obj, record, position_scale, apply_sample=None):
             apply_sample(sample, frame)
         keyed += 1
 
-    _set_interpolation(obj)
-    _set_interpolation(getattr(obj, "data", None))
+    set_linear_interpolation(obj)
+    set_linear_interpolation(getattr(obj, "data", None))
     return keyed
 
 
@@ -131,7 +131,7 @@ def action_fcurves(action):
     return list(getattr(action, "fcurves", None) or [])
 
 
-def _set_interpolation(holder):
+def set_linear_interpolation(holder):
     """Baked samples are linear; Bezier would ease between every frame."""
     action = getattr(getattr(holder, "animation_data", None), "action", None)
     for curve in action_fcurves(action):

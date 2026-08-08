@@ -17,7 +17,7 @@ LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
 LIVELINK_PROTOCOL = "mlender_livelink"
 LIVELINK_VERSION = 3
-EXPORT_SCHEMA_VERSION = 28
+EXPORT_SCHEMA_VERSION = 29
 
 LIGHT_NODE_TYPES = (
     "RedshiftPhysicalLight",
@@ -412,6 +412,12 @@ DEFAULT_FPS = 24.0
 # range writes a large JSON and takes real time, so the range is clamped and
 # the package says it was clamped rather than quietly shipping less.
 MAX_ANIMATION_FRAMES = 2000
+
+# A particle bake writes three numbers per point per frame, and the live link
+# refuses a message over 32 MB, so a dense simulation would fail as a transfer
+# rather than as a bake. Past this many point frames the snapshot travels
+# alone and the package says so.
+MAX_PARTICLE_BAKE_POINTS = 500000
 
 # Scalars worth sampling per frame. Anything else on a light or camera is
 # lookdev state that does not animate in practice.

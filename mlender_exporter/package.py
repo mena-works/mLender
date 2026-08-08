@@ -23,7 +23,12 @@ from .animation import animation_info, sample_records
 from .cameras import camera_record, camera_sample, scene_camera_shapes
 from .curves import curve_records, scene_curve_shapes
 from .render import render_record
-from .particles import particle_records, scene_particle_shapes
+from .particles import (
+    particle_records,
+    particle_sample,
+    resolve_samples,
+    scene_particle_shapes,
+)
 from .volumes import scene_volume_shapes, volume_records
 from .sets import (
     display_layer_records,
@@ -133,9 +138,8 @@ def export_scene(
         transform_list = transform_records(scene_transforms(selected_only))
         curve_list = curve_records(scene_curve_shapes(selected_only))
         volume_list = volume_records(scene_volume_shapes(selected_only))
-        particle_list = particle_records(
-            scene_particle_shapes(selected_only)
-        )
+        particle_shapes = scene_particle_shapes(selected_only)
+        particle_list = particle_records(particle_shapes)
         # Sets and layers may only name what this export carries. A scoped
         # export otherwise sent sets whose members were never in it.
         exported_paths = set(mesh_transforms(mesh_shapes))
@@ -192,8 +196,30 @@ def export_scene(
             + [
                 (record, _sampler(camera_sample, shape))
                 for record, shape in zip(camera_records, camera_shapes)
+            ]
+            + [
+                (record, _sampler(particle_sample, shape))
+                for record, shape in zip(particle_list, particle_shapes)
             ],
         )
+        # Particles are the one sampled thing that can refuse the bake, so
+        # the samples are judged before they are written out.
+        baked_particles = resolve_samples(particle_list)
+        for record in particle_list:
+            if record.get("count_varies"):
+                warnings.append(
+                    'Particle object "{0}" changes count over the frame '
+                    "range, so only the exported frame travels.".format(
+                        record.get("particle") or "?"
+                    )
+                )
+            elif record.get("bake_too_large"):
+                warnings.append(
+                    'Particle object "{0}" is too dense to bake over this '
+                    "range, so only the exported frame travels.".format(
+                        record.get("particle") or "?"
+                    )
+                )
         export_fbx(mesh_transforms(mesh_shapes), fbx_path, animation)
 
         payload = {
@@ -217,6 +243,7 @@ def export_scene(
             "volume_count": len(volume_list),
             "volumes": volume_list,
             "particle_count": len(particle_list),
+            "particle_baked_count": baked_particles,
             "particles": particle_list,
             "transforms": transform_list,
             "light_count": len(light_records),

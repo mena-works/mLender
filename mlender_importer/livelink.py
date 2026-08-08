@@ -186,7 +186,8 @@ def process_messages():
             "Imported {0} mesh(es), {1} material(s), "
             "{2} subdivision modifier(s), {3} light(s), {4} camera(s), "
             "{5} collection(s), {6} instance(s), {7} empty(ies), "
-            "{8} curve(s), {9} set(s), {10} layer(s)."
+            "{8} curve(s), {9} set(s), {10} layer(s), {11} volume(s), "
+            "{12} particle object(s) ({13} baked)."
         ).format(
             result["mesh_count"],
             result["material_count"],
@@ -199,6 +200,9 @@ def process_messages():
             result["curve_count"],
             result["set_count"],
             result["layer_count"],
+            result["volume_count"],
+            result["particle_count"],
+            result["particle_baked_count"],
         )
         for warning in result.get("warnings") or []:
             print("mLender warning: {0}".format(warning))

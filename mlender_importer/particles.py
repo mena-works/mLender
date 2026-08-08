@@ -13,11 +13,18 @@ would put geometry back on them.
 Per particle radius, colour and opacity arrive as mesh attributes on the point
 domain when Maya had them, under their own names, so they can drive that
 instancing rather than being lost as trivia.
+
+A simulation travels as keyframed vertex positions when the exporter could bake
+it. Measured on 4.1 and 5.2: a vertex's ``co`` takes keyframes, while an
+object's mesh datablock does not, which is why a bake is only possible at all
+for a particle count that never changes -- and why the exporter, not this side,
+decides whether there is one.
 """
 
 import bpy
 from mathutils import Matrix, Vector
 
+from .animation import set_linear_interpolation
 from .attributes import apply_custom_attributes
 from .scene import place_in_group
 from .transforms import maya_matrix_to_blender
@@ -33,15 +40,16 @@ POINT_ATTRIBUTES = {
 
 def import_particles(package_data, root_collection, import_scale, warnings,
                      group_cache, object_by_path=None):
-    """Rebuild every particle record. Returns how many were built."""
+    """Rebuild every particle record. Returns (built, baked) counts."""
     records = list(package_data.get("particles") or [])
     if not records:
-        return 0
+        return 0, 0
 
     meters_per_unit = scalar(package_data.get("meters_per_maya_unit"), 0.01)
     position_scale = meters_per_unit * max(scalar(import_scale, 1.0), 0.000001)
 
     built = 0
+    baked = 0
     for record in records:
         try:
             obj = _build_particles(record, position_scale, warnings)
@@ -59,7 +67,65 @@ def import_particles(package_data, root_collection, import_scale, warnings,
         if object_by_path is not None and record.get("particle_path"):
             object_by_path[record["particle_path"]] = obj
         built += 1
-    return built
+        if bake_positions(obj.data, record, position_scale, warnings):
+            baked += 1
+    return built, baked
+
+
+def bake_positions(mesh, record, position_scale, warnings):
+    """Key every vertex to its sampled position. True when a bake happened.
+
+    The exporter only sends samples for a count that never changes, so the
+    vertex list built from the first frame stays valid for all of them. A
+    length that disagrees would move the wrong points, so it stops instead.
+    """
+    samples = record.get("samples") or []
+    if len(samples) < 2:
+        return False
+
+    vertices = mesh.vertices
+    keyed = 0
+    for sample in samples:
+        frame = sample.get("frame")
+        positions = sample.get("positions") or []
+        if frame is None or len(positions) != len(vertices) * 3:
+            warnings.append(
+                'Particle object "{0}" has a frame that does not match its '
+                "point count, so its bake stops there.".format(
+                    record.get("particle") or "?"
+                )
+            )
+            break
+        for index, vertex in enumerate(vertices):
+            base = index * 3
+            vertex.co = (
+                positions[base] * position_scale,
+                positions[base + 1] * position_scale,
+                positions[base + 2] * position_scale,
+            )
+            vertex.keyframe_insert("co", frame=frame)
+        keyed += 1
+
+    if keyed < 2:
+        return False
+    set_linear_interpolation(mesh)
+    # The loop leaves every vertex parked on the last frame it keyed. The
+    # animation overrides that the moment the frame changes, but until then
+    # the mesh would sit at the end of the simulation rather than at the
+    # snapshot the rest of the record describes.
+    _apply_first_sample(vertices, samples[0], position_scale)
+    return True
+
+
+def _apply_first_sample(vertices, sample, position_scale):
+    positions = sample.get("positions") or []
+    for index, vertex in enumerate(vertices):
+        base = index * 3
+        vertex.co = (
+            positions[base] * position_scale,
+            positions[base + 1] * position_scale,
+            positions[base + 2] * position_scale,
+        )
 
 
 def _build_particles(record, position_scale, warnings):

@@ -333,6 +333,23 @@ def build_scene():
         name="dustParticle",
     )
     cmds.setAttr(particle_tf + ".translateY", 10)
+    # Gravity so the four points actually move. A bake asserted on a still
+    # simulation would pass on code that keys the same position every frame.
+    # Both of these commands act on the selection when they have one, which
+    # is why it is cleared first.
+    cmds.select(clear=True)
+    gravity = cmds.gravity(name="dustGravity")[0]
+    cmds.connectDynamic(particle_tf, fields=gravity)
+
+    # And an emitter, whose count grows as it runs: measured 0, 3, 7 and 15
+    # particles at frames 1, 5, 10 and 20. A Blender mesh has a fixed vertex
+    # count, so this one must refuse the bake rather than ship a partial one.
+    cmds.select(clear=True)
+    emitter = cmds.emitter(
+        pos=(0, 0, 0), name="sparkEmitter", type="omni", rate=20
+    )[0]
+    spark_tf, spark_shape = cmds.particle(name="sparkParticle")
+    cmds.connectDynamic(spark_tf, emitters=emitter)
 
     # An Arnold volume. The VDB deliberately does not exist: measured on 4.1
     # and 5.2, Blender takes the path, reports no grids and raises nothing, so
@@ -710,7 +727,7 @@ def main():
         item.get("particle"): item
         for item in (payload.get("particles") or [])
     }
-    check("1 particle object exported", payload["particle_count"] == 1,
+    check("2 particle objects exported", payload["particle_count"] == 2,
           payload["particle_count"])
     dust = by_particle.get("dustParticle") or {}
     check("its count is carried", dust.get("count") == 4, dust.get("count"))
@@ -732,6 +749,35 @@ def main():
           "dustParticle" not in by_mesh, sorted(by_mesh))
     check("nor as an empty",
           "dustParticle" not in by_transform, sorted(by_transform))
+
+    print("\nparticle bake")
+    check("one of the two could be baked",
+          payload.get("particle_baked_count") == 1,
+          payload.get("particle_baked_count"))
+    samples = dust.get("samples") or []
+    check("the constant count one carries a sample per frame",
+          len(samples) > 1, len(samples))
+    if samples:
+        check("every sample names its frame",
+              all(item.get("frame") is not None for item in samples))
+        check("and holds one triple per particle",
+              all(len(item.get("positions") or []) == 12
+                  for item in samples),
+              [len(item.get("positions") or []) for item in samples])
+        # Gravity is connected, so a bake that keys the same value every
+        # frame is a bake that is not reading the simulation.
+        first = samples[0].get("positions") or []
+        last = samples[-1].get("positions") or []
+        check("and the points actually moved between them",
+              first != last, (first[:3], last[:3]))
+
+    spark = by_particle.get("sparkParticle") or {}
+    check("the emitter driven one is flagged as varying",
+          spark.get("count_varies") is True, spark.get("count_varies"))
+    check("and carries no samples at all",
+          not spark.get("samples"), len(spark.get("samples") or []))
+    check("while keeping its snapshot",
+          "positions" in spark)
 
     print("\nvolumes")
     by_volume = {

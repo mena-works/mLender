@@ -20,6 +20,7 @@ from __future__ import absolute_import
 
 import maya.cmds as cmds
 
+from .constants import MAX_PARTICLE_BAKE_POINTS
 from .mayautils import (
     attr_exists,
     first_existing_attr,
@@ -120,6 +121,61 @@ def particle_record(shape):
 
 def particle_records(shapes):
     return [particle_record(shape) for shape in shapes]
+
+
+def particle_sample(shape):
+    """Positions at the current frame, for the timeline sampler.
+
+    The count travels with them because it is what decides, afterwards,
+    whether the bake can be kept at all.
+    """
+    count = particle_count(shape)
+    return {
+        "count": count,
+        "positions": read_point_array(shape, "position", count, 3),
+    }
+
+
+def resolve_samples(records):
+    """Keep a position bake only where the particle count holds still.
+
+    Measured on a real emitter driven system, the count grows as the
+    simulation runs: 0, 3, 7 and 15 particles at frames 1, 5, 10 and 20. A
+    Blender mesh has a fixed vertex count, and measured on 4.1 and 5.2 an
+    object's mesh datablock cannot be keyframed either, so a set of points
+    that changes size has no honest representation on the other side.
+
+    Such a record keeps its single frame snapshot and says why. Shipping a
+    bake that silently drops the particles born later, or invents ones that
+    were never alive, would look like a transfer and be a lie.
+    """
+    baked = 0
+    for record in records:
+        samples = record.pop("samples", None) or []
+        counts = set(int(sample.get("count") or 0) for sample in samples)
+        if len(samples) < 2 or len(counts) != 1 or counts == set([0]):
+            if len(counts) > 1:
+                record["count_varies"] = True
+            continue
+        count = counts.pop()
+        if count * len(samples) > MAX_PARTICLE_BAKE_POINTS:
+            record["bake_too_large"] = True
+            continue
+        frames = [
+            {
+                "frame": sample.get("frame"),
+                "positions": sample.get("positions") or [],
+            }
+            for sample in samples
+            if len(sample.get("positions") or []) == count * 3
+        ]
+        if len(frames) != len(samples):
+            continue
+        record["count"] = count
+        record["positions"] = frames[0]["positions"]
+        record["samples"] = frames
+        baked += 1
+    return baked
 
 
 def _visible(transform):
