@@ -270,6 +270,39 @@ def build_scene():
     cmds.connectAttr(ramp_tex + ".outColor", ramptex_shd + ".baseColor",
                      force=True)
 
+    # A file texture behind a projection. Measured before this: the upstream
+    # walk stepped through the projection, found the file and shipped it as
+    # an ordinary UV mapped texture -- a wrong result that looked right.
+    _, proj_shd = shaded_cube("projCube", "aiStandardSurface")
+    projection = cmds.shadingNode("projection", asTexture=True,
+                                  name="planarProjection")
+    cmds.setAttr(projection + ".projType", 1)          # Planar
+    proj_file = cmds.shadingNode("file", asTexture=True, name="projFile")
+    cmds.setAttr(proj_file + ".fileTextureName", texture, type="string")
+    cmds.connectAttr(proj_file + ".outColor", projection + ".image",
+                     force=True)
+    proj_place = cmds.shadingNode("place3dTexture", asUtility=True,
+                                  name="projPlacement")
+    cmds.setAttr(proj_place + ".translateY", 4)
+    cmds.setAttr(proj_place + ".scaleX", 2)
+    cmds.connectAttr(proj_place + ".worldInverseMatrix[0]",
+                     projection + ".placementMatrix", force=True)
+    cmds.connectAttr(projection + ".outColor", proj_shd + ".baseColor",
+                     force=True)
+
+    # And a projection type this build does not reproduce, which must say so.
+    _, ball_shd = shaded_cube("ballProjCube", "aiStandardSurface")
+    ball = cmds.shadingNode("projection", asTexture=True, name="ballProjection")
+    cmds.setAttr(ball + ".projType", 4)                # Ball
+    ball_file = cmds.shadingNode("file", asTexture=True, name="ballFile")
+    cmds.setAttr(ball_file + ".fileTextureName", texture, type="string")
+    cmds.connectAttr(ball_file + ".outColor", ball + ".image", force=True)
+    ball_place = cmds.shadingNode("place3dTexture", asUtility=True,
+                                  name="ballPlacement")
+    cmds.connectAttr(ball_place + ".worldInverseMatrix[0]",
+                     ball + ".placementMatrix", force=True)
+    cmds.connectAttr(ball + ".outColor", ball_shd + ".baseColor", force=True)
+
     # And a type one Color Ramp cannot make, which must say so rather than
     # arrive as a gradient in the wrong shape.
     _, radial_shd = shaded_cube("radialRampCube", "aiStandardSurface")
@@ -790,7 +823,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("36 meshes exported", payload["mesh_count"] == 36,
+    check("38 meshes exported", payload["mesh_count"] == 38,
           payload["mesh_count"])
     # Four: the locator, the empty null, the nested locator, and the group
     # holding only a curve. That last one has no mesh below it either, so
@@ -1738,6 +1771,40 @@ def main():
     check("a circular ramp travels too, for the importer to refuse",
           (unbaked_radial.get("ramp") or {}).get("type") == "Circular Ramp",
           (unbaked_radial.get("ramp") or {}).get("type"))
+
+    print("\ntexture projection")
+    # With baking on the projection is evaluated onto the UVs, which is
+    # correct and is what the option is for.
+    baked_proj = base_texture(by_material, "projCube_shd")
+    check("with baking on a projection is baked",
+          baked_proj.get("baked") is True, baked_proj.get("baked"))
+
+    proj_tex = base_texture(unbaked_by_material, "projCube_shd")
+    proj = proj_tex.get("projection") or {}
+    # The bug this replaces: the walk found the file behind the projection
+    # and shipped its path, so the texture arrived wrapped on the UVs.
+    check("with baking off the file path is not handed over",
+          not (proj_tex.get("path") or ""), proj_tex.get("path"))
+    check("the projection is described instead",
+          proj.get("type") == "Planar", proj.get("type"))
+    check("its place3dTexture travels with it",
+          proj.get("placement") == "projPlacement", proj.get("placement"))
+    # Without the matrix the other side has nothing to project from.
+    check("and so does the placement's world matrix",
+          len(proj.get("world_matrix") or []) == 16,
+          len(proj.get("world_matrix") or []))
+    check("the placement's offset is in that matrix",
+          abs((proj.get("world_matrix") or [0] * 16)[13] - 4.0) < 1e-6,
+          (proj.get("world_matrix") or [0] * 16)[12:15])
+    # The image itself is an ordinary file; only its mapping differs.
+    check("the projected image path travels",
+          str((proj.get("image") or {}).get("path") or "").endswith(".tx"),
+          (proj.get("image") or {}).get("path"))
+
+    ball_proj = (base_texture(unbaked_by_material, "ballProjCube_shd")
+                 .get("projection") or {})
+    check("a Ball projection travels too, for the importer to refuse",
+          ball_proj.get("type") == "Ball", ball_proj.get("type"))
 
     print("\ninstancers")
     instancers = payload.get("instancers") or []

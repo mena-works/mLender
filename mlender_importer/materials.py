@@ -20,6 +20,7 @@ the FBX importer creates.
 import math
 
 import bpy
+from mathutils import Matrix, Vector
 
 from .constants import (
     COLOUR_VALUED_CHANNELS,
@@ -34,6 +35,9 @@ from .constants import (
     SHEEN_ROUGHNESS_REMAP,
     GLASS_INPUTS,
     PRINCIPLED_INPUTS,
+    PROJECTION_MAPPING_OFFSET,
+    PROJECTION_MAPPING_ROTATION,
+    PROJECTION_MODES,
     RAMP_FACING_MODE,
     RAMP_TEXTURE_COMPONENTS,
     RAMP_TEXTURE_INTERPOLATION,
@@ -46,6 +50,7 @@ from .constants import (
     UNLIT_SHADER_TYPES,
 )
 from .corrections import apply_corrections
+from .transforms import maya_matrix_to_blender
 from .images import load_image
 from .utils import (
     color4,
@@ -774,6 +779,151 @@ def apply_channel(material, bsdf, channel, record, warnings):
     )
 
 
+def build_projection(material, texture, warnings):
+    """A Maya projection as an Image Texture read through a place3dTexture.
+
+    Measured, planar, with the tool's own bake as the ground truth: Maya's
+    image covers the placement's local -0.5..0.5 on both axes, u along +X and
+    v along +Y, with no flip. The same picture comes back in Blender from a
+    Texture Coordinate Object output through a Mapping node rotated -90
+    degrees about X and moved by +0.5; the rotation undoes the Y-up to Z-up
+    conversion so the texture space is Maya's again, and +90 is vertically
+    flipped.
+
+    Only Planar is reproduced. The other types each need their own
+    measurement, and a projection in the wrong shape is worse than one that
+    says it needs the bake.
+
+    Returns the Image Texture node, or None.
+    """
+    projection = texture.get("projection") or {}
+    kind = str(projection.get("type") or "")
+    image_record = projection.get("image") or {}
+    if kind not in PROJECTION_MODES or not image_record.get("path"):
+        warnings.append(
+            'Maya projection "{0}" is {1}, which this build cannot rebuild; '
+            "it needs Bake Procedurals to travel.".format(
+                projection.get("node") or "?", kind or "an unknown type"
+            )
+        )
+        return None
+
+    image = load_image(image_record, "projection", warnings)
+    if image is None:
+        return None
+
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+
+    node = nodes.new("ShaderNodeTexImage")
+    node.name = "ML_Projection"
+    node.label = "Maya {0} Projection".format(kind)
+    node.image = image
+    node.projection = PROJECTION_MODES[kind]
+    node.location = (-500, 0)
+
+    empty = _placement_empty(projection)
+    coords = nodes.new("ShaderNodeTexCoord")
+    coords.name = "ML_Projection_Coord"
+    coords.location = (-1100, 0)
+    if empty is not None:
+        coords.object = empty
+
+    mapping = nodes.new("ShaderNodeMapping")
+    mapping.name = "ML_Projection_Mapping"
+    mapping.label = "Maya texture space"
+    mapping.location = (-800, 0)
+    mapping.inputs["Rotation"].default_value = PROJECTION_MAPPING_ROTATION
+    mapping.inputs["Location"].default_value = PROJECTION_MAPPING_OFFSET
+    links.new(coords.outputs["Object"], mapping.inputs["Vector"])
+    links.new(mapping.outputs["Vector"], node.inputs["Vector"])
+    return node
+
+
+def import_projection_placements(package_data, collection, import_scale,
+                                 warnings):
+    """Build one Empty per place3dTexture, before any material needs it.
+
+    A separate pass for the same reason the locators and curves have one: the
+    materials are built deep inside the mesh loop, and threading the scene
+    scale down to every socket writer to make an object there would be worse
+    than looking one up by name.
+
+    Scale is kept, unlike the light and camera conversion that strips it. A
+    placement's scale is what sets how large the projection is, so dropping it
+    would project the image at the wrong size.
+    """
+    meters_per_unit = scalar(package_data.get("meters_per_maya_unit"), 0.01)
+    position_scale = meters_per_unit * max(scalar(import_scale, 1.0), 1e-6)
+
+    built = 0
+    for projection in _scene_projections(package_data):
+        name = _placement_name(projection)
+        if not name or bpy.data.objects.get(name):
+            continue
+        try:
+            empty = bpy.data.objects.new(name, None)
+            empty["ml_generated"] = True
+            empty["ml_maya_placement"] = projection.get("placement") or name
+            empty.empty_display_type = "CUBE"
+            if collection is not None:
+                collection.objects.link(empty)
+            basis = maya_matrix_to_blender(projection, position_scale)
+            empty.matrix_world = basis @ Matrix.Diagonal(
+                Vector(_matrix_scale(projection))
+            ).to_4x4()
+        except Exception as exc:
+            warnings.append(
+                'Texture placement "{0}" could not be built: {1}'.format(
+                    projection.get("placement") or "?", exc
+                )
+            )
+            continue
+        built += 1
+    return built
+
+
+def _scene_projections(package_data):
+    """Every projection record in the package, materials and layers alike."""
+    found = []
+
+    def walk(material):
+        for record in (material.get("channels") or {}).values():
+            projection = (record.get("texture") or {}).get("projection")
+            if projection:
+                found.append(projection)
+        for layer in material.get("layers") or []:
+            walk(layer)
+
+    for mesh in package_data.get("meshes") or []:
+        for material in mesh.get("materials") or []:
+            walk(material)
+    return found
+
+
+def _placement_name(projection):
+    name = projection.get("placement")
+    return "ML_" + safe_name(name) if name else ""
+
+
+def _placement_empty(projection):
+    """The Empty built for this placement, or None if there was none."""
+    name = _placement_name(projection)
+    return bpy.data.objects.get(name) if name else None
+
+
+def _matrix_scale(record):
+    values = record.get("world_matrix") or []
+    if len(values) != 16:
+        return (1.0, 1.0, 1.0)
+    lengths = []
+    for start in (0, 4, 8):
+        axis = values[start:start + 3]
+        length = sum(float(item) * float(item) for item in axis) ** 0.5
+        lengths.append(length if length > 1e-9 else 1.0)
+    return tuple(lengths)
+
+
 def build_texture_ramp(material, texture, warnings):
     """A Maya ramp *texture* as a Color Ramp driven by a UV coordinate.
 
@@ -936,6 +1086,15 @@ def apply_record_to_socket(material, shader, target, channel, record, warnings):
             return
 
     texture = record.get("texture") or {}
+    # A projected texture has no path either, and it has to come first: the
+    # image behind the projection is a perfectly ordinary file, and treating
+    # it as one is exactly the wrong result this exists to prevent.
+    if texture.get("projection"):
+        projected = build_projection(material, texture, warnings)
+        if projected is not None:
+            material.node_tree.links.new(projected.outputs["Color"], target)
+            return
+
     # A ramp texture has no file to load, so this has to come before the path
     # check or the gradient is skipped and the flat value wins.
     if texture.get("ramp") and not texture.get("path"):

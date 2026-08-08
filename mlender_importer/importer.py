@@ -32,7 +32,11 @@ from .sets import import_sets
 from .particles import import_particles
 from .instancers import import_instancers
 from .volumes import import_volumes
-from .materials import apply_face_assignments, build_material
+from .materials import (
+    apply_face_assignments,
+    build_material,
+    import_projection_placements,
+)
 from .scene import (
     add_subdivision_modifiers,
     apply_visibility,
@@ -145,6 +149,10 @@ def import_scene_package(
     )
     material_cache = {}
     assignments = []
+    # Before the materials, which look their placement up by name.
+    placement_count = import_projection_placements(
+        package_data, root_collection, import_scale, warnings
+    )
     mesh_records = list(package_data.get("meshes") or [])
     # Indexed once: matching every object against every record, and
     # re-deriving each record's name keys each time, was quadratic.
@@ -336,6 +344,7 @@ def import_scene_package(
         "particle_count": particle_count,
         "particle_baked_count": particle_baked_count,
         "instancer_count": instancer_count,
+        "placement_count": placement_count,
         "alembic_count": alembic_count,
         "render": render_applied,
         "import_mode": mode,

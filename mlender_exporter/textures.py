@@ -14,6 +14,12 @@ import re
 import maya.cmds as cmds
 
 from .constants import (
+    PLACEMENT_3D_NODE_TYPE,
+    PROJECTION_IMAGE_ATTR,
+    PROJECTION_NODE_TYPE,
+    PROJECTION_PLACEMENT_ATTR,
+    PROJECTION_TYPES,
+    PROJECTION_TYPE_ATTR,
     RAMP_TEXTURE_ENTRIES,
     RAMP_TEXTURE_INTERPOLATIONS,
     RAMP_TEXTURE_TYPE,
@@ -47,6 +53,7 @@ from .mayautils import (
     node_type,
     raw_attr_value,
     unique,
+    world_matrix,
 )
 
 
@@ -73,6 +80,25 @@ def texture_from_plug(plug):
     # listHistory repeats the node it started from, and a repeat would record
     # the same correction node twice and apply its maths twice.
     candidates = unique(candidates)
+    # A file behind a projection is not UV mapped, so handing its path over
+    # would produce a wrong result that looks like a right one: measured, a
+    # planar projected texture arrived wrapped on the UVs with nothing said.
+    # The walk stops here and the record describes the projection instead.
+    projection = projection_info(candidates)
+    if projection:
+        record = {
+            "path": "",
+            "node": node_label(source_node),
+            "node_type": node_type(source_node),
+            "source_plug": source_plug,
+            "unsupported_network": True,
+            "projection": projection,
+        }
+        image = projection_image(projection["node_path"])
+        if image:
+            record["projection"]["image"] = image
+        return record
+
     for node in candidates:
         path = texture_path_from_node(node)
         if path:
@@ -116,6 +142,87 @@ def texture_from_plug(plug):
     if ramp:
         record["ramp"] = ramp
     return record
+
+
+def projection_info(candidates):
+    """The projection node between the shader and its file, if there is one.
+
+    ``candidates`` runs from the shader end towards the texture, so the first
+    projection found is the one actually driving the channel.
+
+    The place3dTexture comes with it: a projection has no position of its own,
+    it reads the placement's inverse world matrix, and without that matrix the
+    other side has nothing to project from.
+    """
+    for node in candidates:
+        if node_type(node) != PROJECTION_NODE_TYPE:
+            continue
+        record = {
+            "node": node_label(node),
+            "node_path": node,
+            "type": _enum_label(
+                node, PROJECTION_TYPE_ATTR, PROJECTION_TYPES
+            ),
+        }
+        placement = projection_placement(node)
+        if placement:
+            record.update(placement)
+        return record
+    return {}
+
+
+def projection_placement(node):
+    """The place3dTexture feeding a projection, as a name and a world matrix."""
+    try:
+        sources = cmds.listConnections(
+            node + "." + PROJECTION_PLACEMENT_ATTR,
+            source=True, destination=False,
+        ) or []
+    except Exception:
+        return {}
+    for source in sources:
+        resolved = (cmds.ls(source, long=True) or [source])[0]
+        if node_type(resolved) != PLACEMENT_3D_NODE_TYPE:
+            continue
+        return {
+            "placement": node_label(resolved),
+            "placement_path": resolved,
+            "world_matrix": world_matrix(resolved),
+        }
+    return {}
+
+
+def projection_image(node):
+    """The file the projection projects, as an ordinary texture record.
+
+    The path still travels: the image itself is a normal texture, it is only
+    the mapping that differs, and re-reading it on the other side would be
+    the same file.
+    """
+    try:
+        sources = cmds.listConnections(
+            node + "." + PROJECTION_IMAGE_ATTR,
+            source=True, destination=False,
+        ) or []
+    except Exception:
+        return {}
+    for source in sources:
+        resolved = (cmds.ls(source, long=True) or [source])[0]
+        path = texture_path_from_node(resolved)
+        if not path:
+            continue
+        udim = udim_texture_info(resolved, path)
+        image = {
+            "path": maya_path(udim.get("pattern") or path),
+            "original_path": maya_path(path),
+            "node": node_label(resolved),
+            "color_space": texture_color_space(resolved),
+        }
+        if udim.get("is_udim"):
+            image["udim"] = True
+            image["udim_pattern"] = maya_path(udim["pattern"])
+        return image
+    return {}
 
 
 def texture_ramp(node):

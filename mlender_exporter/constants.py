@@ -17,7 +17,7 @@ LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
 LIVELINK_PROTOCOL = "mlender_livelink"
 LIVELINK_VERSION = 3
-EXPORT_SCHEMA_VERSION = 35
+EXPORT_SCHEMA_VERSION = 36
 
 LIGHT_NODE_TYPES = (
     "RedshiftPhysicalLight",
@@ -179,6 +179,34 @@ RAMP_CHANNEL_ATTRS = (
 # is the cosine itself -- 0.988 facing, 0.771 toward the rim -- so that is
 # what the importer builds.
 RAMP_FACING_SEMANTIC = "maya_ramp_facing_angle"
+
+# Texture projection. A projection node maps an image through a
+# place3dTexture rather than through UVs, and the enum below was read from a
+# live Maya 2023 node.
+#
+# Measured, planar, with the tool's own bake as ground truth: the image
+# covers the placement's local -0.5..0.5 on both axes, u along +X and v along
+# +Y, with no flip. On the Blender side the same picture comes back from a
+# Texture Coordinate Object output through a Mapping node rotated -90 degrees
+# about X and translated by +0.5; the rotation undoes the Y-up to Z-up
+# conversion so the texture space is Maya's again, and +90 degrees is
+# vertically flipped.
+PROJECTION_NODE_TYPE = "projection"
+PROJECTION_TYPE_ATTR = "projType"
+PROJECTION_IMAGE_ATTR = "image"
+PROJECTION_PLACEMENT_ATTR = "placementMatrix"
+PLACEMENT_3D_NODE_TYPE = "place3dTexture"
+PROJECTION_TYPES = (
+    "Off",
+    "Planar",
+    "Spherical",
+    "Cylindrical",
+    "Ball",
+    "Cubic",
+    "TriPlanar",
+    "Concentric",
+    "Perspective",
+)
 
 # The ramp *texture* node, which is a different thing from a rampShader: a
 # gradient wired into any channel. Enum labels and the entry children were

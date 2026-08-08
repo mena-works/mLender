@@ -455,6 +455,46 @@ The Phong conversion is **analytic, not measured**: a Phong lobe and a GGX
 lobe are different shapes, so no single number makes them equal. It tracks the
 artist's intent, which a pinned value did not.
 
+### Texture projection
+
+A `projection` node maps an image through a **place3dTexture** instead of
+through UVs. Before this the upstream walk stepped straight through it, found
+the file behind it and shipped that path — so a projected texture arrived
+wrapped on the mesh's UVs, which looks nothing like the projection and which
+nothing warned about. That was a wrong result presented as a right one, not a
+missing one.
+
+**Bake Procedurals decides**, as it does for ramps. With it on the projection
+is evaluated onto the mesh's UVs, which is correct for all nine of Maya's
+types.
+
+With it off, a **Planar** projection is rebuilt natively: the place3dTexture
+arrives as an Empty, and the image is read through a Texture Coordinate
+**Object** output so it follows that Empty. Move the Empty in Blender and the
+projection moves, as it does in Maya. The placement's scale is kept, because
+that is what sets how large the projection is.
+
+The construction was measured, with the tool's own bake as the ground truth.
+Maya's planar projection covers the placement's local `-0.5 .. 0.5` on both
+axes, u along `+X` and v along `+Y`, with no flip. In Blender the same picture
+comes back through a Mapping node rotated **−90° about X** and moved by
+**+0.5**: the rotation undoes the Y-up to Z-up conversion that the Object
+output has already applied, putting the texture back in Maya's space. `+90°`
+renders vertically flipped and `0°` has no vertical variation at all.
+
+Only Planar is rebuilt. Spherical, Cylindrical, Ball, Cubic, TriPlanar,
+Concentric and Perspective each need their own measurement before they can be
+claimed, so with baking off they say so instead of arriving in the wrong
+shape:
+
+```text
+mLender warning: Maya projection "ballProjection" is Ball, which this build
+cannot rebuild; it needs Bake Procedurals to travel.
+```
+
+3D textures such as `solidFractal` or `cloud` have always needed the bake, and
+still do — the bake evaluates their place3dTexture correctly.
+
 ### Ramp textures
 
 A `ramp` texture node is a different thing from a `rampShader`: a gradient

@@ -113,9 +113,9 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("36 meshes imported", result["mesh_count"] == 36,
+    check("38 meshes imported", result["mesh_count"] == 38,
           result["mesh_count"])
-    check("28 materials built", result["material_count"] == 28,
+    check("30 materials built", result["material_count"] == 30,
           result["material_count"])
     # Four of the eight cubes asked for subdivision in Maya, the displaced one
     # among them; the rest must arrive unmodified.
@@ -1656,6 +1656,68 @@ def main():
               any("Circular Ramp" in item
                   for item in unbaked_result["warnings"]),
               [w for w in unbaked_result["warnings"] if "Ramp" in w])
+
+        print("\ntexture projection, unbaked package")
+        check("the import reported a placement",
+              unbaked_result["placement_count"] >= 1,
+              unbaked_result["placement_count"])
+        projected = material_for("projCube")
+        check("the projected material exists", projected is not None)
+        if projected:
+            nodes = projected.node_tree.nodes
+            images = [n for n in nodes
+                      if n.bl_idname == "ShaderNodeTexImage"]
+            check("built from one image texture", len(images) == 1,
+                  len(images))
+            if images:
+                node = images[0]
+                check("projected flat, not wrapped on the UVs",
+                      node.projection == "FLAT", node.projection)
+                mapping = node.inputs["Vector"].links[0].from_node
+                check("through a Mapping node",
+                      mapping.bl_idname == "ShaderNodeMapping",
+                      mapping.bl_idname)
+                if mapping.bl_idname == "ShaderNodeMapping":
+                    # Measured: -90 about X puts the texture back in Maya's
+                    # space and +0.5 moves its -0.5..0.5 onto Blender's 0..1.
+                    # +90 renders vertically flipped.
+                    rotation = [round(math.degrees(v), 1)
+                                for v in mapping.inputs["Rotation"].default_value]
+                    offset = [round(v, 3)
+                              for v in mapping.inputs["Location"].default_value]
+                    check("rotated -90 about X", rotation == [-90.0, 0.0, 0.0],
+                          rotation)
+                    check("and moved by half", offset == [0.5, 0.5, 0.0],
+                          offset)
+                    coord = mapping.inputs["Vector"].links[0].from_node
+                    check("reading object coordinates",
+                          coord.bl_idname == "ShaderNodeTexCoord"
+                          and mapping.inputs["Vector"].links[0]
+                          .from_socket.name == "Object",
+                          (coord.bl_idname,
+                           mapping.inputs["Vector"].links[0].from_socket.name))
+                    # An Empty standing in for the place3dTexture, and the
+                    # coordinates must actually be read from it.
+                    check("from the placement Empty",
+                          coord.object is not None
+                          and coord.object.get("ml_maya_placement")
+                          == "projPlacement",
+                          getattr(coord.object, "name", None))
+                    if coord.object:
+                        # Maya put it 4 units up in a centimetre scene, and
+                        # scaled it 2 in X, which sets the projection size.
+                        place = coord.object
+                        check("placed where Maya had it",
+                              abs(place.matrix_world.translation.z - 0.04)
+                              < 1e-4,
+                              round(place.matrix_world.translation.z, 5))
+                        check("with its scale kept",
+                              abs(place.matrix_world.to_scale().x - 2.0) < 1e-4,
+                              round(place.matrix_world.to_scale().x, 4))
+        # A type this build does not reproduce must say so.
+        check("a Ball projection is refused with a warning",
+              any("Ball" in item for item in unbaked_result["warnings"]),
+              [w for w in unbaked_result["warnings"] if "projection" in w])
 
     print()
     if failures:

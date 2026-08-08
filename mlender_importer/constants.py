@@ -8,7 +8,7 @@ message shape changes.
 
 import math
 
-BUILD_VERSION = "2.19.0"
+BUILD_VERSION = "2.20.0"
 
 LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
@@ -22,7 +22,7 @@ LIVELINK_EVENT = "scene_package_ready"
 # branch with both, plus the Arnold channels.
 SUPPORTED_SCHEMA_VERSIONS = (
     1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
-    20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35,
+    20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36,
 )
 
 # rampShader. The mode name the exporter writes when Maya's single colorInput
@@ -37,6 +37,23 @@ RAMP_INTERPOLATION = {
     "Smooth": "EASE",
     "Spline": "B_SPLINE",
 }
+
+# Maya projection types this build can rebuild, and what they become. Only
+# Planar is here: it is the one that was measured, and each of the others
+# needs its own measurement before it can be claimed. Anything absent falls
+# back to Bake Procedurals, which evaluates the projection correctly.
+PROJECTION_MODES = {
+    "Planar": "FLAT",
+}
+
+# Measured with the tool's own bake as ground truth. Maya's planar projection
+# covers the placement's local -0.5..0.5 with u along +X and v along +Y, so
+# the Mapping node moves the origin by half. The -90 degrees about X undoes
+# the Y-up to Z-up conversion that Texture Coordinate's Object output has
+# already applied, putting the texture back in Maya's space; +90 renders
+# vertically flipped and 0 has no vertical variation at all.
+PROJECTION_MAPPING_ROTATION = (-math.pi / 2.0, 0.0, 0.0)
+PROJECTION_MAPPING_OFFSET = (0.5, 0.5, 0.0)
 
 # Which UV component drives a Maya ramp texture. Measured by baking a
 # red-to-blue ramp and reading the image: a V Ramp puts position 0 at v=0 and
