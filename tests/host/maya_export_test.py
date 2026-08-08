@@ -317,6 +317,22 @@ def build_scene():
                      cyl + ".placementMatrix", force=True)
     cmds.connectAttr(cyl + ".outColor", cyl_shd + ".baseColor", force=True)
 
+    # TriPlanar and Perspective, the two the measurement rig settled last.
+    for label, kind in (("tri", 6), ("persp", 8)):
+        _, proj_shader = shaded_cube(label + "ProjCube", "aiStandardSurface")
+        node = cmds.shadingNode("projection", asTexture=True,
+                                name=label + "Projection")
+        cmds.setAttr(node + ".projType", kind)
+        image = cmds.shadingNode("file", asTexture=True, name=label + "File")
+        cmds.setAttr(image + ".fileTextureName", texture, type="string")
+        cmds.connectAttr(image + ".outColor", node + ".image", force=True)
+        place = cmds.shadingNode("place3dTexture", asUtility=True,
+                                 name=label + "Placement")
+        cmds.connectAttr(place + ".worldInverseMatrix[0]",
+                         node + ".placementMatrix", force=True)
+        cmds.connectAttr(node + ".outColor", proj_shader + ".baseColor",
+                         force=True)
+
     # And a projection type this build does not reproduce, which must say so.
     _, ball_shd = shaded_cube("ballProjCube", "aiStandardSurface")
     ball = cmds.shadingNode("projection", asTexture=True, name="ballProjection")
@@ -850,7 +866,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("40 meshes exported", payload["mesh_count"] == 40,
+    check("42 meshes exported", payload["mesh_count"] == 42,
           payload["mesh_count"])
     # Four: the locator, the empty null, the nested locator, and the group
     # holding only a curve. That last one has no mesh below it either, so
@@ -1837,6 +1853,12 @@ def main():
                 .get("projection") or {})
     check("a Cylindrical projection travels with its type",
           cyl_proj.get("type") == "Cylindrical", cyl_proj.get("type"))
+
+    for label, expected in (("tri", "TriPlanar"), ("persp", "Perspective")):
+        found = (base_texture(unbaked_by_material, label + "ProjCube_shd")
+                 .get("projection") or {})
+        check("a {0} projection travels with its type".format(expected),
+              found.get("type") == expected, found.get("type"))
 
     ball_proj = (base_texture(unbaked_by_material, "ballProjCube_shd")
                  .get("projection") or {})

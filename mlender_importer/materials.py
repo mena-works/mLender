@@ -40,6 +40,8 @@ from .constants import (
     PROJECTION_MAPPING_OFFSET,
     PROJECTION_MAPPING_ROTATION,
     PROJECTION_MODES,
+    TRIPLANAR_FACES,
+    TRIPLANAR_SHARPNESS,
     RAMP_FACING_MODE,
     RAMP_TEXTURE_COMPONENTS,
     RAMP_TEXTURE_INTERPOLATION,
@@ -796,7 +798,9 @@ def build_projection(material, texture, warnings):
     measurement, and a projection in the wrong shape is worse than one that
     says it needs the bake.
 
-    Returns the Image Texture node, or None.
+    Returns the socket carrying the projected colour, or None. A socket
+    rather than a node: a triplanar result is three lookups blended together
+    and has no single image node to hand back.
     """
     projection = texture.get("projection") or {}
     kind = str(projection.get("type") or "")
@@ -848,14 +852,21 @@ def build_projection(material, texture, warnings):
         mapping.inputs["Location"].default_value = PROJECTION_MAPPING_OFFSET
     links.new(coords.outputs["Object"], mapping.inputs["Vector"])
 
+    if kind == "TriPlanar":
+        # Three lookups rather than one, so the node made above is the first
+        # of them and the others are built alongside it.
+        return _triplanar_colour(material, node, mapping.outputs["Vector"])
+
     if kind == "Spherical":
         vector = _spherical_vector(material, mapping.outputs["Vector"])
     elif kind == "Cylindrical":
         vector = _cylindrical_vector(material, mapping.outputs["Vector"])
+    elif kind == "Perspective":
+        vector = _perspective_vector(material, mapping.outputs["Vector"])
     else:
         vector = mapping.outputs["Vector"]
     links.new(vector, node.inputs["Vector"])
-    return node
+    return node.outputs["Color"]
 
 
 def _spherical_vector(material, vector_socket):
@@ -940,6 +951,148 @@ def _cylindrical_vector(material, vector_socket):
     links.new(u, combine.inputs["X"])
     links.new(v, combine.inputs["Y"])
     return combine.outputs[0]
+
+
+def _perspective_vector(material, vector_socket):
+    """A perspective divide from the placement, the way Maya projects it.
+
+    Read off Maya's own bake: ``u = 0.5 - x / 2z`` and ``v = 0.5 - y / 2z``.
+    Behind the projector, where z is positive, Maya returns the centre of the
+    image, and reproducing that is worth 0.14 on its own.
+
+    The residual on a sphere is 0.08 whole but 0.008 away from the silhouette:
+    a perspective divide explodes as z approaches zero, so a sub-texel
+    difference there lands in a different part of the image. That band is the
+    test geometry, not the mapping.
+    """
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+
+    separate = nodes.new("ShaderNodeSeparateXYZ")
+    separate.name = "ML_Projection_Axes"
+    separate.location = (-700, 0)
+    links.new(vector_socket, separate.inputs[0])
+    depth = separate.outputs["Z"]
+
+    u = _math(material, "ADD", (-300, 80), _math(
+        material, "MULTIPLY", (-450, 80),
+        _math(material, "DIVIDE", (-580, 80), separate.outputs["X"], depth),
+        None, -0.5), None, 0.5)
+    v = _math(material, "ADD", (-300, -160), _math(
+        material, "MULTIPLY", (-450, -160),
+        _math(material, "DIVIDE", (-580, -160), separate.outputs["Y"], depth),
+        None, -0.5), None, 0.5)
+
+    combine = nodes.new("ShaderNodeCombineXYZ")
+    combine.name = "ML_Projection_UV"
+    combine.location = (-160, 0)
+    links.new(u, combine.inputs["X"])
+    links.new(v, combine.inputs["Y"])
+
+    behind = nodes.new("ShaderNodeMix")
+    behind.name = "ML_Projection_Behind"
+    behind.label = "Behind the projector"
+    behind.data_type = "VECTOR"
+    behind.location = (-40, 0)
+    links.new(_math(material, "GREATER_THAN", (-160, -300), depth, None, 0.0),
+              behind.inputs["Factor"])
+    links.new(combine.outputs[0], behind.inputs[4])
+    behind.inputs[5].default_value = (0.5, 0.5, 0.0)
+    return behind.outputs[1]
+
+
+def _triplanar_colour(material, first_image, vector_socket):
+    """Three planar lookups blended by the normal, as Maya's TriPlanar is.
+
+    The pairing was read off Maya's bake rather than guessed: the dominant
+    axis names the face, and each face reads the other two, halved and
+    centred -- twice the extent of a plain planar projection.
+
+    Blender's own BOX projection is not this. It stops at 0.27 however it is
+    offset, scaled or blended, because it pairs its axes differently.
+
+    The blend is by the normal. On the measuring sphere the normal and the
+    position point the same way, so the fixture cannot tell them apart; the
+    normal is used because that is what a triplanar projection means.
+    """
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+
+    separate = nodes.new("ShaderNodeSeparateXYZ")
+    separate.name = "ML_Projection_Axes"
+    separate.location = (-820, 200)
+    links.new(vector_socket, separate.inputs[0])
+
+    centred = {}
+    for index, axis in enumerate("XYZ"):
+        centred[axis] = _math(
+            material, "ADD", (-620, 300 - index * 120),
+            _math(material, "MULTIPLY", (-720, 300 - index * 120),
+                  separate.outputs[axis], None, 0.5),
+            None, 0.5,
+        )
+
+    # The normal, turned into the placement's space the same way the
+    # coordinates were.
+    geometry = nodes.new("ShaderNodeNewGeometry")
+    geometry.location = (-820, -300)
+    normal_map = nodes.new("ShaderNodeMapping")
+    normal_map.name = "ML_Projection_Normal"
+    normal_map.location = (-660, -300)
+    normal_map.inputs["Rotation"].default_value = PROJECTION_MAPPING_ROTATION
+    links.new(geometry.outputs["Normal"], normal_map.inputs["Vector"])
+    normal_axes = nodes.new("ShaderNodeSeparateXYZ")
+    normal_axes.location = (-500, -300)
+    links.new(normal_map.outputs["Vector"], normal_axes.inputs[0])
+
+    weights = {}
+    for index, axis in enumerate("XYZ"):
+        weights[axis] = _math(
+            material, "POWER", (-340, -220 - index * 120),
+            _math(material, "ABSOLUTE", (-420, -220 - index * 120),
+                  normal_axes.outputs[axis]),
+            None, TRIPLANAR_SHARPNESS,
+        )
+    total = _math(material, "ADD", (-180, -320),
+                  _math(material, "ADD", (-260, -320),
+                        weights["X"], weights["Y"]),
+                  weights["Z"])
+
+    result = None
+    for index, (face, first, second) in enumerate(TRIPLANAR_FACES):
+        image = first_image if index == 0 else nodes.new("ShaderNodeTexImage")
+        if index:
+            image.image = first_image.image
+            image.projection = first_image.projection
+            image.extension = first_image.extension
+        image.name = "ML_Projection_{0}".format(face)
+        image.location = (-260, 300 - index * 260)
+        pair = nodes.new("ShaderNodeCombineXYZ")
+        pair.location = (-400, 300 - index * 260)
+        links.new(centred[first], pair.inputs["X"])
+        links.new(centred[second], pair.inputs["Y"])
+        links.new(pair.outputs[0], image.inputs["Vector"])
+
+        share = nodes.new("ShaderNodeMix")
+        share.data_type = "RGBA"
+        share.location = (-60, 300 - index * 260)
+        links.new(_math(material, "DIVIDE", (-160, 220 - index * 260),
+                        weights[face], total), share.inputs["Factor"])
+        share.inputs[6].default_value = (0.0, 0.0, 0.0, 1.0)
+        links.new(image.outputs["Color"], share.inputs[7])
+
+        if result is None:
+            result = share.outputs[2]
+            continue
+        total_mix = nodes.new("ShaderNodeMix")
+        total_mix.data_type = "RGBA"
+        total_mix.blend_type = "ADD"
+        total_mix.inputs["Factor"].default_value = 1.0
+        total_mix.location = (100, 200 - index * 160)
+        links.new(result, total_mix.inputs[6])
+        links.new(share.outputs[2], total_mix.inputs[7])
+        result = total_mix.outputs[2]
+    return result
 
 
 def _math(material, operation, location, first, second=None, value=None):
@@ -1214,7 +1367,7 @@ def apply_record_to_socket(material, shader, target, channel, record, warnings):
     if texture.get("projection"):
         projected = build_projection(material, texture, warnings)
         if projected is not None:
-            material.node_tree.links.new(projected.outputs["Color"], target)
+            material.node_tree.links.new(projected, target)
             return
 
     # A ramp texture has no file to load, so this has to come before the path

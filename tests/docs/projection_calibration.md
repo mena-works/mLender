@@ -98,12 +98,67 @@ Planar kenarında sabitliyor; cylindrical'ın yarım turu nesneyi iki kez
 dolaştığı için sarıyor. Tek kural ikisine de uygulanırsa hangisi olursa
 olsun 0.2 kaybediliyor.
 
+## Perspective
+
+Tablodan doğrudan okundu: z<0 noktalarda
+
+    u = 0.5 - x / 2z        v = 0.5 - y / 2z
+
+z>0'da, yani projektörün arkasında, Maya görüntünün **merkezini** döndürüyor;
+bunu kurmak tek başına 0.14 değerinde. Uzatma REPEAT (0.08'e karşı EXTEND
+0.19).
+
+Küre üzerinde bütün görüntüde 0.082 kalıyor ama bu eşleme hatası değil:
+
+| bölge | fark |
+|---|---|
+| z < −0.05 (bütün ön yarıküre) | 0.084 |
+| z < −0.30 | 0.019 |
+| z < −0.50 | **0.008** |
+| z < −0.85 | 0.007 |
+
+Perspektif bölmesi z→0'a yaklaşırken patlıyor; teğet şeritte yarım piksellik
+bir fark görüntünün bambaşka bir yerine düşüyor. Silüetten uzakta 0.008,
+yani Planar'ın 0.028'inden bile iyi.
+
+## TriPlanar
+
+Baskın eksen yüzü seçiyor, her yüz diğer iki ekseni okuyor — yarılanmış ve
+ortalanmış, yani düz planar'ın iki katı genişlikte:
+
+| baskın | u | v |
+|---|---|---|
+| z | `x/2 + 0.5` | `y/2 + 0.5` |
+| x | `z/2 + 0.5` | `y/2 + 0.5` |
+| y | `x/2 + 0.5` | `z/2 + 0.5` |
+
+Blender'ın `BOX`'ı bu değil: offset, ölçek ve blend ne olursa olsun 0.27'de
+kalıyor, çünkü eksenleri başka eşliyor. Üç ayrı arama açıkça kurulup normale
+göre harmanlandığında karışım keskinliği belirleyici oluyor:
+
+| keskinlik | fark |
+|---|---|
+| 1 | 0.132 |
+| 4 | 0.068 |
+| 16 | 0.036 |
+| 64 | **0.024** |
+| 128 | 0.022 |
+| 256 | 0.042 |
+
+256'da ağırlıklar taşıp bozuluyor. En iyi sayı 128 ama uçurumun bir adım
+yanında; kodda **64** kullanılıyor.
+
+Harman normale göre yapılıyor. Ölçüm küresinde normal ile konum aynı yöne
+baktığı için **fixture ikisini ayıramaz**; normal seçildi çünkü triplanar
+projeksiyonun tanımı bu.
+
 ## Kalanlar
 
-Cubic, TriPlanar, Ball, Concentric ve Perspective için u,v tablosu da
-okundu ama tek bir kapalı formüle oturmadı — Cubic yüzeye göre yüz seçiyor,
-Ball bir yansıma küresi eşlemesi. Bunlar bake'e bırakıldı; okunmuş u,v
-tablosu elde olduğu için devam edecek olanın başlangıç noktası hazır.
+Cubic, Ball ve Concentric için u,v tablosu okundu ama tek bir kapalı formüle
+oturmadı. Cubic'te `fitType`/`fitFill` devrede ve eşleme nesnenin sınır
+kutusuna göre değişiyor, Ball bir yansıma küresi eşlemesi. Bunlar bake'e
+bırakıldı; okunmuş tablo elde olduğu için devam edecek olan sıfırdan
+başlamaz.
 
 Planar'ın 0.028'i sıfır değil çünkü bake küre dikişinde filtreleme yapıyor;
 eşleme hatası değil.

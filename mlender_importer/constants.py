@@ -8,7 +8,7 @@ message shape changes.
 
 import math
 
-BUILD_VERSION = "2.22.0"
+BUILD_VERSION = "2.23.0"
 
 LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
@@ -50,6 +50,8 @@ PROJECTION_MODES = {
     "Planar": "FLAT",
     "Spherical": "FLAT",
     "Cylindrical": "FLAT",
+    "TriPlanar": "FLAT",
+    "Perspective": "FLAT",
 }
 
 # How the image behaves outside the projection, which is not the same for
@@ -61,7 +63,25 @@ PROJECTION_EXTENSIONS = {
     "Planar": "EXTEND",
     "Spherical": "EXTEND",
     "Cylindrical": "REPEAT",
+    "TriPlanar": "EXTEND",
+    # A perspective divide sends most of the surface outside the image, and
+    # Maya tiles there: measured, REPEAT 0.08 against EXTEND 0.19.
+    "Perspective": "REPEAT",
 }
+
+# How hard the triplanar blend picks its face. Measured against Maya's bake:
+# 1 gives 0.13, 4 gives 0.07, 16 gives 0.036, 64 gives 0.024 and 128 gives
+# 0.022 -- and 256 jumps back to 0.042 because the weights underflow. 64 is
+# taken rather than the best number, to sit away from that cliff.
+TRIPLANAR_SHARPNESS = 64.0
+
+# Maya's triplanar reads a different pair of axes per face. Read off its own
+# bake: the dominant axis names the face, and the pairs are these.
+TRIPLANAR_FACES = (
+    ("Z", "X", "Y"),
+    ("X", "Z", "Y"),
+    ("Y", "X", "Z"),
+)
 PROJECTION_DEFAULT_EXTENSION = "EXTEND"
 
 # Measured with the tool's own bake as ground truth. Maya's planar projection

@@ -113,9 +113,9 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("40 meshes imported", result["mesh_count"] == 40,
+    check("42 meshes imported", result["mesh_count"] == 42,
           result["mesh_count"])
-    check("32 materials built", result["material_count"] == 32,
+    check("34 materials built", result["material_count"] == 34,
           result["material_count"])
     # Four of the eight cubes asked for subdivision in Maya, the displaced one
     # among them; the rest must arrive unmodified.
@@ -1770,6 +1770,47 @@ def main():
             check("built from an angle and a height, not a latitude",
                   "ARCTAN2" in operations and "ARCSINE" not in operations,
                   sorted(set(operations)))
+
+        # Perspective: a divide by the depth, and the image centre behind
+        # the projector, which is worth 0.14 on its own.
+        perspective = material_for("perspProjCube")
+        check("the perspective material exists", perspective is not None)
+        if perspective:
+            nodes = perspective.node_tree.nodes
+            operations = [n.operation for n in nodes
+                          if n.bl_idname == "ShaderNodeMath"]
+            check("built from a divide and a depth test",
+                  operations.count("DIVIDE") >= 2
+                  and "GREATER_THAN" in operations,
+                  sorted(set(operations)))
+            check("with the centre mixed in behind the projector",
+                  any(n.bl_idname == "ShaderNodeMix"
+                      and n.data_type == "VECTOR" for n in nodes))
+
+        # TriPlanar: three lookups of one image, blended by the normal.
+        triplanar = material_for("triProjCube")
+        check("the triplanar material exists", triplanar is not None)
+        if triplanar:
+            nodes = triplanar.node_tree.nodes
+            images = [n for n in nodes
+                      if n.bl_idname == "ShaderNodeTexImage"]
+            check("reads the image three times, once per face",
+                  len(images) == 3, len(images))
+            # One datablock, not three copies of the same file.
+            check("sharing one image datablock",
+                  len(set(n.image.name for n in images if n.image)) == 1,
+                  sorted(set(n.image.name for n in images if n.image)))
+            check("blended by the geometry normal",
+                  any(n.bl_idname == "ShaderNodeNewGeometry" for n in nodes))
+            powers = [n for n in nodes if n.bl_idname == "ShaderNodeMath"
+                      and n.operation == "POWER"]
+            # The sharpness that was measured, not a round number: 256
+            # underflows and scores worse than 64.
+            check("with the measured blend sharpness",
+                  len(powers) == 3
+                  and all(abs(n.inputs[1].default_value - 64.0) < 1e-6
+                          for n in powers),
+                  [n.inputs[1].default_value for n in powers])
 
         # A type this build does not reproduce must say so.
         check("a Ball projection is refused with a warning",

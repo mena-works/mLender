@@ -496,11 +496,11 @@ compared against a candidate Blender node tree baked into the same UV space
 | Planar | `FLAT` | **0.028** | matches |
 | Spherical | Math nodes | **0.019** | matches |
 | Cylindrical | Math nodes | **0.020** | matches |
+| TriPlanar | three lookups | **0.024** | matches |
+| Perspective | Math nodes | **0.008** | matches |
 | Ball | `SPHERE` | 0.107 | no |
 | Cubic | `BOX` | 0.412 | no |
-| TriPlanar | `BOX` | 0.412 | no |
 | Concentric | — | — | no equivalent |
-| Perspective | — | — | no equivalent |
 
 **Spherical** is rebuilt from Math nodes rather than Blender's `SPHERE`
 mode, which was measured and rejected — it plateaus at 0.106 however it is
@@ -522,7 +522,19 @@ Both formulas were read off Maya rather than guessed at, by projecting an
 image that encodes u in red and v in green and baking it: every surface
 point then reports the pair Maya computed for it.
 
-The rest still need the bake, and say so:
+**TriPlanar** reads the image three times — the dominant axis names the
+face and each face reads the other two, halved and centred — and blends them
+by the normal. Blender's `BOX` is not this mapping: it stops at 0.27 however
+it is offset, scaled or blended, because it pairs its axes differently.
+
+**Perspective** is `u = 0.5 - x / 2z` and `v = 0.5 - y / 2z`, with the image
+centre behind the projector, which is worth 0.14 on its own. Its 0.008 is
+measured away from the silhouette; across the whole sphere it reads 0.082,
+because a perspective divide explodes as the depth approaches zero and half
+a texel there lands anywhere in the image. That band is the test geometry,
+not the mapping.
+
+Cubic and Ball still need the bake, and say so:
 
 ```text
 mLender warning: Maya projection "ballProjection" is Ball, which this build
