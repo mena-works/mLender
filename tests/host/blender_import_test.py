@@ -113,9 +113,9 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("22 meshes imported", result["mesh_count"] == 22,
+    check("23 meshes imported", result["mesh_count"] == 23,
           result["mesh_count"])
-    check("17 materials built", result["material_count"] == 17,
+    check("18 materials built", result["material_count"] == 18,
           result["material_count"])
     # Four of the eight cubes asked for subdivision in Maya, the displaced one
     # among them; the rest must arrive unmodified.
@@ -240,6 +240,41 @@ def main():
               "setDressing" in {c.name
                                 for c in set_dressing_empty.users_collection},
               [c.name for c in set_dressing_empty.users_collection])
+
+    print("\nUV sets and vertex colours")
+    # These already survive the FBX; nothing in the tool builds them. The
+    # assertions exist because nothing else pins them either, and a change to
+    # FBX_EXPORT_OPTIONS could drop a UV set without a word.
+    uv_cube = bpy.data.objects.get("uvSetCube")
+    check("uvSetCube arrived", uv_cube is not None)
+    if uv_cube:
+        mesh = uv_cube.data
+        names = [layer.name for layer in mesh.uv_layers]
+        check("both UV sets arrived under their Maya names",
+              names == ["map1", "lightmap"], names)
+        check("the Maya current set is the active one",
+              mesh.uv_layers.active is not None
+              and mesh.uv_layers.active.name == "map1",
+              mesh.uv_layers.active.name if mesh.uv_layers.active else None)
+        if len(mesh.uv_layers) >= 2:
+            # Two sets that arrived as the same data twice would still pass a
+            # count check, so the second one is offset in Maya.
+            first = [tuple(round(v, 4) for v in d.uv)
+                     for d in mesh.uv_layers[0].data[:4]]
+            second = [tuple(round(v, 4) for v in d.uv)
+                      for d in mesh.uv_layers[1].data[:4]]
+            check("and they hold different coordinates", first != second,
+                  (first[:1], second[:1]))
+        # vertex_colors was replaced by color_attributes in 4.0 and is still
+        # present as an alias, so the newer name is what gets asserted.
+        colours = getattr(mesh, "color_attributes", None)
+        check("the colour set arrived",
+              colours is not None and "paint" in [a.name for a in colours],
+              [a.name for a in colours] if colours is not None else None)
+        if colours and len(colours):
+            sample = tuple(round(v, 3) for v in colours[0].data[0].color)
+            check("with the colour Maya painted",
+                  abs(sample[0] - 1.0) < 0.02 and sample[1] < 0.02, sample)
 
     print("\ncurves")
     # Curves never rode the FBX, so before this they were simply absent.

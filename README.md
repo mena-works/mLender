@@ -886,6 +886,17 @@ Maya                              Blender
 Lights and cameras stay together under `mLender Lights` and `mLender Cameras` rather
 than joining this hierarchy, so they stay reachable as a set.
 
+### UV sets and vertex colours
+
+Both already survive the FBX and the tool builds neither. Measured on a cube
+with two named UV sets and a colour set: the sets arrive under their Maya
+names, Maya's current set is the one Blender makes active, the two sets hold
+genuinely different coordinates, and the colour set arrives as a corner-domain
+colour attribute with the painted values intact.
+
+They are asserted in the host tests anyway, because nothing else pins them and
+a change to the FBX export options could drop a UV set without a word.
+
 ### Curves
 
 NURBS and bezier curves never rode the FBX either — the export selects mesh

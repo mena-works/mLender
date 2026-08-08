@@ -225,6 +225,24 @@ def build_scene():
     cmds.parent(child_mesh, parent_mesh)
     cmds.setAttr(parent_mesh + "|childMesh.translateY", 3)
 
+    # A second UV set and a colour set. Both already survive the FBX, so this
+    # cube exists to keep them surviving: nothing else pins them, and a change
+    # to FBX_EXPORT_OPTIONS could drop either without a word.
+    uv_transform, _ = shaded_cube("uvSetCube", "aiStandardSurface")
+    uv_shape = cmds.listRelatives(uv_transform, shapes=True, fullPath=True)[0]
+    cmds.polyUVSet(uv_shape, create=True, uvSet="lightmap")
+    cmds.polyUVSet(uv_shape, currentUVSet=True, uvSet="lightmap")
+    cmds.polyProjection(uv_shape + ".f[0:5]", type="planar", md="y",
+                        createNewMap=False)
+    # Offset it so the two sets cannot be confused if only one survives.
+    cmds.polyEditUV(uv_shape + ".map[0:100]", uValue=0.25, vValue=0.5)
+    cmds.polyUVSet(uv_shape, currentUVSet=True, uvSet="map1")
+    cmds.polyColorSet(uv_shape, create=True, colorSet="paint",
+                      representation="RGBA")
+    cmds.polyColorSet(uv_shape, currentColorSet=True, colorSet="paint")
+    cmds.polyColorPerVertex(uv_shape + ".vtx[0:3]", rgb=(1.0, 0.0, 0.0), a=1.0)
+    cmds.polyColorPerVertex(uv_shape + ".vtx[4:7]", rgb=(0.0, 0.0, 1.0), a=1.0)
+
     # Curves. The circle is the one that matters: it is driven by construction
     # history, and reading control points the obvious way returns zeros for
     # exactly that case. It is also periodic, where Maya repeats control
@@ -496,7 +514,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("22 meshes exported", payload["mesh_count"] == 22,
+    check("23 meshes exported", payload["mesh_count"] == 23,
           payload["mesh_count"])
     # Four: the locator, the empty null, the nested locator, and the group
     # holding only a curve. That last one has no mesh below it either, so
