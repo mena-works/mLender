@@ -313,7 +313,7 @@ tests/
 **Arnold** (verified against MtoA 5.4.8) — `aiStandardSurface`,
 `aiOpenPBRSurface`, `aiLambert`, `aiFlat`
 
-**Native Maya** — `lambert`, `blinn`, `surfaceShader`
+**Native Maya** — `lambert`, `blinn`, `phong`, `phongE`, `rampShader`, `surfaceShader`
 
 Transferred channels: base colour, reflection roughness, metalness,
 normal/bump, opacity, emission colour and strength, specular weight,
@@ -414,9 +414,28 @@ exported value.
 
 ### Native Maya shaders
 
-Lambert and Blinn transfer base colour (texture if connected, value otherwise)
-and convert `transparency` to opacity. Roughness is approximated: **0.7** for
-lambert, **0.1** for blinn, with Metallic `0.0` for both.
+Lambert, Blinn, Phong, PhongE and Ramp Shader transfer base colour (texture if
+connected, value otherwise) and convert `transparency` to opacity, with
+Metallic `0.0`.
+
+Roughness comes from each shader's own gloss control, read off a live Maya
+2023 session rather than guessed, because the four spell it differently and
+two of them share no attribute at all:
+
+| Shader | Attribute | Becomes |
+|---|---|---|
+| `blinn`, `rampShader` | `eccentricity` | roughness directly |
+| `phong` | `cosinePower` | `sqrt(2 / (n + 2))` |
+| `phongE` | `roughness` | roughness directly |
+| `lambert` | none | **0.7**, a constant |
+
+Only lambert keeps a constant, because it has no gloss control to read. Blinn
+used to get one too — every blinn arrived at `0.1` whatever its eccentricity
+said, which meant the artist's setting was discarded.
+
+The Phong conversion is **analytic, not measured**: a Phong lobe and a GGX
+lobe are different shapes, so no single number makes them equal. It tracks the
+artist's intent, which a pinned value did not.
 
 `surfaceShader.outColor` drives an Emission shader and `outTransparency`
 becomes the Mix Shader factor against a Transparent BSDF, so the material

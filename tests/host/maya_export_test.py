@@ -210,6 +210,21 @@ def build_scene():
     cmds.setAttr(blinn_tex + ".fileTextureName", texture, type="string")
     cmds.connectAttr(blinn_tex + ".outColor", blinn_native + ".transparency",
                      force=True)
+    # Deliberately away from the 0.3 default and from the 0.1 the exporter
+    # used to pin every blinn to, so the assertion can only pass on code that
+    # reads the attribute.
+    cmds.setAttr(blinn_native + ".eccentricity", 0.45)
+
+    # Maya's other two legacy shaders, each with a different gloss control.
+    # Both were unsupported until measured: phong has cosinePower and no
+    # eccentricity, phongE has roughness and no cosinePower.
+    _, phong_native = shaded_cube("phongCube", "phong")
+    cmds.setAttr(phong_native + ".color", 0.2, 0.6, 0.3, type="double3")
+    cmds.setAttr(phong_native + ".cosinePower", 30.0)
+
+    _, phong_e_native = shaded_cube("phongECube", "phongE")
+    cmds.setAttr(phong_e_native + ".color", 0.6, 0.2, 0.2, type="double3")
+    cmds.setAttr(phong_e_native + ".roughness", 0.8)
 
     _, surface_native = shaded_cube("surfaceCube", "surfaceShader")
     cmds.setAttr(surface_native + ".outColor", 0.9, 0.3, 0.1, type="double3")
@@ -666,7 +681,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("27 meshes exported", payload["mesh_count"] == 27,
+    check("29 meshes exported", payload["mesh_count"] == 29,
           payload["mesh_count"])
     # Four: the locator, the empty null, the nested locator, and the group
     # holding only a curve. That last one has no mesh below it either, so
@@ -1480,6 +1495,31 @@ def main():
     check("and carries the texture rather than a value",
           blinn_opacity.get("texture", {}).get("path", "").endswith(".tx"),
           blinn_opacity.get("texture"))
+
+    # Each legacy shader's own gloss control, rather than one pinned number
+    # per type. Before this a blinn arrived at 0.1 whatever the artist set.
+    def roughness_of(material):
+        channels = (by_material.get(material) or {}).get("channels", {})
+        return (channels.get("roughness") or {}).get("value")
+
+    check("blinn roughness comes from its eccentricity",
+          abs(roughness_of("blinnCube_shd") - 0.45) < 1e-6,
+          roughness_of("blinnCube_shd"))
+    # cosinePower 30 through r = sqrt(2 / (n + 2)) is 0.25.
+    check("phong roughness comes from its cosinePower",
+          abs(roughness_of("phongCube_shd") - 0.25) < 1e-6,
+          roughness_of("phongCube_shd"))
+    check("phongE roughness comes from its own roughness attribute",
+          abs(roughness_of("phongECube_shd") - 0.8) < 1e-6,
+          roughness_of("phongECube_shd"))
+    # Lambert has no gloss control at all, so it must keep the constant.
+    check("lambert still uses the approximation",
+          abs(roughness_of("lambertCube_shd") - 0.7) < 1e-6,
+          roughness_of("lambertCube_shd"))
+    for name in ("phongCube_shd", "phongECube_shd"):
+        check("{0} is reported as supported".format(name),
+              (by_material.get(name) or {}).get("supported") is True,
+              (by_material.get(name) or {}).get("supported"))
 
     surface_channels = (
         (by_material.get("surfaceCube_shd") or {}).get("channels", {})

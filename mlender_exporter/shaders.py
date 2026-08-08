@@ -27,6 +27,8 @@ from .constants import (
     DEFAULT_IOR,
     FALLBACK_ROUGHNESS,
     LAMBERT_ROUGHNESS,
+    NATIVE_ROUGHNESS_ATTRS,
+    PHONG_EXPONENT_ATTRS,
     OPENPBR_EMISSION_SEMANTIC,
     OPENPBR_SPECULAR_SEMANTIC,
     REDSHIFT_GLOSSINESS_FLAGS,
@@ -67,8 +69,20 @@ def shader_channels(shader, shader_type, bake_context=None):
         )
     if shader_type == "aiFlat":
         return arnold_flat_channels(shader, bake_context)
-    if shader_type == "blinn":
-        return maya_basic_channels(shader, BLINN_ROUGHNESS, bake_context)
+    if shader_type in NATIVE_ROUGHNESS_ATTRS:
+        # blinn, phong, phongE and rampShader each carry their own gloss
+        # control under a different name; the fallback only applies when the
+        # attribute is missing or unreadable.
+        return maya_basic_channels(
+            shader,
+            native_roughness(
+                shader,
+                shader_type,
+                BLINN_ROUGHNESS if shader_type == "blinn"
+                else FALLBACK_ROUGHNESS,
+            ),
+            bake_context,
+        )
     if shader_type == "lambert":
         return maya_basic_channels(shader, LAMBERT_ROUGHNESS, bake_context)
     if shader_type == "surfaceShader":
@@ -173,6 +187,43 @@ def apply_glossiness_conversion(shader, roughness_record):
         roughness_record["invert"] = True
     elif "value" in roughness_record:
         roughness_record["value"] = 1.0 - float(roughness_record["value"])
+
+
+def native_roughness(shader, shader_type, default):
+    """Roughness from a native Maya shader's own gloss control.
+
+    Maya's pre-PBR shaders each spell it differently and two of them do not
+    share a single attribute, so this is a table lookup rather than an alias
+    tuple. A shader with no control, or one whose control is textured, falls
+    back to the approximation for its type.
+    """
+    attrs = NATIVE_ROUGHNESS_ATTRS.get(shader_type) or ()
+    for attr in attrs:
+        if not attr_exists(shader, attr):
+            continue
+        try:
+            value = float(cmds.getAttr(shader + "." + attr))
+        except Exception:
+            continue
+        if attr in PHONG_EXPONENT_ATTRS:
+            return phong_exponent_to_roughness(value)
+        return max(0.0, min(1.0, value))
+    return default
+
+
+def phong_exponent_to_roughness(exponent):
+    """Phong exponent to microfacet roughness, r = sqrt(2 / (n + 2)).
+
+    Analytic rather than measured: a Phong lobe and a GGX lobe are different
+    shapes, so no single number makes them equal. This is the standard
+    conversion and it at least tracks the artist's intent, which pinning
+    every phong to one value did not.
+    """
+    try:
+        exponent = max(0.0, float(exponent))
+    except Exception:
+        return FALLBACK_ROUGHNESS
+    return max(0.0, min(1.0, (2.0 / (exponent + 2.0)) ** 0.5))
 
 
 def maya_basic_channels(shader, roughness, bake_context=None):

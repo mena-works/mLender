@@ -147,6 +147,9 @@ SUPPORTED_SHADER_TYPES = (
     "aiFlat",
     "lambert",
     "blinn",
+    "phong",
+    "phongE",
+    "rampShader",
     "surfaceShader",
 )
 
@@ -693,10 +696,30 @@ MAX_SUBDIV_ITERATIONS = 6
 # Dielectric default, used when a shader exposes no IOR attribute.
 DEFAULT_IOR = 1.5
 
-# Principled roughness approximations for Maya's non-PBR shaders.
+# Principled roughness approximations for Maya's non-PBR shaders. Lambert has
+# no gloss control at all, so it keeps a constant; the others expose one and it
+# is now read instead of guessed. A fixed value ignored what the artist set:
+# every blinn arrived at 0.1 whatever its eccentricity said.
 LAMBERT_ROUGHNESS = 0.7
 BLINN_ROUGHNESS = 0.1
 FALLBACK_ROUGHNESS = 0.5
+
+# Attribute names read from a live Maya 2023 session, with their defaults:
+# blinn eccentricity 0.3, phong cosinePower 20.0, phongE roughness 0.5.
+# phong has no eccentricity and phongE has no cosinePower, so this is a table
+# rather than one alias tuple.
+NATIVE_ROUGHNESS_ATTRS = {
+    "blinn": ("eccentricity",),
+    "phong": ("cosinePower",),
+    "phongE": ("roughness",),
+    "rampShader": ("eccentricity",),
+}
+
+# Attributes whose value is a Phong exponent rather than a 0..1 roughness.
+# The conversion is the standard one between a Phong lobe and a microfacet
+# roughness, r = sqrt(2 / (n + 2)); it is analytic, not a render measurement,
+# and cosinePower 20 lands at 0.30.
+PHONG_EXPONENT_ATTRS = ("cosinePower",)
 
 METERS_PER_LINEAR_UNIT = {
     "mm": 0.001,

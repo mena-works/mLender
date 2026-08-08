@@ -113,9 +113,9 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("27 meshes imported", result["mesh_count"] == 27,
+    check("29 meshes imported", result["mesh_count"] == 29,
           result["mesh_count"])
-    check("21 materials built", result["material_count"] == 21,
+    check("23 materials built", result["material_count"] == 23,
           result["material_count"])
     # Four of the eight cubes asked for subdivision in Maya, the displaced one
     # among them; the rest must arrive unmodified.
@@ -1117,9 +1117,34 @@ def main():
               ("ShaderNodeMath", "SUBTRACT") in chain, sorted(chain))
         check("the map itself is in the chain",
               any(i[0] == "ShaderNodeTexImage" for i in chain), sorted(chain))
-        check("roughness pinned to the blinn approximation",
-              abs(value(native_blinn, "Roughness") - 0.1) < 1e-5,
+        # Maya's eccentricity, not a pinned constant: the fixture sets 0.45,
+        # away from both the 0.3 default and the 0.1 this used to be.
+        check("roughness came from the blinn's eccentricity",
+              abs(value(native_blinn, "Roughness") - 0.45) < 1e-5,
               value(native_blinn, "Roughness"))
+
+    print("\nphong and phongE")
+    # Both were unsupported until measured, so their materials arrived from
+    # the fallback path with a pinned roughness and an "unsupported" warning.
+    phong = material_for("phongCube")
+    check("phong material exists", phong is not None)
+    if phong:
+        check("its roughness came from cosinePower 30",
+              abs(value(phong, "Roughness") - 0.25) < 1e-5,
+              value(phong, "Roughness"))
+        check("and its base colour survived",
+              abs(value(phong, "Base Color")[1] - 0.6) < 1e-3,
+              list(value(phong, "Base Color"))[:3])
+    phong_e = material_for("phongECube")
+    check("phongE material exists", phong_e is not None)
+    if phong_e:
+        check("its roughness came from its own roughness attribute",
+              abs(value(phong_e, "Roughness") - 0.8) < 1e-5,
+              value(phong_e, "Roughness"))
+    check("neither was reported as unsupported",
+          not [w for w in result["warnings"]
+               if "Unsupported" in w and ("phong" in w or "phongE" in w)],
+          [w for w in result["warnings"] if "Unsupported" in w])
 
     native_surface = material_for("surfaceCube")
     check("surfaceShader material exists", native_surface is not None)
