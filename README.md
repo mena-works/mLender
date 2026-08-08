@@ -494,7 +494,7 @@ compared against a candidate Blender node tree baked into the same UV space
 | Maya type | best Blender candidate | difference | |
 |---|---|---|---|
 | Planar | `FLAT` | **0.028** | matches |
-| Spherical | `SPHERE` | 0.106 | close, not the same |
+| Spherical | Math nodes | **0.019** | matches |
 | Ball | `SPHERE` | 0.107 | no |
 | Cylindrical | `TUBE` | 0.415 | no |
 | Cubic | `BOX` | 0.412 | no |
@@ -502,11 +502,18 @@ compared against a candidate Blender node tree baked into the same UV space
 | Concentric | — | — | no equivalent |
 | Perspective | — | — | no equivalent |
 
-Spherical is the near miss, and every combination of axis rotation and sign
-flip plateaus at the same 0.106: Blender's `SPHERE` and Maya's spherical are
-parameterised differently, so it is not an orientation that can be corrected.
-Shipping it would be a projection that looks nearly right, which is worse
-than one that says it needs the bake:
+**Spherical** is rebuilt from Math nodes rather than Blender's `SPHERE`
+mode, which was measured and rejected — it plateaus at 0.106 however it is
+turned or flipped, because the two are parameterised differently. Maya's
+mapping is `u = 0.5 + atan2(x, z) / 2π` and `v = 0.5 + asin(y / |p|) / π`,
+which reproduces its bake at 0.019.
+
+Establishing that needed the reference image to be changed. Against four
+coloured quadrants the winner and its mirror scored 0.0216 and 0.0217, which
+is a coin toss, and the coin came down on the wrong side; against a sixteen
+cell grid it is 0.019 against 0.123.
+
+The rest still need the bake, and say so:
 
 ```text
 mLender warning: Maya projection "ballProjection" is Ball, which this build

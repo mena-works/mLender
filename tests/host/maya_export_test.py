@@ -290,6 +290,20 @@ def build_scene():
     cmds.connectAttr(projection + ".outColor", proj_shd + ".baseColor",
                      force=True)
 
+    # Spherical, built from Math nodes rather than Blender's SPHERE mode,
+    # which was measured against Maya's bake and rejected.
+    _, sph_shd = shaded_cube("sphProjCube", "aiStandardSurface")
+    sph = cmds.shadingNode("projection", asTexture=True, name="sphProjection")
+    cmds.setAttr(sph + ".projType", 2)                 # Spherical
+    sph_file = cmds.shadingNode("file", asTexture=True, name="sphFile")
+    cmds.setAttr(sph_file + ".fileTextureName", texture, type="string")
+    cmds.connectAttr(sph_file + ".outColor", sph + ".image", force=True)
+    sph_place = cmds.shadingNode("place3dTexture", asUtility=True,
+                                 name="sphPlacement")
+    cmds.connectAttr(sph_place + ".worldInverseMatrix[0]",
+                     sph + ".placementMatrix", force=True)
+    cmds.connectAttr(sph + ".outColor", sph_shd + ".baseColor", force=True)
+
     # And a projection type this build does not reproduce, which must say so.
     _, ball_shd = shaded_cube("ballProjCube", "aiStandardSurface")
     ball = cmds.shadingNode("projection", asTexture=True, name="ballProjection")
@@ -823,7 +837,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("38 meshes exported", payload["mesh_count"] == 38,
+    check("39 meshes exported", payload["mesh_count"] == 39,
           payload["mesh_count"])
     # Four: the locator, the empty null, the nested locator, and the group
     # holding only a curve. That last one has no mesh below it either, so
@@ -1800,6 +1814,11 @@ def main():
     check("the projected image path travels",
           str((proj.get("image") or {}).get("path") or "").endswith(".tx"),
           (proj.get("image") or {}).get("path"))
+
+    sph_proj = (base_texture(unbaked_by_material, "sphProjCube_shd")
+                .get("projection") or {})
+    check("a Spherical projection travels with its type",
+          sph_proj.get("type") == "Spherical", sph_proj.get("type"))
 
     ball_proj = (base_texture(unbaked_by_material, "ballProjCube_shd")
                  .get("projection") or {})

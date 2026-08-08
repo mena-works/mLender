@@ -8,7 +8,7 @@ message shape changes.
 
 import math
 
-BUILD_VERSION = "2.20.1"
+BUILD_VERSION = "2.21.0"
 
 LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
@@ -42,8 +42,13 @@ RAMP_INTERPOLATION = {
 # Planar is here: it is the one that was measured, and each of the others
 # needs its own measurement before it can be claimed. Anything absent falls
 # back to Bake Procedurals, which evaluates the projection correctly.
+# Both are read through a FLAT image: Planar feeds it the placement's local
+# X and Y directly, Spherical feeds it a longitude and latitude built from
+# Math nodes. Blender's own SPHERE projection is a different mapping and was
+# measured and rejected -- see tests/docs/projection_calibration.md.
 PROJECTION_MODES = {
     "Planar": "FLAT",
+    "Spherical": "FLAT",
 }
 
 # Maya clamps a projection at its extent rather than tiling it. Measured on

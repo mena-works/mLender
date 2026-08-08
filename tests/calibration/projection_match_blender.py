@@ -92,22 +92,36 @@ METERS_PER_UNIT = 0.01
 MATCH_THRESHOLD = 0.06
 
 
+# Sixteen cells, every one a different colour. Four quadrants were not
+# enough: two spherical candidates that differ by a mirror in u scored
+# 0.0216 and 0.0217 against them, which is no answer at all. A fixture that
+# cannot tell two candidates apart is not measuring them.
+GRID = 4
+
+
+def cell_colour(column, row):
+    """A colour per cell, spread so no two are close in any channel."""
+    index = row * GRID + column
+    return (
+        ((index % 4) / 3.0),
+        (((index // 4) % 4) / 3.0),
+        (0.25 if index % 2 else 1.0),
+    )
+
+
 def write_quad():
-    """Four quadrants, so both axes and any flip are readable at a glance."""
+    """The reference image both applications project."""
     if not os.path.isdir(OUT):
         os.makedirs(OUT)
     size = 64
     image = bpy.data.images.new("quad", width=size, height=size, alpha=False)
     pixels = [0.0] * (size * size * 4)
+    step = size // GRID
     for y in range(size):
         for x in range(size):
             index = (y * size + x) * 4
-            top = y >= size // 2
-            right = x >= size // 2
-            if not top:
-                colour = (0, 1, 0) if right else (1, 0, 0)
-            else:
-                colour = (1, 1, 0) if right else (0, 0, 1)
+            colour = cell_colour(min(x // step, GRID - 1),
+                                 min(y // step, GRID - 1))
             pixels[index:index + 4] = [colour[0], colour[1], colour[2], 1.0]
     image.pixels = pixels
     image.filepath_raw = QUAD

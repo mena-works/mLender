@@ -42,9 +42,33 @@ Eşik 0.06. Planar 0.028'de, en yakın yanlış aday 0.106'da; aradaki boşluk
 geniş, yani karar keskin.
 
 Spherical için rotX/rotZ ve Y/Z işaret çevirmelerinin tüm kombinasyonları
-tarandı; hepsi **0.1063'te düzleşti**. Yani kalan fark bir yönelim meselesi
-değil, Blender'ın `SPHERE`'ü ile Maya'nın spherical'ının farklı
-parametrelendirmesi. Uydurup eşiği gevşetmektense eşleşmedi denmiştir.
+tarandı; hepsi **0.1063'te düzleşti**. Yani Blender'ın `SPHERE`'ü ile
+Maya'nın spherical'ı farklı parametrelendirilmiş; çevirmekle düzelmez.
+
+## Spherical'ı node'larla kurmak
+
+Hazır mod yerine Maya'nın matematiği Math node'larıyla kuruldu ve tarandı:
+
+| aday | fark |
+|---|---|
+| `atan2(+x, +z)`, v = `asin(y/len)` | **0.0189** |
+| `atan2(-z, -x)` | 0.1229 |
+| `atan2(+z, +x)` | 0.1236 |
+| `atan2(+x, +z)`, v ters | 0.2317 |
+
+Yani Maya spherical: **u = 0.5 + atan2(x, z)/2π**, **v = 0.5 + asin(y/|p|)/π**.
+
+**Fixture'ın kendisi bir kez değiştirildi ve bu şart oldu.** Dört çeyrekli
+görüntüyle `atan2(x,z)` ile aynadaki eşi `atan2(x,-z)` **0.0216'ya karşı
+0.0217** aldı — bu bir cevap değil, yazı tura. On altı hücreli ızgaraya
+geçilince kazanan 0.0189, ikincisi 0.1229 oldu ve seçim kesinleşti. Üstelik
+kazanan, dört çeyreğin işaret ettiğinin **tersi** çıktı.
+
+Cylindrical aynı yöntemle tarandı, en iyi 0.248'de kaldı ve ilk dört aday
+0.001 içinde toplandı — yani hiçbiri doğru değil. `projection` node'unda
+`uAngle = 180` ve `vAngle = 90` var; spherical'da bu tam tur demek ve
+formülü doğruluyor, cylindrical'ın dikey ölçeği ise bunlarla açıklanamadı.
+Devam edecek olan için iz burada.
 
 Planar'ın 0.028'i sıfır değil çünkü bake küre dikişinde filtreleme yapıyor;
 eşleme hatası değil.

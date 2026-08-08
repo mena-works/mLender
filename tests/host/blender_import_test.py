@@ -113,9 +113,9 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("38 meshes imported", result["mesh_count"] == 38,
+    check("39 meshes imported", result["mesh_count"] == 39,
           result["mesh_count"])
-    check("30 materials built", result["material_count"] == 30,
+    check("31 materials built", result["material_count"] == 31,
           result["material_count"])
     # Four of the eight cubes asked for subdivision in Maya, the displaced one
     # among them; the rest must arrive unmodified.
@@ -1727,6 +1727,31 @@ def main():
                               abs(place.matrix_world.to_scale().x - 0.02)
                               < 1e-5,
                               round(place.matrix_world.to_scale().x, 5))
+        # Spherical is built from Math nodes rather than Blender's SPHERE
+        # mode, which was measured against Maya's bake and rejected: it
+        # plateaus at 0.106 however it is turned, against 0.019 for this.
+        spherical = material_for("sphProjCube")
+        check("the spherical material exists", spherical is not None)
+        if spherical:
+            nodes = spherical.node_tree.nodes
+            image = next((n for n in nodes
+                          if n.bl_idname == "ShaderNodeTexImage"), None)
+            check("read through a flat image, not Blender's SPHERE mode",
+                  image is not None and image.projection == "FLAT",
+                  getattr(image, "projection", None))
+            operations = sorted(
+                n.operation for n in nodes if n.bl_idname == "ShaderNodeMath"
+            )
+            # Longitude from arctan2, latitude from arcsine: the two that
+            # make this Maya's mapping rather than Blender's.
+            check("with a longitude and a latitude built from Math nodes",
+                  "ARCTAN2" in operations and "ARCSINE" in operations,
+                  operations)
+            check("and the axes separated for them",
+                  any(n.bl_idname == "ShaderNodeSeparateXYZ" for n in nodes)
+                  and any(n.bl_idname == "ShaderNodeCombineXYZ"
+                          for n in nodes))
+
         # A type this build does not reproduce must say so.
         check("a Ball projection is refused with a warning",
               any("Ball" in item for item in unbaked_result["warnings"]),

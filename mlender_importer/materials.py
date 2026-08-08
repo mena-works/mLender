@@ -837,12 +837,80 @@ def build_projection(material, texture, warnings):
     mapping = nodes.new("ShaderNodeMapping")
     mapping.name = "ML_Projection_Mapping"
     mapping.label = "Maya texture space"
-    mapping.location = (-800, 0)
+    mapping.location = (-900, 0)
     mapping.inputs["Rotation"].default_value = PROJECTION_MAPPING_ROTATION
-    mapping.inputs["Location"].default_value = PROJECTION_MAPPING_OFFSET
+    if kind == "Planar":
+        # Planar reads the placement's local X and Y straight, over its
+        # -0.5..0.5, so the half offset is all it needs.
+        mapping.inputs["Location"].default_value = PROJECTION_MAPPING_OFFSET
     links.new(coords.outputs["Object"], mapping.inputs["Vector"])
-    links.new(mapping.outputs["Vector"], node.inputs["Vector"])
+
+    if kind == "Spherical":
+        vector = _spherical_vector(material, mapping.outputs["Vector"])
+    else:
+        vector = mapping.outputs["Vector"]
+    links.new(vector, node.inputs["Vector"])
     return node
+
+
+def _spherical_vector(material, vector_socket):
+    """Longitude and latitude, the way Maya's spherical projection reads them.
+
+    Measured against Maya's own bake: u is ``atan2(x, z)`` over a full turn
+    and v is ``asin(y / length)`` over a half turn, both centred on 0.5. The
+    fixture had to be a sixteen cell grid to establish it -- four quadrants
+    scored the winner and its mirror 0.0216 against 0.0217, which is not an
+    answer -- and with the grid it is 0.019 against 0.123 for the runner up.
+
+    Blender's own SPHERE projection is not this mapping: it plateaus at 0.106
+    however it is turned or flipped.
+    """
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+
+    separate = nodes.new("ShaderNodeSeparateXYZ")
+    separate.name = "ML_Projection_Axes"
+    separate.location = (-700, 0)
+    links.new(vector_socket, separate.inputs[0])
+
+    length = nodes.new("ShaderNodeVectorMath")
+    length.name = "ML_Projection_Radius"
+    length.operation = "LENGTH"
+    length.location = (-700, -260)
+    links.new(vector_socket, length.inputs[0])
+
+    longitude = _math(material, "ARCTAN2", (-520, 80),
+                      separate.outputs["X"], separate.outputs["Z"])
+    unit = _math(material, "DIVIDE", (-360, 80), longitude, None,
+                 2.0 * math.pi)
+    u = _math(material, "ADD", (-200, 80), unit, None, 0.5)
+
+    sine = _math(material, "DIVIDE", (-520, -160),
+                 separate.outputs["Y"], length.outputs["Value"])
+    latitude = _math(material, "ARCSINE", (-360, -160), sine)
+    half = _math(material, "DIVIDE", (-260, -160), latitude, None, math.pi)
+    v = _math(material, "ADD", (-160, -160), half, None, 0.5)
+
+    combine = nodes.new("ShaderNodeCombineXYZ")
+    combine.name = "ML_Projection_UV"
+    combine.location = (-60, 0)
+    links.new(u, combine.inputs["X"])
+    links.new(v, combine.inputs["Y"])
+    return combine.outputs[0]
+
+
+def _math(material, operation, location, first, second=None, value=None):
+    """One Math node, wired or filled, returning its output socket."""
+    node = material.node_tree.nodes.new("ShaderNodeMath")
+    node.operation = operation
+    node.location = location
+    if first is not None:
+        material.node_tree.links.new(first, node.inputs[0])
+    if second is not None:
+        material.node_tree.links.new(second, node.inputs[1])
+    elif value is not None:
+        node.inputs[1].default_value = value
+    return node.outputs[0]
 
 
 def import_projection_placements(package_data, collection, import_scale,
