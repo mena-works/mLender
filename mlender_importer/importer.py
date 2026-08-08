@@ -16,6 +16,7 @@ from .fbx import import_fbx, read_package_json, resolve_fbx_path
 from .animation import apply_scene_range
 from .colormanagement import apply_color_management
 from .lights import import_lights
+from .render import apply_render_settings
 from .materials import apply_face_assignments, build_material
 from .scene import (
     add_subdivision_modifiers,
@@ -186,6 +187,7 @@ def import_scene_package(
     )
 
     view_transform = apply_color_management(package_data, warnings)
+    render_applied = apply_render_settings(package_data, warnings)
 
     _remove_fbx_placeholder_materials(before_materials)
     purge_orphans()
@@ -209,6 +211,7 @@ def import_scene_package(
         "instanced_count": instanced_count,
         "transform_count": empty_result["transform_count"],
         "curve_count": curve_count,
+        "render": render_applied,
         "light_count": light_result["light_count"],
         "light_object_count": light_result["object_count"],
         "dome_count": light_result["dome_count"],

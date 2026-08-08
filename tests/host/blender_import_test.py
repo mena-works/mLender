@@ -241,6 +241,26 @@ def main():
                                 for c in set_dressing_empty.users_collection},
               [c.name for c in set_dressing_empty.users_collection])
 
+    print("\nrender settings")
+    # 1920x804, not 1920x1080: Blender's own default would pass against an
+    # importer that ignored the record entirely.
+    render = bpy.context.scene.render
+    check("resolution came from Maya",
+          render.resolution_x == 1920 and render.resolution_y == 804,
+          (render.resolution_x, render.resolution_y))
+    # Maya has no equivalent, and a leftover value silently scales the render.
+    check("resolution percentage set to 100",
+          render.resolution_percentage == 100, render.resolution_percentage)
+    check("pixel aspect is square",
+          abs(render.pixel_aspect_x - 1.0) < 1e-6
+          and abs(render.pixel_aspect_y - 1.0) < 1e-6,
+          (render.pixel_aspect_x, render.pixel_aspect_y))
+    check("motion blur switched on", render.use_motion_blur is True,
+          render.use_motion_blur)
+    check("with Maya's shutter length, in frames",
+          abs(render.motion_blur_shutter - 0.75) < 1e-5,
+          render.motion_blur_shutter)
+
     print("\nUV sets and vertex colours")
     # These already survive the FBX; nothing in the tool builds them. The
     # assertions exist because nothing else pins them either, and a change to

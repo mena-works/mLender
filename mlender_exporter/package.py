@@ -22,6 +22,7 @@ from .constants import (
 from .animation import animation_info, sample_records
 from .cameras import camera_record, camera_sample, scene_camera_shapes
 from .curves import curve_records, scene_curve_shapes
+from .render import render_record
 from .transforms import scene_transforms, transform_records
 from .collect import collect_textures
 from .fbx import export_fbx
@@ -167,6 +168,7 @@ def export_scene(
             "mesh_count": len(mesh_records),
             "meshes": mesh_records,
             "transform_count": len(transform_list),
+            "render": render_record(),
             "curve_count": len(curve_list),
             "curves": curve_list,
             "transforms": transform_list,

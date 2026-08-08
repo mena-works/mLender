@@ -17,7 +17,7 @@ LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
 LIVELINK_PROTOCOL = "mlender_livelink"
 LIVELINK_VERSION = 3
-EXPORT_SCHEMA_VERSION = 22
+EXPORT_SCHEMA_VERSION = 23
 
 LIGHT_NODE_TYPES = (
     "RedshiftPhysicalLight",
@@ -115,6 +115,17 @@ LIGHT_DOME_TEXTURE_ATTRS = (
     "mapTexture",
     "color",
 )
+
+# Arnold motion blur, read off a live MtoA 5.4.8 session. motion_frames is
+# a shutter length in frames, which is what Blender's motion_blur_shutter
+# means too, so the two need no conversion.
+#
+# Redshift is deliberately absent. Its attribute names cannot be probed on
+# this machine and this project does not write names it has not read off a
+# live session; the same footing as the Redshift light anchor.
+ARNOLD_MOTION_BLUR_NODE = "defaultArnoldRenderOptions"
+ARNOLD_MOTION_BLUR_ENABLED_ATTRS = ("motion_blur_enable",)
+ARNOLD_MOTION_BLUR_LENGTH_ATTRS = ("motion_frames",)
 
 SUPPORTED_SHADER_TYPES = (
     "RedshiftStandardMaterial",

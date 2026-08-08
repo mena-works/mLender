@@ -1064,6 +1064,35 @@ scene, which is what you want while iterating on a single asset.
 
 ---
 
+## Render settings
+
+Resolution, pixel aspect and motion blur travel with the package. It is a
+small thing that decides whether a scene feels ready or merely present: a shot
+framed for 1920x804 arriving into Blender's 1920x1080 is reframed, and every
+judgement about the camera then looks wrong for a reason that has nothing to
+do with the camera.
+
+```text
+defaultResolution.width / height   -> resolution_x / resolution_y
+defaultResolution.pixelAspect      -> pixel_aspect_x, against pixel_aspect_y 1
+(no Maya equivalent)               -> resolution_percentage forced to 100
+motion_blur_enable                 -> use_motion_blur
+motion_frames                      -> motion_blur_shutter
+```
+
+Arnold states the shutter as a length in frames and so does Blender, so that
+number crosses untouched.
+
+Two deliberate limits. **Resolution percentage is forced to 100** because Maya
+has no equivalent and the scene datablock survives the import wipe, so a value
+left at 50 by an earlier session would silently halve every render. And
+**motion blur is read from Arnold only** — Redshift's attribute names cannot
+be probed on this machine, and this project does not write names it has not
+read off a live session, the same footing as the Redshift light anchor.
+
+The frame range is not repeated here; it already travels with the animation
+record.
+
 ## Colour management
 
 This is the most common reason a transfer that is technically correct still

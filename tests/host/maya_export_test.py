@@ -225,6 +225,21 @@ def build_scene():
     cmds.parent(child_mesh, parent_mesh)
     cmds.setAttr(parent_mesh + "|childMesh.translateY", 3)
 
+    # Render settings. A deliberately non-default resolution: 1920x1080 would
+    # pass against a Blender that ignored the record entirely, since that is
+    # Blender's own default.
+    cmds.setAttr("defaultResolution.width", 1920)
+    cmds.setAttr("defaultResolution.height", 804)
+    cmds.setAttr("defaultResolution.pixelAspect", 1.0)
+    try:
+        import mtoa.core as core
+
+        core.createOptions()
+        cmds.setAttr("defaultArnoldRenderOptions.motion_blur_enable", True)
+        cmds.setAttr("defaultArnoldRenderOptions.motion_frames", 0.75)
+    except Exception as exc:
+        print("  note: Arnold render options unavailable: {0}".format(exc))
+
     # A second UV set and a colour set. Both already survive the FBX, so this
     # cube exists to keep them surviving: nothing else pins them, and a change
     # to FBX_EXPORT_OPTIONS could drop either without a word.
@@ -583,6 +598,25 @@ def main():
     check("a curve transform is not recorded as an empty",
           "probeCurve" not in by_transform and "probeCircle" not in
           by_transform, sorted(by_transform))
+
+    print("\nrender settings")
+    render = payload.get("render") or {}
+    check("resolution carried", render.get("width") == 1920
+          and render.get("height") == 804,
+          (render.get("width"), render.get("height")))
+    check("pixel aspect carried",
+          abs(float(render.get("pixel_aspect") or 0) - 1.0) < 1e-6,
+          render.get("pixel_aspect"))
+    motion = render.get("motion_blur") or {}
+    check("motion blur read from Arnold", motion.get("enabled") is True,
+          motion)
+    # Arnold and Blender both state the shutter as a length in frames.
+    check("shutter length carried in frames",
+          abs(float(motion.get("shutter_frames") or 0) - 0.75) < 1e-6,
+          motion.get("shutter_frames"))
+    check("and the attribute it came from is recorded",
+          motion.get("length_attr") == "motion_frames",
+          motion.get("length_attr"))
 
     print("\ncurves")
     by_curve = {
