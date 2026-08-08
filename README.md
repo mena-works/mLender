@@ -1110,6 +1110,25 @@ deformed result, not the rig.
 If Maya's `AbcExport` plugin cannot be loaded, the export still succeeds and
 warns; the affected objects travel as a single frame.
 
+### Particle instancers
+
+Maya's `instancer` places geometry on particle points. Nothing looked for the
+node, so it and everything it placed left the scene without a word.
+
+It arrives as Blender **vertex instancing**: the points object is switched to
+`VERTS` and a copy of the source geometry is parented to it, giving one
+instance per point. Measured on 4.1, 4.5 and 5.2, all three evaluate the same
+number of instances, which is why this route was chosen over geometry nodes.
+
+The source object is never re-parented. It came through the FBX with its own
+place in the scene, and moving it would edit the user's geometry to make the
+instancer work; a linked copy sharing the same mesh data is created instead.
+
+Two limits, both stated rather than approximated. Maya cycles several sources
+with a per-particle index and vertex instancing has no room for one, so only
+the first source travels and the export says so when there is more than one.
+Per-particle rotation and scale are not carried either.
+
 ### Volumes
 
 An Arnold `aiVolume` points at a VDB and Blender's volume object reads the

@@ -36,6 +36,7 @@ from .alembic import (
     export_alembic,
     rig_deformed,
 )
+from .instancers import instancer_records, scene_instancers
 from .volumes import scene_volume_shapes, volume_records
 from .sets import (
     display_layer_records,
@@ -153,6 +154,9 @@ def export_scene(
         volume_list = volume_records(scene_volume_shapes(selected_only))
         particle_shapes = scene_particle_shapes(selected_only)
         particle_list = particle_records(particle_shapes)
+        instancer_list = instancer_records(
+            scene_instancers(selected_only)
+        )
         # Sets and layers may only name what this export carries. A scoped
         # export otherwise sent sets whose members were never in it.
         exported_paths = set(mesh_transforms(mesh_shapes))
@@ -300,6 +304,8 @@ def export_scene(
             "volumes": volume_list,
             "particle_count": len(particle_list),
             "particle_baked_count": baked_particles,
+            "instancer_count": len(instancer_list),
+            "instancers": instancer_list,
             "alembic": {
                 "file": alembic.get("file") or "",
                 "mesh_count": alembic.get("mesh_count") or 0,

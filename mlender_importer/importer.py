@@ -30,6 +30,7 @@ from .merge import (
 from .render import apply_render_settings
 from .sets import import_sets
 from .particles import import_particles
+from .instancers import import_instancers
 from .volumes import import_volumes
 from .materials import apply_face_assignments, build_material
 from .scene import (
@@ -256,6 +257,16 @@ def import_scene_package(
         object_by_path,
     )
 
+    # Last of the rebuilt kinds: an instancer needs both its points object
+    # and its source geometry to exist before it can point at them.
+    instancer_count = import_instancers(
+        package_data,
+        root_collection,
+        warnings,
+        group_cache,
+        object_by_path,
+    )
+
     # Runs after the empties so both kinds of group transform, the ones the
     # FBX brought and the ones the JSON did, end up in the same place.
     place_group_empties(imported_objects, group_cache)
@@ -324,6 +335,7 @@ def import_scene_package(
         "volume_count": volume_count,
         "particle_count": particle_count,
         "particle_baked_count": particle_baked_count,
+        "instancer_count": instancer_count,
         "alembic_count": alembic_count,
         "render": render_applied,
         "import_mode": mode,

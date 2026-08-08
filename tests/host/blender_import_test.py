@@ -113,7 +113,7 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("32 meshes imported", result["mesh_count"] == 32,
+    check("33 meshes imported", result["mesh_count"] == 33,
           result["mesh_count"])
     check("25 materials built", result["material_count"] == 25,
           result["material_count"])
@@ -316,8 +316,8 @@ def main():
     check("the particle object arrived", dust is not None)
     # One, not two: the emitting system travels in the Alembic cache and
     # must not also be rebuilt here as a frozen snapshot.
-    check("the import reported the uncached one", result["particle_count"] == 1,
-          result["particle_count"])
+    check("the import reported the uncached ones",
+          result["particle_count"] == 2, result["particle_count"])
     if dust:
         check("as a mesh of loose vertices",
               dust.type == "MESH" and len(dust.data.vertices) == 4
@@ -337,8 +337,8 @@ def main():
               dust.get("ml_source_count") == 4, dust.get("ml_source_count"))
 
     print("\nparticle bake")
-    check("the import reported one bake",
-          result["particle_baked_count"] == 1,
+    check("the import reported both bakes",
+          result["particle_baked_count"] == 2,
           result["particle_baked_count"])
     if dust:
         action = getattr(
@@ -1122,6 +1122,50 @@ def main():
         check("roughness came from the blinn's eccentricity",
               abs(value(native_blinn, "Roughness") - 0.45) < 1e-5,
               value(native_blinn, "Roughness"))
+
+    print("\ninstancers")
+    check("the import reported one instancer",
+          result["instancer_count"] == 1, result["instancer_count"])
+    holder = bpy.data.objects.get("scatterParticle")
+    check("the points object arrived", holder is not None)
+    if holder:
+        check("switched to vertex instancing",
+              holder.instance_type == "VERTS", holder.instance_type)
+        children = list(holder.children)
+        check("with one template parented to it", len(children) == 1,
+              [c.name for c in children])
+        if children:
+            template = children[0]
+            # A linked copy, not the original: re-parenting the source would
+            # move geometry the user placed to make the instancer work.
+            source = bpy.data.objects.get("instancedGeo")
+            check("the template shares the source's mesh data",
+                  source is not None and template.data is source.data,
+                  template.data.name)
+            check("and the source itself was left alone",
+                  source is not None and source.parent is None,
+                  getattr(getattr(source, "parent", None), "name", None))
+        # Three points in Maya, so three instances after evaluation.
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        # Read inside the loop: a DepsgraphObjectInstance is only valid while
+        # it is being iterated, and keeping the list raises ReferenceError on
+        # the first attribute touched afterwards.
+        places = []
+        for item in depsgraph.object_instances:
+            if not item.is_instance or not item.parent:
+                continue
+            if item.parent.original != holder:
+                continue
+            places.append(round(item.matrix_world.translation.x, 4))
+        check("three instances are actually evaluated",
+              len(places) == 3, len(places))
+        # Maya spaced the points 2 units apart in a centimetre scene, so the
+        # copies must land 2 cm apart, on the points rather than offset from
+        # them. This is what a stale parent inverse or a doubled transform
+        # would move, and a count alone would not notice.
+        places = sorted(places)
+        check("and they land on the points Maya had",
+              places == [0.0, 0.02, 0.04], places)
 
     print("\nanimated visibility")
     check("the import reported one animated visibility",

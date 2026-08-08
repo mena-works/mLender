@@ -398,6 +398,17 @@ def build_scene():
     spark_tf, spark_shape = cmds.particle(name="sparkParticle")
     cmds.connectDynamic(spark_tf, emitters=emitter)
 
+    # Geometry placed on points. Nothing looked for an instancer, so it and
+    # everything it placed left the scene without a word.
+    cmds.select(clear=True)
+    inst_geo = cmds.polyCube(name="instancedGeo", w=0.5, h=0.5, d=0.5)[0]
+    cmds.setAttr(inst_geo + ".translateZ", -18)
+    inst_tf, inst_shape = cmds.particle(
+        p=[(0, 0, 0), (2, 0, 0), (4, 0, 0)], name="scatterParticle"
+    )
+    cmds.setAttr(inst_tf + ".translateZ", -18)
+    cmds.particleInstancer(inst_tf, addObject=True, object=inst_geo)
+
     # A mesh that blinks. Measured: visibility keys do not survive the FBX at
     # all, so before this the cube arrived visible for the whole range.
     blink = cmds.polyCube(name="blinkCube")[0]
@@ -721,7 +732,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("32 meshes exported", payload["mesh_count"] == 32,
+    check("33 meshes exported", payload["mesh_count"] == 33,
           payload["mesh_count"])
     # Four: the locator, the empty null, the nested locator, and the group
     # holding only a curve. That last one has no mesh below it either, so
@@ -796,7 +807,7 @@ def main():
         item.get("particle"): item
         for item in (payload.get("particles") or [])
     }
-    check("2 particle objects exported", payload["particle_count"] == 2,
+    check("3 particle objects exported", payload["particle_count"] == 3,
           payload["particle_count"])
     dust = by_particle.get("dustParticle") or {}
     check("its count is carried", dust.get("count") == 4, dust.get("count"))
@@ -820,8 +831,10 @@ def main():
           "dustParticle" not in by_transform, sorted(by_transform))
 
     print("\nparticle bake")
-    check("one of the two could be baked",
-          payload.get("particle_baked_count") == 1,
+    # dustParticle and the instancer's scatterParticle both hold a steady
+    # count; only the emitter driven one refuses.
+    check("the two steady ones could be baked",
+          payload.get("particle_baked_count") == 2,
           payload.get("particle_baked_count"))
     samples = dust.get("samples") or []
     check("the constant count one carries a sample per frame",
@@ -1560,6 +1573,24 @@ def main():
         check("{0} is reported as supported".format(name),
               (by_material.get(name) or {}).get("supported") is True,
               (by_material.get(name) or {}).get("supported"))
+
+    print("\ninstancers")
+    instancers = payload.get("instancers") or []
+    check("1 instancer exported", payload.get("instancer_count") == 1,
+          payload.get("instancer_count"))
+    scatter = instancers[0] if instancers else {}
+    # The connection arrives from the particle *shape*, and the record has to
+    # name the transform: that is what the importer's particle objects are
+    # keyed by, and matching shape to transform later would be guesswork.
+    check("it names the particle transform, not the shape",
+          str(scatter.get("points_path") or "").endswith("scatterParticle"),
+          scatter.get("points_path"))
+    check("and the source geometry it places",
+          any(str(item).endswith("instancedGeo")
+              for item in (scatter.get("sources") or [])),
+          scatter.get("sources"))
+    check("with one source in this fixture",
+          scatter.get("source_count") == 1, scatter.get("source_count"))
 
     print("\nanimated visibility")
     blink_record = by_mesh.get("blinkCube") or {}
