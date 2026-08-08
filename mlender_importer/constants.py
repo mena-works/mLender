@@ -8,13 +8,13 @@ message shape changes.
 
 import math
 
-BUILD_VERSION = "1.30.0"
+BUILD_VERSION = "2.0.0"
 
 LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
-LIVELINK_PROTOCOL = "za_lookdev_livelink"
-LIVELINK_VERSION = 2
-LIVELINK_EVENT = "lookdev_package_ready"
+LIVELINK_PROTOCOL = "mlender_livelink"
+LIVELINK_VERSION = 3
+LIVELINK_EVENT = "scene_package_ready"
 
 # Package JSON schema versions this build knows how to read. The import wipes
 # the scene, so an unreadable package must be rejected before anything is lost.
@@ -29,9 +29,9 @@ MAX_MESSAGE_BYTES = 32 * 1024 * 1024
 SOCKET_POLL_SECONDS = 0.5
 TIMER_INTERVAL_SECONDS = 0.1
 
-ROOT_COLLECTION_NAME = "Z-A Lookdev Import"
-LIGHT_COLLECTION_NAME = "Z-A Lights"
-CAMERA_COLLECTION_NAME = "Z-A Cameras"
+ROOT_COLLECTION_NAME = "mLender Import"
+LIGHT_COLLECTION_NAME = "mLender Lights"
+CAMERA_COLLECTION_NAME = "mLender Cameras"
 
 # Maya filmFit onto Blender sensor_fit. Overscan has no Blender equivalent and
 # frames like Fill, so both fall back to AUTO.
@@ -41,7 +41,7 @@ CAMERA_SENSOR_FIT = {
     "vertical": "VERTICAL",
     "overscan": "AUTO",
 }
-SUBDIVISION_MODIFIER_NAME = "Z-A Subdivision"
+SUBDIVISION_MODIFIER_NAME = "mLender Subdivision"
 
 # Principled BSDF socket names per channel. Later Blender versions renamed
 # some sockets, so each channel lists the names to try in order.

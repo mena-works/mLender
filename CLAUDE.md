@@ -1,4 +1,4 @@
-# CLAUDE.md — Z-A Exporter (Lookdev)
+# CLAUDE.md — mLender (Lookdev)
 
 > Bu dosya bu repo için geçerlidir ve üst klasördeki (`Downloads/CLAUDE.md`)
 > Unreal Engine kurallarının **yerine geçer**. Buradaki hiçbir şey Unreal,
@@ -26,7 +26,7 @@
 bir modül yalnızca kendinden önce listelenenleri import edebilir.
 
 ```text
-za_lookdev_exporter/     # Maya (import sırası = bağımlılık sırası)
+mlender_exporter/     # Maya (import sırası = bağımlılık sırası)
   constants.py           # sabitler, attribute alias tabloları
   mayautils.py           # maya.cmds sarmalayıcıları
   collect.py             # texture'ları pakete kopyalama (opsiyonel)
@@ -43,7 +43,7 @@ za_lookdev_exporter/     # Maya (import sırası = bağımlılık sırası)
   ui.py                  # Maya penceresi
   __init__.py            # public API + reload_package()
 
-za_lookdev_importer/     # Blender multi-file add-on
+mlender_importer/     # Blender multi-file add-on
   constants.py
   utils.py               # değer/isim normalizasyonu
   images.py              # texture yükleme, UDIM
@@ -96,7 +96,7 @@ sırasında sessizce eski kodla çalışmaya devam eder.
 
 ## 2. Çalışma Ortamı Kısıtları
 
-### Exporter (`za_lookdev_exporter/`)
+### Exporter (`mlender_exporter/`)
 
 - Maya'nın gömülü Python'unda çalışır. `maya.cmds` ve `maya.mel` dışında
   **üçüncü parti bağımlılık yok**, standart kütüphane yeterli.
@@ -105,7 +105,7 @@ sırasında sessizce eski kodla çalışmaya devam eder.
   sürümleriyle uyum bilinçli bir karar.
 - Blender'a özgü hiçbir şey import edilemez (`bpy`, `mathutils`).
 
-### Importer (`za_lookdev_importer/`)
+### Importer (`mlender_importer/`)
 
 - Blender'ın Python'unda çalışır. `bpy` + `mathutils` dışında bağımlılık yok.
 - Maya'ya özgü hiçbir şey import edilemez (`maya.cmds`).
@@ -125,7 +125,7 @@ Aşağıdaki sabitler **iki dosyada da** aynı olmak zorunda:
 |----------------------|------------------------|
 | `LIVELINK_HOST`      | `127.0.0.1`            |
 | `LIVELINK_PORT`      | `50505`                |
-| `LIVELINK_PROTOCOL`  | `za_lookdev_livelink`  |
+| `LIVELINK_PROTOCOL`  | `mlender_livelink`  |
 | `LIVELINK_VERSION`   | `1`                    |
 
 Kurallar:
@@ -261,13 +261,13 @@ doğrulamasının tek yoludur. Uyumsuz bırakma.
 
 ### Namespace kuralı
 
-- Üretilen material adları: `ZA_` öneki
-- Üretilen node adları: `ZA_` öneki
-- Custom property'ler: `za_` öneki (`za_generated`, `za_source_*`)
-- Blender Scene property'leri: `za_` öneki
+- Üretilen material adları: `ML_` öneki
+- Üretilen node adları: `ML_` öneki
+- Custom property'ler: `ml_` öneki (`ml_generated`, `ml_source_*`)
+- Blender Scene property'leri: `ml_` öneki
 - Collection'lar: `ROOT_COLLECTION_NAME`, `LIGHT_COLLECTION_NAME` sabitleri
 
-`za_generated` bayrağı, aracın ürettiği datablock'ları FBX'in ürettiği geçici
+`ml_generated` bayrağı, aracın ürettiği datablock'ları FBX'in ürettiği geçici
 olanlardan ayırmak için kullanılır. Yeni datablock üretiyorsan bu bayrağı koy.
 
 Maya grup hiyerarşisi iç içe collection olarak kurulur (`place_in_group`).
@@ -279,7 +279,7 @@ transform objedir. Aynı gruba düşen meshler tek collection paylaşsın diye
 
 ## 7. Yıkıcı Davranış — Bilinçli Tasarım
 
-`import_lookdev_package()` her pakette **sahnenin tamamını siler**. Bu bir hata
+`import_scene_package()` her pakette **sahnenin tamamını siler**. Bu bir hata
 değil, aracın tasarımıdır (README "Blender import davranışı" bölümü).
 
 - Silmeden önce dosya kayıtlıysa `bpy.ops.wm.save_mainfile()` çağrılır.
@@ -312,7 +312,7 @@ Blender'ın `normalize`'ını **her zaman `True`** bırakır.
 Bu kuralı bozma: alan çarpımını hem `light_energy()` içinde yapıp hem de
 Blender'a normalize=False vermek alanı **iki kez** uygular. Kaynak ışığın
 normalize bayrağı `light_energy()` içinde tüketilir, Blender'a geçirilmez;
-bilgi `za_source_normalized` custom property'sinde saklanır.
+bilgi `ml_source_normalized` custom property'sinde saklanır.
 
 Fiziksel birim bildiren dallar (lumen/candela/watt/radiance) tam çevrimdir,
 dokunma.
@@ -334,11 +334,11 @@ Blender'ın `piksel = P/(π²d²)` özdeşliğini tutturmasıyla sınayabilirsin
 Redshift girdisi (`10.0`) hâlâ devralınmış bir tahmindir çünkü plugin bu
 makinede kurulu değil. Bunu düzeltmek isteyen olursa yöntem belgede yazılı.
 
-Kullanıcı çarpanı `za_light_power_scale`'dir, varsayılanı `1.0` ve dönüşümün
+Kullanıcı çarpanı `ml_light_power_scale`'dir, varsayılanı `1.0` ve dönüşümün
 üstünde çarpan olarak durur. Dönüşüm ölçülmüş olduğu için varsayılanı
 değiştirme.
 
-Orijinal Maya değerleri `za_source_*` custom property'lerinde saklanır —
+Orijinal Maya değerleri `ml_source_*` custom property'lerinde saklanır —
 tartışma çıktığında referans budur, silme.
 
 ### Light node ağacı birim çarpandır
@@ -378,7 +378,7 @@ gerçekten test edebilirsin. Ayrıntılar `tests/README.md`.
 
 ```bash
 # 1. Sozdizimi
-python -m py_compile za_lookdev_exporter/*.py za_lookdev_importer/*.py
+python -m py_compile mlender_exporter/*.py mlender_importer/*.py
 
 # 2. Sozlesme kontrolleri (host gerekmez, saniyeler)
 python tests/check_contracts.py
@@ -409,12 +409,12 @@ Kullanıcının elle doğrulaması gereken adımlar:
 1. Maya'da `za.show_ui()` → Export Location seç → `Send To Blender`
 2. Blender N-panel'de `Build` numarasının beklenen sürüm olduğunu kontrol et
 3. Import sonrası panel status satırını oku (mesh/material/subdiv/ışık sayıları)
-4. Blender System Console'da `Z-A Lookdev warning:` satırlarını kontrol et
+4. Blender System Console'da `mLender warning:` satırlarını kontrol et
 
 ### Hata yönetimi deseni
 
 - **Exporter**: paket üretimi atomiktir. Hata olursa FBX, JSON ve klasör
-  temizlenir (`export_lookdev` içindeki `try/except`). Yeni dosya üretiyorsan
+  temizlenir (`export_scene` içindeki `try/except`). Yeni dosya üretiyorsan
   bu temizliğe ekle.
 - **Importer**: tek bir material/ışık/texture hatası import'u durdurmaz;
   `warnings` listesine yazılır ve akış devam eder. Bu deseni sürdür — kısmi
@@ -427,14 +427,14 @@ Kullanıcının elle doğrulaması gereken adımlar:
 ## 10. Kod Stili
 
 - Paket dışına açık API `__init__.py` içindeki `__all__` ile tanımlıdır:
-  exporter'da `show_ui`, `show`, `export_lookdev`, `reload_package`;
-  importer'da `import_lookdev_package`, `register`, `unregister` ve listener
+  exporter'da `show_ui`, `show`, `export_scene`, `reload_package`;
+  importer'da `import_scene_package`, `register`, `unregister` ve listener
   fonksiyonları.
 - Modüller arası paylaşılan fonksiyonlar `_` **almaz** — başka modülden
   `_foo` import etmek anlamsızdır. `_` öneki yalnızca aynı modül içinde
   kalan yardımcılar içindir (`_build_principled`, `_insert_value_invert`).
 - Modül içi import'lar hep relative: `from .mayautils import attr_exists`.
-  Absolute import (`from za_lookdev_exporter.mayautils import ...`) yazma;
+  Absolute import (`from mlender_exporter.mayautils import ...`) yazma;
   Blender add-on klasör adı değiştiğinde kırılır.
 - Modül seviyesi sabitler UPPER_SNAKE ve `constants.py` içinde toplanır.
   Yeni bir sihirli sayı veya string'i doğrudan mantığa gömme.

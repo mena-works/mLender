@@ -42,7 +42,7 @@ def operators_callable():
     Blender does not expose operator classes on bpy.types by class name, so
     checking there reports a false negative and hides a real failure.
     """
-    namespace = getattr(bpy.ops, "za_lookdev", None)
+    namespace = getattr(bpy.ops, "ml_lookdev", None)
     if namespace is None:
         return False
     return all(
@@ -56,7 +56,7 @@ def unregistered_classes(classes):
 
 
 def main():
-    import za_lookdev_importer as zi
+    import mlender_importer as zi
 
     print("Blender {0}, importer build {1}".format(
         bpy.app.version_string, zi.BUILD_VERSION))
@@ -67,17 +67,17 @@ def main():
     check("every class registered", not unregistered_classes(classes),
           unregistered_classes(classes))
     check("operators callable", operators_callable())
-    check("panel sits in the Z-A sidebar tab",
-          bpy.types.ZA_PT_lookdev.bl_category == "Z-A Exporter",
-          bpy.types.ZA_PT_lookdev.bl_category)
+    check("panel sits in the mLender sidebar tab",
+          bpy.types.ML_PT_lookdev.bl_category == "mLender",
+          bpy.types.ML_PT_lookdev.bl_category)
 
     print("\nscene properties")
     scene = bpy.context.scene
     for prop, expected in (
-        ("za_import_scale", 1.0),
-        ("za_light_power_scale", 1.0),
-        ("za_livelink_host", "127.0.0.1"),
-        ("za_livelink_port", 50505),
+        ("ml_import_scale", 1.0),
+        ("ml_light_power_scale", 1.0),
+        ("ml_livelink_host", "127.0.0.1"),
+        ("ml_livelink_port", 50505),
     ):
         check("{0} defaults to {1!r}".format(prop, expected),
               getattr(scene, prop, None) == expected,
@@ -85,11 +85,11 @@ def main():
 
     print("\nlistener round trip")
     check("start returns FINISHED",
-          bpy.ops.za_lookdev.start_listener() == {"FINISHED"})
+          bpy.ops.mlender.start_listener() == {"FINISHED"})
     check("status reports the bound port",
           "50505" in zi.get_status(), zi.get_status())
     check("stop returns FINISHED",
-          bpy.ops.za_lookdev.stop_listener() == {"FINISHED"})
+          bpy.ops.mlender.stop_listener() == {"FINISHED"})
     check("status reports stopped", "stopped" in zi.get_status().lower(),
           zi.get_status())
 
@@ -102,10 +102,10 @@ def main():
         check("round {0}: operators survive".format(round_number),
               operators_callable())
         check("round {0}: scene properties survive".format(round_number),
-              hasattr(bpy.context.scene, "za_light_power_scale"))
+              hasattr(bpy.context.scene, "ml_light_power_scale"))
     check("operators still run after re-registering",
-          bpy.ops.za_lookdev.start_listener() == {"FINISHED"})
-    bpy.ops.za_lookdev.stop_listener()
+          bpy.ops.mlender.start_listener() == {"FINISHED"})
+    bpy.ops.mlender.stop_listener()
 
     print("\nunregistration")
     zi.unregister()
@@ -113,7 +113,7 @@ def main():
           all(not cls.is_registered for cls in classes),
           [cls.__name__ for cls in classes if cls.is_registered])
     check("scene properties removed",
-          not hasattr(bpy.types.Scene, "za_light_power_scale"))
+          not hasattr(bpy.types.Scene, "ml_light_power_scale"))
     check("listener released", "stopped" in zi.get_status().lower(),
           zi.get_status())
 

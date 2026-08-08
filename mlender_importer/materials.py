@@ -12,7 +12,7 @@ There are three build paths: unlit shaders become Emission mixed against a
 Transparent BSDF, refractive ones become a Glass BSDF, and everything else
 becomes a Principled BSDF.
 
-Every material produced here carries the ``za_generated`` custom property so
+Every material produced here carries the ``ml_generated`` custom property so
 the import can tell its own datablocks apart from the placeholder materials
 the FBX importer creates.
 """
@@ -65,11 +65,11 @@ def build_material(material_record, warnings):
         or "Material"
     )
     material = bpy.data.materials.new(
-        unique_material_name("ZA_" + safe_name(display_name))
+        unique_material_name("ML_" + safe_name(display_name))
     )
-    material["za_generated"] = True
-    material["za_maya_material"] = maya_name
-    material["za_shader_type"] = material_record.get("shader_type") or ""
+    material["ml_generated"] = True
+    material["ml_maya_material"] = maya_name
+    material["ml_shader_type"] = material_record.get("shader_type") or ""
     material.use_nodes = True
     material.node_tree.nodes.clear()
 
@@ -129,7 +129,7 @@ def apply_displacement(material, material_record, warnings):
     node = nodes.new(
         "ShaderNodeVectorDisplacement" if is_vector else "ShaderNodeDisplacement"
     )
-    node.name = "ZA_Displacement"
+    node.name = "ML_Displacement"
     node.label = "Maya Displacement"
     # Object space unless Maya said otherwise. Measured on the imported FBX:
     # the unit conversion lands on the object's scale while vertex coordinates
@@ -166,8 +166,8 @@ def apply_displacement(material, material_record, warnings):
         except Exception:
             pass
 
-    material["za_displacement"] = method
-    material["za_source_displacement_height"] = scalar(
+    material["ml_displacement"] = method
+    material["ml_source_displacement_height"] = scalar(
         displacement.get("height"), 1.0
     )
     if not displacement.get("subdivision_enabled"):
@@ -266,7 +266,7 @@ def apply_sheen_roughness_remap(material, bsdf, channels, warnings):
     if source is None:
         return
     socket.default_value = remapped_sheen_roughness(source)
-    material["za_source_sheen_roughness"] = float(source)
+    material["ml_source_sheen_roughness"] = float(source)
 
 
 def apply_openpbr_metal_specular(material, bsdf, channels, warnings):
@@ -316,7 +316,7 @@ def apply_openpbr_metal_specular(material, bsdf, channels, warnings):
         for index in range(3):
             colour[index] = max(0.0, colour[index]) * factor
         socket.default_value = colour
-    material["za_openpbr_specular_scale"] = factor
+    material["ml_openpbr_specular_scale"] = factor
 
 
 def _insert_colour_scale(material, socket, factor):
@@ -326,7 +326,7 @@ def _insert_colour_scale(material, socket, factor):
     source = socket.links[0].from_socket
     node = nodes.new("ShaderNodeVectorMath")
     node.operation = "MULTIPLY"
-    node.name = "ZA_SpecularMetalScale"
+    node.name = "ML_SpecularMetalScale"
     node.label = "OpenPBR Specular Weight"
     node.location = (socket.node.location[0] - 780,
                      socket.node.location[1] - 120)
@@ -392,8 +392,8 @@ def apply_coat_darkening(material, bsdf, channels, warnings):
                 colour[index], reflectance, amount
             )
         socket.default_value = colour
-    material["za_coat_darkening"] = amount
-    material["za_coat_internal_reflectance"] = reflectance
+    material["ml_coat_darkening"] = amount
+    material["ml_coat_internal_reflectance"] = reflectance
 
 
 def _darkened_channel(value, reflectance, amount):
@@ -422,7 +422,7 @@ def _insert_coat_darkening(material, socket, reflectance, amount):
     def vector(operation, index, first, second):
         node = nodes.new("ShaderNodeVectorMath")
         node.operation = operation
-        node.name = "ZA_CoatDarkening_{0}".format(index)
+        node.name = "ML_CoatDarkening_{0}".format(index)
         node.label = "Coat Darkening"
         node.location = (origin[0] - 720 + index * 80, origin[1] - 320)
         for slot, value in ((0, first), (1, second)):
@@ -482,7 +482,7 @@ def _build_glass(material, channels, warnings):
     output = nodes.new("ShaderNodeOutputMaterial")
     output.location = (560, 0)
     glass = nodes.new("ShaderNodeBsdfGlass")
-    glass.name = "ZA_Glass"
+    glass.name = "ML_Glass"
     glass.label = "Glass"
     glass.location = (80, 40)
 
@@ -514,7 +514,7 @@ def _build_glass(material, channels, warnings):
         transparent = nodes.new("ShaderNodeBsdfTransparent")
         transparent.location = (80, -170)
         mix = nodes.new("ShaderNodeMixShader")
-        mix.name = "ZA_Glass_Opacity"
+        mix.name = "ML_Glass_Opacity"
         mix.label = "Glass Cutout Opacity"
         mix.location = (330, 0)
         links.new(transparent.outputs.get("BSDF"), mix.inputs[1])
@@ -531,15 +531,15 @@ def _build_glass(material, channels, warnings):
     else:
         links.new(glass.outputs.get("BSDF"), output.inputs.get("Surface"))
 
-    material["za_material_mode"] = "GLASS_BSDF"
-    material["za_transmission_weight"] = scalar(
+    material["ml_material_mode"] = "GLASS_BSDF"
+    material["ml_transmission_weight"] = scalar(
         (channels.get("transmission") or {}).get("value"),
         1.0,
     )
-    material["za_thin_walled"] = bool(
+    material["ml_thin_walled"] = bool(
         scalar((channels.get("thin_walled") or {}).get("value"), 0.0)
     )
-    material["za_transmission_affects_alpha"] = bool(
+    material["ml_transmission_affects_alpha"] = bool(
         scalar(
             (channels.get("transmission_affects_alpha") or {}).get("value"),
             1.0,
@@ -598,7 +598,7 @@ def _build_unlit(material, channels, warnings):
         image = load_image(emission_texture, "emission", warnings)
         if image:
             image_node = nodes.new("ShaderNodeTexImage")
-            image_node.name = "ZA_Unlit_Color"
+            image_node.name = "ML_Unlit_Color"
             image_node.image = image
             _apply_placement(material, image_node, emission_texture)
             links.new(
@@ -629,7 +629,7 @@ def _build_unlit(material, channels, warnings):
         image = load_image(opacity_texture, "opacity", warnings)
         if image:
             image_node = nodes.new("ShaderNodeTexImage")
-            image_node.name = "ZA_Unlit_Opacity"
+            image_node.name = "ML_Unlit_Opacity"
             image_node.image = image
             _apply_placement(material, image_node, opacity_texture)
             rgb_to_bw = nodes.new("ShaderNodeRGBToBW")
@@ -724,7 +724,7 @@ def connect_image_channel(material, bsdf, target, channel, image, invert,
     nodes = material.node_tree.nodes
     links = material.node_tree.links
     image_node = nodes.new("ShaderNodeTexImage")
-    image_node.name = "ZA_{0}_Texture".format(channel)
+    image_node.name = "ML_{0}_Texture".format(channel)
     image_node.label = channel.replace("_", " ").title()
     image_node.image = image
     _apply_placement(material, image_node, texture_record)
@@ -776,7 +776,7 @@ def _connect_normal(material, source, target, texture_record):
     if interpretation.startswith("bump"):
         # A height field rather than a normal map.
         node = nodes.new("ShaderNodeBump")
-        node.name = "ZA_Bump"
+        node.name = "ML_Bump"
         links.new(source, node.inputs.get("Height"))
         if node.inputs.get("Strength") is not None:
             node.inputs["Strength"].default_value = max(0.0, depth)
@@ -784,7 +784,7 @@ def _connect_normal(material, source, target, texture_record):
         return
 
     normal_map = nodes.new("ShaderNodeNormalMap")
-    normal_map.name = "ZA_Normal_Map"
+    normal_map.name = "ML_Normal_Map"
     if "object" in interpretation and hasattr(normal_map, "space"):
         try:
             normal_map.space = "OBJECT"
@@ -824,11 +824,11 @@ def _apply_placement(material, image_node, texture_record):
     nodes = material.node_tree.nodes
     links = material.node_tree.links
     mapping = nodes.new("ShaderNodeMapping")
-    mapping.name = "ZA_Placement"
+    mapping.name = "ML_Placement"
     mapping.label = "Maya Placement"
     mapping.vector_type = "POINT"
     coord = nodes.new("ShaderNodeTexCoord")
-    coord.name = "ZA_Placement_Coord"
+    coord.name = "ML_Placement_Coord"
 
     mapping.inputs["Scale"].default_value = (repeat_u, repeat_v, 1.0)
     mapping.inputs["Location"].default_value = (

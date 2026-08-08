@@ -58,7 +58,7 @@ def validate_schema_version(package_data):
     return version
 
 
-def import_lookdev_package(
+def import_scene_package(
     package_folder,
     package_data=None,
     import_scale=1.0,
@@ -214,12 +214,12 @@ def _remove_fbx_placeholder_materials(before_materials):
     """Drop the unused materials the FBX importer created.
 
     Only untouched, unused datablocks are removed; anything this tool built
-    is tagged with za_generated and kept.
+    is tagged with ml_generated and kept.
     """
     for material in list(bpy.data.materials):
         if material in before_materials:
             continue
-        if material.get("za_generated"):
+        if material.get("ml_generated"):
             continue
         if material.users == 0:
             bpy.data.materials.remove(material)

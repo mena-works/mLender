@@ -20,7 +20,7 @@ import bpy
 TOOL_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 )
-OUT = os.path.join(tempfile.gettempdir(), "za_material_match")
+OUT = os.path.join(tempfile.gettempdir(), "ml_material_match")
 
 if TOOL_ROOT not in sys.path:
     sys.path.insert(0, TOOL_ROOT)
@@ -73,12 +73,12 @@ def main():
     ):
         raise SystemExit("No Arnold chart. Run material_match_maya.py first.")
 
-    packages = sorted(glob.glob(os.path.join(OUT, "MTB_Z_A_*")))
-    import za_lookdev_importer as zi
+    packages = sorted(glob.glob(os.path.join(OUT, "mLender_*")))
+    import mlender_importer as zi
 
     print("Blender {0}, importer build {1}".format(
         bpy.app.version_string, zi.BUILD_VERSION))
-    result = zi.import_lookdev_package(packages[-1], import_scale=1.0)
+    result = zi.import_scene_package(packages[-1], import_scale=1.0)
     for warning in result["warnings"]:
         print("  warn: {0}".format(warning))
 

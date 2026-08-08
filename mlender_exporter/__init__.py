@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Z-A Exporter - Lookdev, Maya side.
+"""mLender, Maya side.
 
 Public API::
 
-    import za_lookdev_exporter as za
+    import mlender_exporter as za
     za.show_ui()
 
 Everything else is internal. Use :func:`reload_package` during development;
@@ -22,11 +22,11 @@ from .constants import (
     LIVELINK_VERSION,
     TOOL_NAME,
 )
-from .package import export_lookdev
+from .package import export_scene
 from .ui import show_ui
 
 
-BUILD_VERSION = "1.30.0"
+BUILD_VERSION = "2.0.0"
 
 # Dependency order; reloading follows this list so each module re-imports
 # already refreshed dependencies.
@@ -55,7 +55,7 @@ __all__ = [
     "LIVELINK_PROTOCOL",
     "LIVELINK_VERSION",
     "TOOL_NAME",
-    "export_lookdev",
+    "export_scene",
     "reload_package",
     "show",
     "show_ui",

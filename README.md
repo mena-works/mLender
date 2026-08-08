@@ -1,13 +1,14 @@
 # mLender
 
-**Live lookdev transfer from Maya to Blender.**
+**Live scene transfer from Maya to Blender.**
 
 mLender packages a Maya scene as FBX plus a JSON sidecar, streams it to Blender
-over a local socket, and rebuilds the result there: materials as Principled BSDF
-node trees, lights as native Blender lights, cameras as native Blender cameras.
+over a local socket, and rebuilds it there natively: meshes with their group
+hierarchy and per-face material assignments, materials as Principled BSDF node
+trees, lights as Blender lights, cameras as Blender cameras.
 
-The goal is not a file format. It is that a shot lit and shaded in Maya looks
-the same in Cycles without anybody re-authoring it. Where the two renderers
+The goal is not a file format. It is that a scene built in Maya arrives in
+Blender ready to render, without anybody re-authoring it. Where the two renderers
 disagree, the conversion constants in this tool were **measured by rendering
 both sides and solving for the ratio**, not guessed. Those measurements are
 recorded under [`tests/docs/`](tests/docs/).
@@ -37,7 +38,7 @@ recorded under [`tests/docs/`](tests/docs/).
 |---|---|
 | Maya | 2022 or newer |
 | Renderers | Arnold (MtoA), Redshift, or native Maya shaders |
-| Blender | 3.6 or newer — verified on 4.1, 4.3, 4.5 and 5.2 |
+| Blender | 4.1 or newer — verified on 4.1, 4.3, 4.5 and 5.2 |
 | Dependencies | None. Standard library only on both sides. |
 
 The two halves never import each other and have no shared module: they run in
@@ -51,7 +52,7 @@ package JSON schema.
 ### Maya
 
 The exporter is a plain Python package. Add the directory **containing**
-`za_lookdev_exporter` to `sys.path`:
+`mlender_exporter` to `sys.path`:
 
 ```python
 import sys
@@ -60,8 +61,8 @@ tool_path = r"C:\path\to\mLender"
 if tool_path not in sys.path:
     sys.path.append(tool_path)
 
-import za_lookdev_exporter as za
-za.show_ui()
+import mlender_exporter as ml
+ml.show_ui()
 ```
 
 For a permanent setup, append the following to
@@ -77,7 +78,7 @@ def _register_mlender():
     import sys
     try:
         if not os.path.isdir(os.path.join(MLENDER_ROOT,
-                                          "za_lookdev_exporter")):
+                                          "mlender_exporter")):
             return
         if MLENDER_ROOT not in sys.path:
             sys.path.append(MLENDER_ROOT)
@@ -93,52 +94,58 @@ startup.
 
 A shelf is the other option: drop a separate `shelf_mLender.mel` into
 `Documents/maya/<version>/prefs/shelves/`. Because it is a new file, existing
-shelves are untouched. Two buttons are useful — one calling `za.show_ui()` and
-one calling `za.reload_package()` for development.
+shelves are untouched. Two buttons are useful — one calling `ml.show_ui()` and
+one calling `ml.reload_package()` for development.
 
 ### Blender
 
-`za_lookdev_importer` is a standard multi-file add-on. Install it in any of
+`mlender_importer` is a standard multi-file add-on. Install it in any of
 three ways:
 
 **Copy the folder** into Blender's add-on directory:
 
 ```text
-%APPDATA%\Blender Foundation\Blender\<version>\scripts\addons\za_lookdev_importer\
+%APPDATA%\Blender Foundation\Blender\<version>\scripts\addons\mlender_importer\
 ```
 
-**Install a zip** of the `za_lookdev_importer` folder through
+**Install a zip** of the `mlender_importer` folder through
 `Edit > Preferences > Add-ons > Install`.
 
 **Link the folder** — best for development, since `git pull` then needs no
 copying:
 
 ```bat
-mklink /J "%APPDATA%\Blender Foundation\Blender\5.2\scripts\addons\za_lookdev_importer" ^
-          "C:\path\to\mLender\za_lookdev_importer"
+mklink /J "%APPDATA%\Blender Foundation\Blender\5.2\scripts\addons\mlender_importer" ^
+          "C:\path\to\mLender\mlender_importer"
 ```
 
 A directory junction needs no administrator rights on Windows. `ln -s` does the
 same on Linux and macOS.
 
-Enable **Z-A Exporter - Lookdev** in `Edit > Preferences > Add-ons`.
+Enable **mLender** in `Edit > Preferences > Add-ons`.
 
-> The add-on, its node prefixes (`ZA_`) and its custom properties (`za_`) still
-> carry the tool's original name. Renaming them is a breaking change for any
-> scene already imported, so it is deliberately not bundled with the repository
-> rename.
+> **Upgrading from 1.x.** The add-on module was called `za_lookdev_importer`
+> and is now `mlender_importer`, so Blender treats it as a new add-on rather
+> than an update. Remove the old one and, if you installed it as a junction or
+> symlink, point the link at the new folder. Generated nodes are prefixed
+> `ML_` and custom properties `ml_`, where 1.x used `ZA_` and `za_`.
+>
+> A 1.x package still imports: its JSON is named `*_lookdev.json` and the
+> importer accepts both names. The two halves must match, though — the
+> LiveLink protocol string changed, so a 2.0 exporter cannot talk to a 1.x
+> importer, and it says so rather than failing quietly.
 
 ---
 
 ## Usage
 
-**In Maya** — `za.show_ui()`, then:
+**In Maya** — `ml.show_ui()`, then:
 
 1. Choose an **Export Location**.
 2. Check the Blender host and port. Default `127.0.0.1:50505`.
 3. Press **Send To Blender**.
 
-**In Blender** — `View3D > N Panel > Z-A Exporter`:
+**In Blender** — `View3D > N Panel > mLender`:
 
 1. Confirm the **Build** number is the version you expect.
 2. Check **FBX Scale**.
@@ -147,7 +154,7 @@ Enable **Z-A Exporter - Lookdev** in `Edit > Preferences > Add-ons`.
 
 After an import, read the panel's status line (mesh, material, subdivision and
 light counts) and check the System Console for lines beginning
-`Z-A Lookdev warning:`.
+`mLender warning:`.
 
 ### Options
 
@@ -168,7 +175,7 @@ Deliberately **not** included:
 
 - No Alembic.
 - No shape keys, parenting or constraint setup.
-- No lookdev `.blend` selection.
+- No template `.blend` selection.
 - No turntable generator — whatever is animated in the scene is what arrives.
 
 **Import is destructive by design.** Every package wipes the Blender scene and
@@ -184,9 +191,9 @@ not a bug; a merge mode would be a separate feature.
 Each send creates a new package folder under the chosen export location:
 
 ```text
-MTB_Z_A_01/
-  MTB_Z_A_01.fbx
-  MTB_Z_A_01_lookdev.json
+mLender_01/
+  mLender_01.fbx
+  mLender_01_scene.json
 ```
 
 Textures are **not** copied by default. The JSON carries the original Maya
@@ -199,9 +206,9 @@ Ticking **Collect Textures** copies every referenced texture into
 the package portable:
 
 ```text
-MTB_Z_A_01/
-  MTB_Z_A_01.fbx
-  MTB_Z_A_01_lookdev.json
+mLender_01/
+  mLender_01.fbx
+  mLender_01_scene.json
   textures_collected/
     wood_basecolor.tx
     tile.1001.tx
@@ -252,7 +259,7 @@ Both packages are ordered by dependency: a module may only import ones listed
 above it.
 
 ```text
-za_lookdev_exporter/        # Maya side
+mlender_exporter/        # Maya side
   constants.py              # protocol constants, attribute alias tables
   mayautils.py              # maya.cmds wrappers and value helpers
   collect.py                # optional texture collection
@@ -268,7 +275,7 @@ za_lookdev_exporter/        # Maya side
   package.py                # package folder, JSON, atomic cleanup
   ui.py                     # Maya window
 
-za_lookdev_importer/        # Blender side (multi-file add-on)
+mlender_importer/        # Blender side (multi-file add-on)
   constants.py              # protocol constants, socket names, calibration
   utils.py                  # value and name normalisation
   images.py                 # texture loading, UDIM
@@ -324,8 +331,8 @@ mixes the Glass BSDF against a Transparent BSDF rather than tinting the glass.
 (`surfaceShader`, `aiFlat`), which reproduces their behaviour far better than
 pushing the colour into a base colour would.
 
-Source values survive as custom properties: `za_material_mode`,
-`za_transmission_weight`, `za_thin_walled`, `za_transmission_affects_alpha`.
+Source values survive as custom properties: `ml_material_mode`,
+`ml_transmission_weight`, `ml_thin_walled`, `ml_transmission_affects_alpha`.
 
 ### Specular weight
 
@@ -495,7 +502,7 @@ do not mean the same thing: at 0.3 Arnold shows a sheen Blender barely
 registers, and at 1.0 Blender shows a third more than Arnold. No single factor
 could fix that — the sign of the error changes partway along the scale. A
 measured table remaps it (0.25 becomes about 0.51); the original is kept in
-`za_source_sheen_roughness`. The table came out identical at two base albedos
+`ml_source_sheen_roughness`. The table came out identical at two base albedos
 and stable across Blender 4.1 to 5.2.
 
 **aiOpenPBRSurface `fuzzRoughness` passes through untouched.** Swept the same
@@ -507,7 +514,7 @@ model. Remapping it would break a match that is already correct.
 Arnold; `aiStandardSurface` does not behave this way and Principled has no
 socket that does. Measured across five weights and five metalness values, the
 result is exactly `base × (1 − metalness × (1 − specularWeight))`. That factor
-is applied to the base colour and recorded as `za_openpbr_specular_scale`. At
+is applied to the base colour and recorded as `ml_openpbr_specular_scale`. At
 the default weight of 1.0 the factor is 1 and nothing changes.
 
 **OpenPBR's `coatDarkening` is folded into the base colour.** OpenPBR darkens
@@ -520,7 +527,7 @@ the coat weight because the light crosses the coat going in and coming out.
 `rᵢ` follows the coat IOR and was checked at three IORs. A flat base colour is
 darkened directly; a textured one goes through a node chain. The package keeps
 reporting the artist's base colour; the amount applied is in
-`za_coat_darkening`. `aiStandardSurface` has no such attribute and is
+`ml_coat_darkening`. `aiStandardSurface` has no such attribute and is
 unaffected.
 
 **Principled has no separate Subsurface Color socket** in 4.1 or 5.2; it tints
@@ -548,7 +555,7 @@ nodes, which is faster than baking and stays editable:
 | `multiplyDivide` | Mix (Multiply / Divide) |
 | `remapValue` | Mix + Colour Ramp + Mix |
 
-Nodes are prefixed `ZA_CC_` / `ZA_`. A setting left at its neutral value builds
+Nodes are prefixed `ML_CC_` / `ML_`. A setting left at its neutral value builds
 no node, so an untouched correction node does not clutter the tree.
 
 Five conversions were measured and came out against intuition — details in
@@ -584,7 +591,7 @@ ramp, layered noise — there is nothing to reference, so the exporter **bakes**
 the network to the mesh's UVs and writes it into the package.
 
 ```text
-MTB_Z_A_01/
+mLender_01/
   textures/
     procCube_shd_base_color.png
     procCube_shd_roughness.png
@@ -652,7 +659,7 @@ The `Scale` socket's default differs between versions (1.0 in 4.1, 0.01 in
 ## Lights
 
 Lights are not written into the FBX. They are sent through the JSON and rebuilt
-under `Z-A Lookdev Import > Z-A Lights`.
+under `mLender Import > mLender Lights`.
 
 ```text
 Redshift Physical Area         -> Area
@@ -675,7 +682,7 @@ Transferred: world position and rotation, area size from the transform scale,
 colour and colour temperature, intensity, exposure and physical unit, area
 shape, normalize, spread and bidirectional metadata, spot cone and falloff,
 shadow settings, and dome HDR and IES file paths. Exposure is evaluated as
-`intensity × 2^exposure`. Originals are preserved in `za_source_*` properties.
+`intensity × 2^exposure`. Originals are preserved in `ml_source_*` properties.
 
 Arnold spells the exposure attribute inconsistently — `aiAreaLight` and
 `aiPhotometricLight` carry `exposure`, while `aiSkyDomeLight`, `aiMeshLight`
@@ -758,7 +765,7 @@ collection**:
 
 ```text
 Maya      lightA -> cubeA (link to cubeB broken)
-Blender   lightA.light_linking.receiver_collection = ZA_Link_lightA
+Blender   lightA.light_linking.receiver_collection = ML_Link_lightA
           containing: cubeA
 ```
 
@@ -789,7 +796,7 @@ Blender's equivalent is the `blocker_collection`.
 
 Maya's startup cameras (`persp`, `top`, `front`, `side`) are viewport
 furniture and are not transferred. User cameras are rebuilt under
-`Z-A Lookdev Import > Z-A Cameras`.
+`mLender Import > mLender Cameras`.
 
 Maya and Blender cameras face the same way (local −Z forward, +Y up), so the
 same matrix conversion as lights applies. The differences are lens and units:
@@ -808,7 +815,7 @@ focusDistance            -> dof.focus_distance (scene units -> metres)
 
 The camera marked `renderable` in Maya becomes Blender's active scene camera.
 With several renderable cameras the first is chosen and a warning is issued.
-Originals are stored in `za_source_*` on the camera data.
+Originals are stored in `ml_source_*` on the camera data.
 
 ---
 
@@ -863,7 +870,7 @@ scene.
 
 ```text
 Maya                              Blender
-|setDressing|props|chair    ->    Z-A Lookdev Import
+|setDressing|props|chair    ->    mLender Import
                                     setDressing
                                       props
                                         chair
@@ -874,10 +881,10 @@ Maya                              Blender
   nesting level that does not exist.
 - A mesh with no group stays in the root collection.
 - Two meshes from the same Maya group share **one** collection.
-- Generated collections carry `za_generated` and `za_maya_group`.
+- Generated collections carry `ml_generated` and `ml_maya_group`.
 
-Lights and cameras stay together under `Z-A Lights` and `Z-A Cameras` rather
-than joining this hierarchy, because lookdev wants them all reachable at once.
+Lights and cameras stay together under `mLender Lights` and `mLender Cameras` rather
+than joining this hierarchy, so they stay reachable as a set.
 
 ### Meshes with the same name
 
@@ -894,7 +901,7 @@ outscore a genuine one.
 ### Visibility and render flags
 
 An object hidden from camera but casting shadows — one of the most common
-lookdev setups — used to arrive fully visible. Ray visibility is now
+setups in production — used to arrive fully visible. Ray visibility is now
 transferred:
 
 ```text
@@ -942,7 +949,7 @@ Catmull-Clark.
 `aiSubdivUvSmoothing` maps `pin_corners` to `PRESERVE_CORNERS`, `pin_borders`
 to `PRESERVE_BOUNDARIES` and `smooth` to `SMOOTH_ALL`. When
 `useSmoothPreviewForRender` is off, viewport and render levels transfer
-separately. The source is recorded in `za_subdivision_source`.
+separately. The source is recorded in `ml_subdivision_source`.
 
 > Packages older than schema 6 carry no subdivision record and those meshes are
 > left unsubdivided. Before 1.9.0 every mesh was subdivided; re-sending the
@@ -956,8 +963,8 @@ scene, which is what you want while iterating on a single asset.
 - **The selection is expanded through groups.** Selecting an asset normally
   means selecting the group holding it, so reading the selection literally
   would export nothing in the most common case.
-- **Lights and cameras always come in full.** A lookdev package without its
-  lighting is not lookdev, it is darkness. A light in the selection is
+- **Lights and cameras always come in full.** A scene package without its
+  lighting is not a scene, it is darkness. A light in the selection is
   mentioned in a warning rather than silently ignored.
 - If the selection contains no meshes at all, the export **fails loudly**
   rather than leaving half a package behind.
@@ -1013,8 +1020,8 @@ raw linear and `Standard` is applied.
 refreshes `__init__.py` and leaves the submodules stale.
 
 ```python
-za = za.reload_package()
-za.show_ui()
+ml = ml.reload_package()
+ml.show_ui()
 ```
 
 `reload_package()` refreshes submodules in dependency order and returns the
@@ -1028,7 +1035,7 @@ port 50505 stays bound, press **Stop LiveLink** first, then reload.
 
 ```bash
 # 1. Syntax
-python -m py_compile za_lookdev_exporter/*.py za_lookdev_importer/*.py
+python -m py_compile mlender_exporter/*.py mlender_importer/*.py
 
 # 2. Contract checks (no host required, seconds)
 python tests/check_contracts.py

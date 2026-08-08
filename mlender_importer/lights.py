@@ -3,7 +3,7 @@
 
 Lights never travel inside the FBX; they arrive as current-frame JSON records
 so they can be rebuilt with real Blender light data instead of FBX
-approximations. Original Redshift values are preserved in ``za_source_*``
+approximations. Original Redshift values are preserved in ``ml_source_*``
 custom properties, which are the reference when calibration is questioned.
 """
 
@@ -250,14 +250,14 @@ def apply_light_linking(obj, record, mesh_objects, warnings):
     applied = False
     if names is not None:
         applied = _assign_link_collection(
-            linking, "receiver_collection", "ZA_Link_", obj, names,
+            linking, "receiver_collection", "ML_Link_", obj, names,
             mesh_objects, warnings,
         ) or applied
     if shadow_names is not None:
         # Blender's blockers are the objects that cast this light's shadow,
         # which is what Maya's shadow linking restricts.
         applied = _assign_link_collection(
-            linking, "blocker_collection", "ZA_Shadow_", obj, shadow_names,
+            linking, "blocker_collection", "ML_Shadow_", obj, shadow_names,
             mesh_objects, warnings,
         ) or applied
     return applied
@@ -268,7 +268,7 @@ def _assign_link_collection(linking, attribute, prefix, obj, names,
     if not hasattr(linking, attribute):
         return False
     collection = bpy.data.collections.new(prefix + obj.name)
-    collection["za_generated"] = True
+    collection["ml_generated"] = True
     found = 0
     for name in names:
         target = (mesh_objects or {}).get(name)
@@ -298,7 +298,7 @@ def _assign_link_collection(linking, attribute, prefix, obj, names,
         )
         bpy.data.collections.remove(collection)
         return False
-    obj["za_" + attribute + "_count"] = found
+    obj["ml_" + attribute + "_count"] = found
     return True
 
 
@@ -523,7 +523,7 @@ def configure_light_texture_nodes(data, record, warnings):
             image = load_image(color_texture, "base_color", warnings)
             if image:
                 image_node = nodes.new("ShaderNodeTexImage")
-                image_node.name = "ZA_Light_Color_Texture"
+                image_node.name = "ML_Light_Color_Texture"
                 image_node.image = image
                 links.new(
                     image_node.outputs.get("Color"),
@@ -600,7 +600,7 @@ def create_dome_world(dome_records, collection, position_scale, warnings):
             "as metadata empties."
         )
 
-    world = bpy.data.worlds.new("Z-A Dome World")
+    world = bpy.data.worlds.new("mLender Dome World")
     world.use_nodes = True
     bpy.context.scene.world = world
     nodes = world.node_tree.nodes
@@ -697,14 +697,14 @@ def _create_dome_metadata_empty(record, collection, position_scale):
 def store_light_metadata(obj, data, record):
     """Keep the original Maya values on the light data, or the empty."""
     target = data if data is not None else obj
-    target["za_generated"] = True
-    target["za_source_full_name"] = str(record.get("full_name") or "")
-    target["za_source_node_type"] = str(record.get("node_type") or "")
-    target["za_source_light_kind"] = str(record.get("light_kind") or "")
-    target["za_source_intensity"] = scalar(record.get("intensity"), 1.0)
-    target["za_source_exposure"] = scalar(record.get("exposure"), 0.0)
+    target["ml_generated"] = True
+    target["ml_source_full_name"] = str(record.get("full_name") or "")
+    target["ml_source_node_type"] = str(record.get("node_type") or "")
+    target["ml_source_light_kind"] = str(record.get("light_kind") or "")
+    target["ml_source_intensity"] = scalar(record.get("intensity"), 1.0)
+    target["ml_source_exposure"] = scalar(record.get("exposure"), 0.0)
     # Kept because the flag is consumed during the flux conversion rather than
     # passed to Blender, so this is the only record of what the source said.
-    target["za_source_normalized"] = source_is_normalized(record)
-    target["za_source_renderer"] = renderer_key(record)
-    target["za_source_json"] = json.dumps(record, ensure_ascii=False)
+    target["ml_source_normalized"] = source_is_normalized(record)
+    target["ml_source_renderer"] = renderer_key(record)
+    target["ml_source_json"] = json.dumps(record, ensure_ascii=False)

@@ -30,7 +30,7 @@ TOOL_ROOT = os.path.dirname(
 if TOOL_ROOT not in sys.path:
     sys.path.insert(0, TOOL_ROOT)
 
-OUT = os.path.join(tempfile.gettempdir(), "za_coat_darkening")
+OUT = os.path.join(tempfile.gettempdir(), "ml_coat_darkening")
 
 # Values worth separating: a dark base is darkened hard, a bright one barely,
 # and full coverage differs from partial. A single mid grey would hide an
@@ -64,7 +64,7 @@ def constant_image(name, value):
 
 def build_material(name, channels, image=None):
     """Build through the importer itself, so the code under test is the code."""
-    from za_lookdev_importer import materials
+    from mlender_importer import materials
 
     material = bpy.data.materials.new(name)
     material.use_nodes = True

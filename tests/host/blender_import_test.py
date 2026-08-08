@@ -8,7 +8,7 @@ node trees and light data Blender ends up with.
         --background --factory-startup --python tests/host/blender_import_test.py
 
 Run maya_export_test.py first; this reads its output from
-<temp>/za_lookdev_test/MTB_Z_A_01.
+<temp>/mlender_test/mLender_01.
 """
 import glob
 import math
@@ -22,7 +22,7 @@ import bpy
 TOOL_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 )
-TEST_ROOT = os.path.join(tempfile.gettempdir(), "za_lookdev_test")
+TEST_ROOT = os.path.join(tempfile.gettempdir(), "mlender_test")
 
 if TOOL_ROOT not in sys.path:
     sys.path.insert(0, TOOL_ROOT)
@@ -39,7 +39,7 @@ def check(label, condition, detail=""):
 
 
 def find_package():
-    packages = sorted(glob.glob(os.path.join(TEST_ROOT, "MTB_Z_A_*")))
+    packages = sorted(glob.glob(os.path.join(TEST_ROOT, "mLender_*")))
     if not packages:
         raise SystemExit(
             "No package in {0}. Run maya_export_test.py first.".format(TEST_ROOT)
@@ -49,7 +49,7 @@ def find_package():
 
 def fcurves_of(action):
     """Actions became slotted in 4.4 and Action.fcurves went away in 5.0."""
-    from za_lookdev_importer.animation import action_fcurves
+    from mlender_importer.animation import action_fcurves
 
     return action_fcurves(action)
 
@@ -70,7 +70,7 @@ def material_for(fragment):
     wanted = fragment.lower()
     fallback = None
     for material in bpy.data.materials:
-        name = str(material.get("za_maya_material", "")).lower()
+        name = str(material.get("ml_maya_material", "")).lower()
         if name == wanted or name == wanted + "_shd":
             return material
         if fallback is None and wanted in name:
@@ -99,12 +99,12 @@ def value(material, name):
 
 
 def main():
-    import za_lookdev_importer as zi
+    import mlender_importer as zi
 
     print("Blender {0}, importer build {1}".format(
         bpy.app.version_string, zi.BUILD_VERSION))
 
-    result = zi.import_lookdev_package(find_package(), import_scale=1.0)
+    result = zi.import_scene_package(find_package(), import_scale=1.0)
     print("meshes={0} materials={1} subdiv={2} lights={3} domes={4}".format(
         result["mesh_count"], result["material_count"],
         result["subdivision_count"], result["light_count"],
@@ -153,14 +153,14 @@ def main():
     def scene_collections(obj):
         return [
             c.name for c in obj.users_collection
-            if not c.name.startswith(("ZA_Link_", "ZA_Shadow_"))
+            if not c.name.startswith(("ML_Link_", "ML_Shadow_"))
         ]
 
     check("the mesh sits in the innermost collection only",
           grouped is not None and scene_collections(grouped) == ["props"],
           [c.name for c in grouped.users_collection] if grouped else None)
     check("collections are marked as ours",
-          props is not None and props.get("za_generated") is True)
+          props is not None and props.get("ml_generated") is True)
     check("an ungrouped mesh stays at the root",
           ungrouped is not None
           and scene_collections(ungrouped) == [result["root_collection"]],
@@ -257,14 +257,14 @@ def main():
         check("both gammas rebuilt as their reciprocal",
               exponents == [round(1.0 / 2.2, 5), 0.5], exponents)
 
-        hue_sat = by_name.get("ZA_CC_Hue_Saturation")
+        hue_sat = by_name.get("ML_CC_Hue_Saturation")
         check("saturation 0.5 rebuilt", hue_sat is not None
               and abs(hue_sat.inputs[1].default_value - 0.5) < 1e-5)
         check("hue left neutral at 0.5", hue_sat is not None
               and abs(hue_sat.inputs[0].default_value - 0.5) < 1e-5)
 
         # exposure 1 folds into multiply, so the red channel is 2 * 2 = 4.
-        multiply = by_name.get("ZA_CC_Multiply")
+        multiply = by_name.get("ML_CC_Multiply")
         check("exposure folded into the multiply", multiply is not None
               and abs(multiply.inputs[2].default_value[0] - 4.0) < 1e-5,
               multiply.inputs[2].default_value[:] if multiply else None)
@@ -272,14 +272,14 @@ def main():
               and abs(multiply.inputs[2].default_value[1] - 2.0) < 1e-5)
 
         check("the corrected colour, not the raw image, reaches the socket",
-              socket(std, "Base Color").links[0].from_node.name.startswith("ZA_CC"),
+              socket(std, "Base Color").links[0].from_node.name.startswith("ML_CC"),
               socket(std, "Base Color").links[0].from_node.name)
 
         check("a node with no builder is still reported",
               any("aiComposite" in warning for warning in result["warnings"]),
               result["warnings"])
 
-        ramp_node = by_name.get("ZA_Remap_Ramp")
+        ramp_node = by_name.get("ML_Remap_Ramp")
         check("the remapValue curve became a Colour Ramp",
               ramp_node is not None, sorted(by_name))
         if ramp_node:
@@ -294,10 +294,10 @@ def main():
                   ramp_node.color_ramp.interpolation)
 
         check("clamp rebuilt as a max then a min",
-              by_name.get("ZA_Clamp_Min") is not None
-              and by_name.get("ZA_Clamp_Max") is not None,
+              by_name.get("ML_Clamp_Min") is not None
+              and by_name.get("ML_Clamp_Max") is not None,
               sorted(n for n in by_name if "Clamp" in n))
-        clamp_max = by_name.get("ZA_Clamp_Max")
+        clamp_max = by_name.get("ML_Clamp_Max")
         if clamp_max:
             check("the ceiling is a per-channel minimum",
                   clamp_max.blend_type == "DARKEN"
@@ -305,7 +305,7 @@ def main():
                   (clamp_max.blend_type,
                    clamp_max.inputs[2].default_value[0]))
 
-        blend_node = by_name.get("ZA_Blend_Colors")
+        blend_node = by_name.get("ML_Blend_Colors")
         check("blendColors rebuilt", blend_node is not None)
         if blend_node:
             # Maya blender 0.25 keeps a quarter of color1, and Blender's
@@ -563,7 +563,7 @@ def main():
         check("fuzz roughness 0.25 passed through unremapped",
               fuzz is not None and abs(fuzz - 0.25) < 1e-5, fuzz)
         check("and no source value recorded, nothing having been changed",
-              "za_source_sheen_roughness" not in pbr.keys())
+              "ml_source_sheen_roughness" not in pbr.keys())
 
     print("\naiFlat")
     flat = material_for("flatCube")
@@ -674,11 +674,11 @@ def main():
                   node.inputs["Roughness"].default_value)
             check("ior 1.52", abs(node.inputs["IOR"].default_value - 1.52) < 1e-5,
                   node.inputs["IOR"].default_value)
-        check("thin walled recorded", glass.get("za_thin_walled") is True,
-              glass.get("za_thin_walled"))
+        check("thin walled recorded", glass.get("ml_thin_walled") is True,
+              glass.get("ml_thin_walled"))
         check("material mode recorded",
-              glass.get("za_material_mode") == "GLASS_BSDF",
-              glass.get("za_material_mode"))
+              glass.get("ml_material_mode") == "GLASS_BSDF",
+              glass.get("ml_material_mode"))
     check("a non refractive material stays Principled",
           bsdf_of(material_for("stdSurfCube")) is not None)
 
@@ -691,7 +691,7 @@ def main():
     check("aiLambert base colour loaded an image", image is not None)
     if image:
         check("image is tiled", image.source == "TILED", image.source)
-        check("udim marked on the image", image.get("za_udim") is True)
+        check("udim marked on the image", image.get("ml_udim") is True)
         check("all three tiles registered", len(image.tiles) == 3,
               [tile.number for tile in image.tiles])
 
@@ -703,7 +703,7 @@ def main():
             if (candidate.type == "MESH"
                     and fragment.lower() in candidate.name.lower()):
                 obj = candidate
-        return obj, (obj.modifiers.get("Z-A Subdivision") if obj else None)
+        return obj, (obj.modifiers.get("mLender Subdivision") if obj else None)
 
     plain_obj, plain_mod = modifier_of("stdSurfCube")
     check("the plain cube has no subdivision modifier",
@@ -776,8 +776,8 @@ def main():
         check("standard surface sheen roughness remapped off 0.25",
               remapped is not None and abs(remapped - 0.5065) < 0.01, remapped)
         check("and the Maya value kept for reference",
-              abs(tiled.get("za_source_sheen_roughness", -1) - 0.25) < 1e-5,
-              tiled.get("za_source_sheen_roughness"))
+              abs(tiled.get("ml_source_sheen_roughness", -1) - 0.25) < 1e-5,
+              tiled.get("ml_source_sheen_roughness"))
         check("subsurface weight 0.3",
               abs(value(tiled, "Subsurface Weight") - 0.3) < 1e-5)
         check("subsurface scale 2.5 set explicitly, not left at the version default",
@@ -848,7 +848,7 @@ def main():
           result["camera_count"])
 
     print("\nlights")
-    lights = {obj.data.get("za_source_node_type"): obj
+    lights = {obj.data.get("ml_source_node_type"): obj
               for obj in bpy.data.objects if obj.type == "LIGHT"}
 
     area = lights.get("aiAreaLight")
@@ -868,11 +868,11 @@ def main():
             check("Blender Power left meaning total flux",
                   area.data.normalize is True)
         check("source normalize recorded in metadata",
-              area.data.get("za_source_normalized") is True,
-              area.data.get("za_source_normalized"))
+              area.data.get("ml_source_normalized") is True,
+              area.data.get("ml_source_normalized"))
         check("source renderer recorded in metadata",
-              area.data.get("za_source_renderer") == "arnold",
-              area.data.get("za_source_renderer"))
+              area.data.get("ml_source_renderer") == "arnold",
+              area.data.get("ml_source_renderer"))
         if hasattr(area.data, "temperature"):
             check("temperature 4500",
                   abs(area.data.temperature - 4500.0) < 1e-3)

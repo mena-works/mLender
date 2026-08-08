@@ -165,7 +165,7 @@ uğramaz.
 
 ## Kullanıcı çarpanı
 
-`Light Power Scale` (N-panel, `za_light_power_scale`) dönüşümün üstünde sanatsal
+`Light Power Scale` (N-panel, `ml_light_power_scale`) dönüşümün üstünde sanatsal
 bir çarpandır, varsayılanı `1.0`. Bütün ışıkları eşit ölçekler, yani ışıklar
 arası oranlar bozulmaz. Dönüşüm ölçülmüş olduğu için `1.0` Maya render'ıyla
 eşleşmelidir; başka bir değere ihtiyaç duyuyorsan ya sahnede fiziksel birim

@@ -122,14 +122,14 @@ def main():
         sys.path.insert(0, TOOL_ROOT)
 
     print("import graph")
-    import za_lookdev_exporter as exporter
-    import za_lookdev_importer as importer
+    import mlender_exporter as exporter
+    import mlender_importer as importer
     check("exporter package imports", True)
     check("importer package imports", True)
 
-    for attr in ("show_ui", "show", "export_lookdev", "reload_package"):
+    for attr in ("show_ui", "show", "export_scene", "reload_package"):
         check("exporter exposes {0}".format(attr), hasattr(exporter, attr))
-    for attr in ("register", "unregister", "import_lookdev_package", "bl_info"):
+    for attr in ("register", "unregister", "import_scene_package", "bl_info"):
         check("importer exposes {0}".format(attr), hasattr(importer, attr))
 
     print("\ncross-package contracts")
@@ -256,7 +256,7 @@ def main():
         "protocol": importer.constants.LIVELINK_PROTOCOL,
         "protocol_version": importer.constants.LIVELINK_VERSION,
         "event": importer.constants.LIVELINK_EVENT,
-        "package_folder": "C:/packages/MTB_Z_A_01",
+        "package_folder": "C:/packages/mLender_01",
     }
 
     def rejects(label, message):

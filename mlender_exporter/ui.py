@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Maya window for the lookdev exporter."""
+"""Maya window for the scene exporter."""
 from __future__ import absolute_import
 
 import re
@@ -15,7 +15,7 @@ from .constants import (
     WINDOW_NAME,
 )
 from .livelink import send_package
-from .package import default_export_folder, export_lookdev
+from .package import default_export_folder, export_scene
 
 
 def show_ui():
@@ -212,7 +212,7 @@ def export_from_ui(
         )
 
     try:
-        result = export_lookdev(
+        result = export_scene(
             output_folder,
             selected_only=selected_only,
             bake_procedurals=bake,
@@ -224,7 +224,7 @@ def export_from_ui(
             frame_step=frame_step,
         )
     except Exception as exc:
-        cmds.warning("Z-A Lookdev export failed: {0}".format(exc))
+        cmds.warning("mLender export failed: {0}".format(exc))
         cmds.confirmDialog(
             title="Export Failed",
             message=str(exc),
@@ -249,7 +249,7 @@ def export_from_ui(
         return
 
     cmds.confirmDialog(
-        title="Z-A Lookdev Export Complete",
+        title="mLender Export Complete",
         message=(
             "Meshes: {0}\nLights: {1}\nCameras: {2}\n"
             "Baked textures: {3}\nCollected textures: {8}\nFrames: {7}\n"
@@ -286,7 +286,7 @@ def browse_folder(field):
     result = cmds.fileDialog2(
         dialogStyle=2,
         fileMode=3,
-        caption="Choose Z-A Lookdev Export Location",
+        caption="Choose mLender Export Location",
     )
     if result:
         cmds.textFieldButtonGrp(field, edit=True, text=result[0])

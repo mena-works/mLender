@@ -127,8 +127,8 @@ def group_collection(root, groups, cache):
         collection = cache.get(key)
         if collection is None:
             collection = bpy.data.collections.new(name)
-            collection["za_generated"] = True
-            collection["za_maya_group"] = key
+            collection["ml_generated"] = True
+            collection["ml_maya_group"] = key
             parent.children.link(collection)
             cache[key] = collection
         parent = collection
@@ -255,7 +255,7 @@ def _apply_subdivision(obj, subdivision):
         setattr(modifier, attr, value)
 
     _verify_subdivision(modifier, settings)
-    obj.data["za_subdivision_source"] = str(subdivision.get("source") or "")
+    obj.data["ml_subdivision_source"] = str(subdivision.get("source") or "")
     return modifier
 
 

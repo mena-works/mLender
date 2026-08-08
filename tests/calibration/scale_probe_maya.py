@@ -25,7 +25,7 @@ import maya.cmds as cmds  # noqa: E402
 TOOL_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 )
-OUT = os.path.join(tempfile.gettempdir(), "za_scale_probe")
+OUT = os.path.join(tempfile.gettempdir(), "ml_scale_probe")
 
 if TOOL_ROOT not in sys.path:
     sys.path.insert(0, TOOL_ROOT)
@@ -72,9 +72,9 @@ def main():
         light_tf + ".scale", LIGHT_SCALE, LIGHT_SCALE, LIGHT_SCALE, type="double3"
     )
 
-    import za_lookdev_exporter as za
+    import mlender_exporter as za
 
-    result = za.export_lookdev(OUT)
+    result = za.export_scene(OUT)
     with open(result["json_path"], "r") as handle:
         payload = json.load(handle)
 

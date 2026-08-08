@@ -102,7 +102,7 @@ def selected_light_count():
     """Lights in the selection, so the user can be told they are not filtered.
 
     Lighting always travels whole: an asset exported without its lighting is
-    not a lookdev package, it is a dark one.
+    not a scene package, it is a dark one.
     """
     selection = cmds.ls(selection=True, long=True) or []
     if not selection:

@@ -46,8 +46,18 @@ def resolve_fbx_path(package_folder, package_data):
 
 
 def read_package_json(package_folder):
-    files = glob.glob(os.path.join(package_folder, "*_lookdev.json"))
+    """Find the package's JSON, under either the current or the old name.
+
+    Packages written before the tool was renamed carry ``*_lookdev.json``.
+    Reading them costs one extra glob and the schema is unchanged, so there is
+    no reason to refuse a package that is still perfectly readable.
+    """
+    files = glob.glob(os.path.join(package_folder, "*_scene.json"))
+    if not files:
+        files = glob.glob(os.path.join(package_folder, "*_lookdev.json"))
     if len(files) != 1:
-        raise ValueError("Package must contain exactly one *_lookdev.json file.")
+        raise ValueError(
+            "Package must contain exactly one *_scene.json file."
+        )
     with open(files[0], "r", encoding="utf-8") as handle:
         return json.load(handle)

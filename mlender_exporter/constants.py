@@ -9,14 +9,14 @@ support a new version instead of adding branching logic elsewhere.
 from __future__ import absolute_import
 
 
-TOOL_NAME = "Z-A Exporter - Lookdev"
-WINDOW_NAME = "zaLookdevExporterWindow"
-PACKAGE_PREFIX = "MTB_Z_A_"
+TOOL_NAME = "mLender"
+WINDOW_NAME = "mLenderWindow"
+PACKAGE_PREFIX = "mLender_"
 
 LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
-LIVELINK_PROTOCOL = "za_lookdev_livelink"
-LIVELINK_VERSION = 2
+LIVELINK_PROTOCOL = "mlender_livelink"
+LIVELINK_VERSION = 3
 EXPORT_SCHEMA_VERSION = 20
 
 LIGHT_NODE_TYPES = (

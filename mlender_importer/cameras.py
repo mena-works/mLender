@@ -158,11 +158,11 @@ def _activate_scene_camera(created, warnings):
 
 
 def _store_camera_metadata(obj, data, record):
-    data["za_generated"] = True
-    data["za_source_full_name"] = str(record.get("full_name") or "")
-    data["za_source_renderable"] = bool(record.get("renderable"))
-    data["za_source_focal_length_mm"] = scalar(
+    data["ml_generated"] = True
+    data["ml_source_full_name"] = str(record.get("full_name") or "")
+    data["ml_source_renderable"] = bool(record.get("renderable"))
+    data["ml_source_focal_length_mm"] = scalar(
         record.get("focal_length_mm"), 35.0
     )
-    data["za_source_film_fit"] = str(record.get("film_fit") or "")
-    obj["za_generated"] = True
+    data["ml_source_film_fit"] = str(record.get("film_fit") or "")
+    obj["ml_generated"] = True

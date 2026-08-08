@@ -31,7 +31,7 @@ import maya.cmds as cmds  # noqa: E402
 TOOL_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 )
-OUT = os.path.join(tempfile.gettempdir(), "za_lookdev_benchmark")
+OUT = os.path.join(tempfile.gettempdir(), "ml_lookdev_benchmark")
 
 if TOOL_ROOT not in sys.path:
     sys.path.insert(0, TOOL_ROOT)
@@ -111,13 +111,13 @@ def main():
     build_scene()
     print("  scene built in {0:.1f}s".format(time.time() - started))
 
-    import za_lookdev_exporter as za
+    import mlender_exporter as za
 
     print("\nexporter build {0}".format(za.BUILD_VERSION))
     profiler = cProfile.Profile()
     started = time.time()
     profiler.enable()
-    result = za.export_lookdev(OUT, bake_procedurals=False)
+    result = za.export_scene(OUT, bake_procedurals=False)
     profiler.disable()
     elapsed = time.time() - started
 

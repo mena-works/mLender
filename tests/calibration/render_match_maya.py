@@ -28,7 +28,7 @@ import maya.cmds as cmds  # noqa: E402
 TOOL_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 )
-OUT = os.path.join(tempfile.gettempdir(), "za_render_match")
+OUT = os.path.join(tempfile.gettempdir(), "ml_render_match")
 KICK = r"C:\Program Files\Autodesk\Arnold\maya2023\bin\kick.exe"
 
 if TOOL_ROOT not in sys.path:
@@ -166,9 +166,9 @@ def main():
 
     camera = build_scene()
 
-    import za_lookdev_exporter as za
+    import mlender_exporter as za
 
-    result = za.export_lookdev(OUT)
+    result = za.export_scene(OUT)
     print("exporter build:", za.BUILD_VERSION)
     print("package:", result["package_folder"])
     print("cameras exported:", result["camera_count"])

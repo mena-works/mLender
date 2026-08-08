@@ -40,7 +40,7 @@ def send_package(result, host=None, port=None):
     message = {
         "protocol": LIVELINK_PROTOCOL,
         "protocol_version": LIVELINK_VERSION,
-        "event": "lookdev_package_ready",
+        "event": "scene_package_ready",
         "package_folder": maya_path(result["package_folder"]),
         "package_name": result.get("package_name") or "",
     }

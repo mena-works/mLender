@@ -44,8 +44,8 @@ def load_image(texture_record, channel, warnings):
             try:
                 image.source = "TILED"
                 image.filepath = path
-                image["za_udim"] = True
-                image["za_udim_pattern"] = path
+                image["ml_udim"] = True
+                image["ml_udim_pattern"] = path
                 # Blender only scans for sibling tiles on reload.
                 image.reload()
             except Exception:

@@ -28,7 +28,7 @@ from .constants import (
     SOCKET_POLL_SECONDS,
     TIMER_INTERVAL_SECONDS,
 )
-from .importer import import_lookdev_package
+from .importer import import_scene_package
 
 
 _server = None
@@ -175,11 +175,11 @@ def process_messages():
     try:
         validate_message(payload)
         scene = bpy.context.scene
-        result = import_lookdev_package(
+        result = import_scene_package(
             payload.get("package_folder") or "",
             package_data=payload.get("package_json"),
-            import_scale=scene.za_import_scale,
-            power_scale=scene.za_light_power_scale,
+            import_scale=scene.ml_import_scale,
+            power_scale=scene.ml_light_power_scale,
         )
         _status = (
             "Imported {0} mesh(es), {1} material(s), "
@@ -194,10 +194,10 @@ def process_messages():
             result["group_collection_count"],
         )
         for warning in result.get("warnings") or []:
-            print("Z-A Lookdev warning: {0}".format(warning))
+            print("mLender warning: {0}".format(warning))
     except Exception as exc:
         _status = "Import failed: {0}".format(exc)
-        print("Z-A Lookdev: {0}".format(_status))
+        print("mLender: {0}".format(_status))
     return TIMER_INTERVAL_SECONDS
 
 

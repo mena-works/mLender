@@ -22,7 +22,7 @@ gerçekten import eder. Yakaladıkları:
 Sözdizimi için ayrıca:
 
 ```bash
-python -m py_compile za_lookdev_exporter/*.py za_lookdev_importer/*.py
+python -m py_compile mlender_exporter/*.py mlender_importer/*.py
 ```
 
 ## 2. Maya export testi (gerçek Maya + Arnold, ~2 dk)
@@ -33,7 +33,7 @@ python -m py_compile za_lookdev_exporter/*.py za_lookdev_importer/*.py
 
 Headless Maya'da desteklenen her Arnold shader ve ışığından bir tane içeren
 sahne kurar, gerçek exporter'ı çalıştırır, ürettiği JSON'a assert eder.
-Paketi `<temp>/za_lookdev_test` altına yazar.
+Paketi `<temp>/mlender_test` altına yazar.
 
 Doğruladıkları arasında: `specularRoughness`/`baseMetalness`/`geometryOpacity`
 gibi attribute isimleri, Arnold opacity'sinin ters çevrilmemesi, `aiTranslator`

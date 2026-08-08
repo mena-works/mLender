@@ -53,7 +53,7 @@ PACKAGE_PATTERN = re.compile(
 )
 
 
-def export_lookdev(
+def export_scene(
     output_folder,
     selected_only=False,
     bake_procedurals=True,
@@ -64,7 +64,7 @@ def export_lookdev(
     frame_end=None,
     frame_step=None,
 ):
-    """Write a numbered package folder holding the FBX and the lookdev JSON.
+    """Write a numbered package folder holding the FBX and the scene JSON.
 
     Package creation is atomic: any failure removes both files and the folder
     so a half written package is never picked up by the importer.
@@ -77,7 +77,7 @@ def export_lookdev(
     package_folder = os.path.join(output_folder, package_name)
     os.makedirs(package_folder)
     fbx_path = os.path.join(package_folder, package_name + ".fbx")
-    json_path = os.path.join(package_folder, package_name + "_lookdev.json")
+    json_path = os.path.join(package_folder, package_name + "_scene.json")
 
     warnings = []
     bake_context = BakeContext(
@@ -146,7 +146,7 @@ def export_lookdev(
         payload = {
             "schema_version": EXPORT_SCHEMA_VERSION,
             "tool_name": TOOL_NAME,
-            "profile": "lookdev",
+            "profile": "scene",
             "exported_at_utc": utc_timestamp(),
             "maya_scene": cmds.file(query=True, sceneName=True) or "",
             "package_name": package_name,
@@ -252,7 +252,7 @@ def _sampler(function, shape):
 
 
 def next_package_name(folder):
-    """MTB_Z_A_01, MTB_Z_A_02, ... continuing past the highest existing one."""
+    """mLender_01, mLender_02, ... continuing past the highest existing one."""
     highest = 0
     if os.path.isdir(folder):
         for name in os.listdir(folder):

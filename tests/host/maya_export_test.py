@@ -6,7 +6,7 @@ exporter, and asserts on the JSON it produces. Nothing is mocked.
 
     "C:\\Program Files\\Autodesk\\Maya2023\\bin\\mayapy.exe" tests/host/maya_export_test.py
 
-Writes its package to <temp>/za_lookdev_test, which blender_import_test.py
+Writes its package to <temp>/mlender_test, which blender_import_test.py
 then reads. Run this one first.
 """
 from __future__ import print_function
@@ -27,7 +27,7 @@ import maya.cmds as cmds  # noqa: E402
 TOOL_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 )
-OUT = os.path.join(tempfile.gettempdir(), "za_lookdev_test")
+OUT = os.path.join(tempfile.gettempdir(), "mlender_test")
 
 if TOOL_ROOT not in sys.path:
     sys.path.insert(0, TOOL_ROOT)
@@ -423,7 +423,7 @@ def main():
     os.makedirs(OUT)
     build_scene()
 
-    import za_lookdev_exporter as za
+    import mlender_exporter as za
 
     print("exporter build:", za.BUILD_VERSION)
     # Baking creates file nodes; the export must clean up after itself, so the
@@ -433,7 +433,7 @@ def main():
     # is deliberately parked away from the range start, to prove sampling puts
     # it back.
     cmds.currentTime(7, edit=True)
-    result = za.export_lookdev(OUT, export_animation=True)
+    result = za.export_scene(OUT, export_animation=True)
     restored_frame = cmds.currentTime(query=True)
     with open(result["json_path"], "r") as handle:
         payload = json.load(handle)
@@ -585,7 +585,7 @@ def main():
     # Selecting the group is how an asset is normally picked, so the selection
     # must expand to its descendants rather than be read literally.
     cmds.select("setDressing", replace=True)
-    selected_result = za.export_lookdev(
+    selected_result = za.export_scene(
         os.path.join(OUT, "selected"), selected_only=True
     )
     with open(selected_result["json_path"], "r") as handle:
@@ -606,13 +606,13 @@ def main():
     cmds.select(clear=True)
     failed = False
     try:
-        za.export_lookdev(os.path.join(OUT, "empty"), selected_only=True)
+        za.export_scene(os.path.join(OUT, "empty"), selected_only=True)
     except RuntimeError:
         failed = True
     check("an empty selection fails loudly rather than exporting nothing",
           failed)
     check("the failed export left no package folder behind",
-          not os.path.isdir(os.path.join(OUT, "empty", "MTB_Z_A_01")),
+          not os.path.isdir(os.path.join(OUT, "empty", "mLender_01")),
           os.listdir(os.path.join(OUT, "empty"))
           if os.path.isdir(os.path.join(OUT, "empty")) else "no folder")
 
@@ -652,7 +652,7 @@ def main():
     # A second export with collection on, into its own folder so the package
     # numbering the Blender import test reads from is left alone, and so the
     # first package keeps proving the default of pointing at the Maya paths.
-    collected_result = za.export_lookdev(
+    collected_result = za.export_scene(
         os.path.join(OUT, "collected"), collect_textures_into_package=True
     )
     with open(collected_result["json_path"], "r") as handle:
@@ -919,8 +919,8 @@ def main():
     # flag attribute exists, so a real Maya shader carrying a real flag name
     # exercises it honestly. What is under test is which branch a record takes,
     # and that is the branch that shipped a textured transparency uninverted.
-    from za_lookdev_exporter.constants import REDSHIFT_GLOSSINESS_FLAGS
-    from za_lookdev_exporter.shaders import apply_glossiness_conversion
+    from mlender_exporter.constants import REDSHIFT_GLOSSINESS_FLAGS
+    from mlender_exporter.shaders import apply_glossiness_conversion
 
     probe = cmds.shadingNode("blinn", asShader=True, name="glossProbe")
     cmds.addAttr(probe, longName=REDSHIFT_GLOSSINESS_FLAGS[0],

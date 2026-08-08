@@ -75,7 +75,7 @@ def _chain_node(material, output, bl_idname, name):
     """Add a node to the right of whatever currently feeds the chain."""
     node = material.node_tree.nodes.new(bl_idname)
     node.name = name
-    node.label = name.replace("ZA_", "").replace("_", " ")
+    node.label = name.replace("ML_", "").replace("_", " ")
     source = output.node
     node.location = (
         source.location.x + CORRECTION_NODE_SPACING,
@@ -110,7 +110,7 @@ def _mix_rgb(material, output, blend_type, color, name):
 def _apply_gamma(material, output, gamma):
     if gamma <= 0.0 or abs(gamma - 1.0) <= CORRECTION_EPSILON:
         return output
-    node = _chain_node(material, output, "ShaderNodeGamma", "ZA_CC_Gamma")
+    node = _chain_node(material, output, "ShaderNodeGamma", "ML_CC_Gamma")
     # Maya raises to 1/gamma, Blender's node raises to gamma.
     node.inputs[1].default_value = 1.0 / gamma
     material.node_tree.links.new(output, node.inputs[0])
@@ -122,7 +122,7 @@ def _apply_hue_saturation(material, output, hue, saturation):
             and abs(saturation - 1.0) <= CORRECTION_EPSILON):
         return output
     node = _chain_node(
-        material, output, "ShaderNodeHueSaturation", "ZA_CC_Hue_Saturation"
+        material, output, "ShaderNodeHueSaturation", "ML_CC_Hue_Saturation"
     )
     # Arnold shifts by a number of turns; Blender offsets from a neutral 0.5.
     # Both wrap, and both multiply saturation and clamp it at one, which was
@@ -139,7 +139,7 @@ def _apply_contrast(material, output, contrast, pivot):
     if abs(contrast - 1.0) <= CORRECTION_EPSILON:
         return output
     node = _chain_node(
-        material, output, "ShaderNodeBrightContrast", "ZA_CC_Contrast"
+        material, output, "ShaderNodeBrightContrast", "ML_CC_Contrast"
     )
     # Solving Arnold's c*(in - pivot) + pivot against Blender's
     # (1 + C)*in + (B - C/2) gives these two. Blender additionally clamps the
@@ -157,10 +157,10 @@ def _apply_scale_and_offset(material, output, exposure, multiply, add):
     multiply = [component * scale for component in multiply]
     if any(abs(c - 1.0) > CORRECTION_EPSILON for c in multiply):
         output = _mix_rgb(
-            material, output, "MULTIPLY", multiply, "ZA_CC_Multiply"
+            material, output, "MULTIPLY", multiply, "ML_CC_Multiply"
         )
     if any(abs(c) > CORRECTION_EPSILON for c in add):
-        output = _mix_rgb(material, output, "ADD", add, "ZA_CC_Add")
+        output = _mix_rgb(material, output, "ADD", add, "ML_CC_Add")
     return output
 
 
@@ -195,13 +195,13 @@ def _build_color_correct(material, output, params, warnings):
         _rgb(params.get("add"), 0.0),
     )
     if params.get("invert"):
-        output = _apply_invert(material, output, "ZA_CC_Invert")
+        output = _apply_invert(material, output, "ML_CC_Invert")
 
     # The mask blends the corrected result back against the untouched input,
     # so it is only meaningful once something above actually built a node.
     mask = scalar(params.get("mask"), 1.0)
     if abs(mask - 1.0) > CORRECTION_EPSILON and output is not source:
-        node = _chain_node(material, output, "ShaderNodeMixRGB", "ZA_CC_Mask")
+        node = _chain_node(material, output, "ShaderNodeMixRGB", "ML_CC_Mask")
         node.blend_type = "MIX"
         node.inputs[0].default_value = max(0.0, min(1.0, mask))
         material.node_tree.links.new(source, node.inputs[1])
@@ -224,18 +224,18 @@ def _build_multiply(material, output, params, warnings):
     multiply = _rgb(params.get("multiply"), 1.0)
     if all(abs(c - 1.0) <= CORRECTION_EPSILON for c in multiply):
         return output
-    return _mix_rgb(material, output, "MULTIPLY", multiply, "ZA_Multiply")
+    return _mix_rgb(material, output, "MULTIPLY", multiply, "ML_Multiply")
 
 
 def _build_add(material, output, params, warnings):
     add = _rgb(params.get("add"), 0.0)
     if all(abs(c) <= CORRECTION_EPSILON for c in add):
         return output
-    return _mix_rgb(material, output, "ADD", add, "ZA_Add")
+    return _mix_rgb(material, output, "ADD", add, "ML_Add")
 
 
 def _build_reverse(material, output, params, warnings):
-    return _apply_invert(material, output, "ZA_Reverse")
+    return _apply_invert(material, output, "ML_Reverse")
 
 
 def _build_range(material, output, params, warnings):
@@ -255,11 +255,11 @@ def _build_range(material, output, params, warnings):
         offset = output_min - input_min * gain
         if abs(gain - 1.0) > CORRECTION_EPSILON:
             output = _mix_rgb(
-                material, output, "MULTIPLY", [gain] * 3, "ZA_Range_Scale"
+                material, output, "MULTIPLY", [gain] * 3, "ML_Range_Scale"
             )
         if abs(offset) > CORRECTION_EPSILON:
             output = _mix_rgb(
-                material, output, "ADD", [offset] * 3, "ZA_Range_Offset"
+                material, output, "ADD", [offset] * 3, "ML_Range_Offset"
             )
 
     output = _apply_contrast(
@@ -294,8 +294,8 @@ def _build_clamp(material, output, params, warnings):
     low = _rgb(params.get("clamp_min"), 0.0)
     high = _rgb(params.get("clamp_max"), 0.0)
     if any(abs(c) > CORRECTION_EPSILON for c in low):
-        output = _mix_rgb(material, output, "LIGHTEN", low, "ZA_Clamp_Min")
-    output = _mix_rgb(material, output, "DARKEN", high, "ZA_Clamp_Max")
+        output = _mix_rgb(material, output, "LIGHTEN", low, "ML_Clamp_Min")
+    output = _mix_rgb(material, output, "DARKEN", high, "ML_Clamp_Max")
     return output
 
 
@@ -310,7 +310,7 @@ def _build_blend_colors(material, output, params, warnings):
     other = _rgb(params.get("other_color"), 0.0)
     connected = str(params.get("connected_input") or "color1")
 
-    node = _chain_node(material, output, "ShaderNodeMixRGB", "ZA_Blend_Colors")
+    node = _chain_node(material, output, "ShaderNodeMixRGB", "ML_Blend_Colors")
     node.blend_type = "MIX"
     if connected == "color2":
         # The texture is Maya's color2, which is the side blender fades out.
@@ -333,9 +333,9 @@ def _build_multiply_divide(material, output, params, warnings):
     if operation == "multiply":
         if all(abs(c - 1.0) <= CORRECTION_EPSILON for c in operand):
             return output
-        return _mix_rgb(material, output, "MULTIPLY", operand, "ZA_Multiply")
+        return _mix_rgb(material, output, "MULTIPLY", operand, "ML_Multiply")
     if operation == "divide":
-        return _mix_rgb(material, output, "DIVIDE", operand, "ZA_Divide")
+        return _mix_rgb(material, output, "DIVIDE", operand, "ML_Divide")
     warnings.append(
         'multiplyDivide "{0}" was not rebuilt; Mix has no such blend '
         "type.".format(operation)
@@ -367,12 +367,12 @@ def _build_remap_value(material, output, params, warnings):
     ):
         gain = 1.0 / span
         output = _mix_rgb(
-            material, output, "MULTIPLY", [gain] * 3, "ZA_Remap_Normalise"
+            material, output, "MULTIPLY", [gain] * 3, "ML_Remap_Normalise"
         )
         offset = -input_min * gain
         if abs(offset) > CORRECTION_EPSILON:
             output = _mix_rgb(
-                material, output, "ADD", [offset] * 3, "ZA_Remap_Offset"
+                material, output, "ADD", [offset] * 3, "ML_Remap_Offset"
             )
 
     if _ramp_is_meaningful(stops):
@@ -381,11 +381,11 @@ def _build_remap_value(material, output, params, warnings):
     out_span = output_max - output_min
     if abs(out_span - 1.0) > CORRECTION_EPSILON:
         output = _mix_rgb(
-            material, output, "MULTIPLY", [out_span] * 3, "ZA_Remap_Scale"
+            material, output, "MULTIPLY", [out_span] * 3, "ML_Remap_Scale"
         )
     if abs(output_min) > CORRECTION_EPSILON:
         output = _mix_rgb(
-            material, output, "ADD", [output_min] * 3, "ZA_Remap_Output"
+            material, output, "ADD", [output_min] * 3, "ML_Remap_Output"
         )
     return output
 
@@ -407,7 +407,7 @@ def _ramp_is_meaningful(stops):
 
 
 def _build_ramp(material, output, stops, warnings):
-    node = _chain_node(material, output, "ShaderNodeValToRGB", "ZA_Remap_Ramp")
+    node = _chain_node(material, output, "ShaderNodeValToRGB", "ML_Remap_Ramp")
     ramp = node.color_ramp
 
     modes = set(str(stop.get("interpolation") or "linear") for stop in stops)

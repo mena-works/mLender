@@ -21,14 +21,14 @@ import bpy
 TOOL_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 )
-OUT = os.path.join(tempfile.gettempdir(), "za_lookdev_benchmark")
+OUT = os.path.join(tempfile.gettempdir(), "ml_lookdev_benchmark")
 
 if TOOL_ROOT not in sys.path:
     sys.path.insert(0, TOOL_ROOT)
 
 
 def main():
-    packages = sorted(glob.glob(os.path.join(OUT, "MTB_Z_A_*")))
+    packages = sorted(glob.glob(os.path.join(OUT, "mLender_*")))
     if not packages:
         raise SystemExit(
             "No benchmark package in {0}. Run benchmark_export.py first.".format(
@@ -36,7 +36,7 @@ def main():
             )
         )
 
-    import za_lookdev_importer as zi
+    import mlender_importer as zi
 
     print("Blender {0}, importer build {1}".format(
         bpy.app.version_string, zi.BUILD_VERSION))
@@ -44,7 +44,7 @@ def main():
     profiler = cProfile.Profile()
     started = time.time()
     profiler.enable()
-    result = zi.import_lookdev_package(packages[-1], import_scale=1.0)
+    result = zi.import_scene_package(packages[-1], import_scale=1.0)
     profiler.disable()
     elapsed = time.time() - started
 

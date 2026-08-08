@@ -1,26 +1,26 @@
 # -*- coding: utf-8 -*-
-"""Z-A Exporter - Lookdev, Blender side.
+"""mLender, Blender side.
 
 Install this folder as a Blender add-on. Public API::
 
-    import za_lookdev_importer
-    za_lookdev_importer.import_lookdev_package(package_folder)
+    import mlender_importer
+    mlender_importer.import_scene_package(package_folder)
 
 Keep ``bl_info["version"]`` and ``constants.BUILD_VERSION`` in step; the panel
 shows BUILD_VERSION and it is how a user confirms which build is loaded.
 """
 
 bl_info = {
-    "name": "Z-A Exporter - Lookdev",
-    "author": "Z-A Exporter",
-    "version": (1, 30, 0),
+    "name": "mLender",
+    "author": "mena-works",
+    "version": (2, 0, 0),
     # 4.1 is the oldest build this is actually tested on, and the code
     # relies on APIs that arrived in 4.0. Claiming 3.6 was untrue.
     "blender": (4, 1, 0),
-    "location": "View3D > Sidebar > Z-A Exporter",
+    "location": "View3D > Sidebar > mLender",
     "description": (
-        "Live FBX lookdev transfer from Maya with Principled material "
-        "rebuilding."
+        "Live scene transfer from Maya: meshes, materials, lights and "
+        "cameras rebuilt natively in Blender."
     ),
     "category": "Import-Export",
 }
@@ -79,7 +79,7 @@ from .constants import (  # noqa: E402
     LIVELINK_PROTOCOL,
     LIVELINK_VERSION,
 )
-from .importer import import_lookdev_package  # noqa: E402
+from .importer import import_scene_package  # noqa: E402
 from .livelink import (  # noqa: E402
     get_status,
     is_running,
@@ -97,7 +97,7 @@ __all__ = [
     "LIVELINK_VERSION",
     "bl_info",
     "get_status",
-    "import_lookdev_package",
+    "import_scene_package",
     "is_running",
     "register",
     "start_listener",

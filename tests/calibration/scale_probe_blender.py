@@ -23,7 +23,7 @@ import bpy
 TOOL_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 )
-PROBE = os.path.join(tempfile.gettempdir(), "za_scale_probe")
+PROBE = os.path.join(tempfile.gettempdir(), "ml_scale_probe")
 
 if TOOL_ROOT not in sys.path:
     sys.path.insert(0, TOOL_ROOT)
@@ -42,15 +42,15 @@ def check(label, condition, detail=""):
 def main():
     with open(os.path.join(PROBE, "expected.json"), "r") as handle:
         expected = json.load(handle)
-    packages = sorted(glob.glob(os.path.join(PROBE, "MTB_Z_A_*")))
+    packages = sorted(glob.glob(os.path.join(PROBE, "mLender_*")))
     if not packages:
         raise SystemExit("No package. Run scale_probe_maya.py first.")
 
-    import za_lookdev_importer as zi
+    import mlender_importer as zi
 
     print("Blender {0}, importer build {1}".format(
         bpy.app.version_string, zi.BUILD_VERSION))
-    result = zi.import_lookdev_package(packages[-1], import_scale=1.0)
+    result = zi.import_scene_package(packages[-1], import_scale=1.0)
     for warning in result["warnings"]:
         print("  warn: {0}".format(warning))
 
