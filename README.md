@@ -888,6 +888,17 @@ Maya                              Blender
 Lights and cameras stay together under `mLender Lights` and `mLender Cameras` rather
 than joining this hierarchy, so they stay reachable as a set.
 
+### Hard and soft edges
+
+Also already carried by the FBX, and also asserted rather than assumed. A cube
+with every edge hard arrives faceted, with twelve sharp edges and face
+normals; one with every edge soft arrives with none and vertex-averaged
+normals. Both carry custom normals, and the corner normal API is spelled the
+same on 4.1 and 5.2.
+
+The pair is what makes the check worth having: a single cube would pass
+against an export that flattened every mesh to the same shading.
+
 ### UV sets and vertex colours
 
 Both already survive the FBX and the tool builds neither. Measured on a cube

@@ -113,9 +113,9 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("23 meshes imported", result["mesh_count"] == 23,
+    check("25 meshes imported", result["mesh_count"] == 25,
           result["mesh_count"])
-    check("18 materials built", result["material_count"] == 18,
+    check("20 materials built", result["material_count"] == 20,
           result["material_count"])
     # Four of the eight cubes asked for subdivision in Maya, the displaced one
     # among them; the rest must arrive unmodified.
@@ -308,6 +308,33 @@ def main():
     check("with Maya's shutter length, in frames",
           abs(render.motion_blur_shutter - 0.75) < 1e-5,
           render.motion_blur_shutter)
+
+    print("\nhard and soft edges")
+    # Nothing in the tool builds these; they ride the FBX. The pair is what
+    # makes the check mean something, because one cube alone would pass
+    # against an export that flattened every mesh to the same shading.
+    hard = bpy.data.objects.get("hardEdgeCube")
+    soft = bpy.data.objects.get("softEdgeCube")
+    check("both edge cubes arrived", hard is not None and soft is not None)
+    if hard and soft:
+        hard_sharp = sum(1 for e in hard.data.edges if e.use_edge_sharp)
+        soft_sharp = sum(1 for e in soft.data.edges if e.use_edge_sharp)
+        check("a hard edged cube arrives faceted",
+              hard_sharp == 12, hard_sharp)
+        check("and a soft edged one does not", soft_sharp == 0, soft_sharp)
+        check("custom normals came across",
+              getattr(hard.data, "has_custom_normals", False) is True)
+        # The distinction is in the corner normals, not only the sharp flags:
+        # a face normal against a vertex-averaged one.
+        if hasattr(hard.data, "corner_normals"):
+            hard_n = tuple(round(v, 2)
+                           for v in hard.data.corner_normals[0].vector)
+            soft_n = tuple(round(v, 2)
+                           for v in soft.data.corner_normals[0].vector)
+            check("the hard cube's corner normal is a face normal",
+                  max(abs(c) for c in hard_n) > 0.99, hard_n)
+            check("the soft cube's is averaged between faces",
+                  max(abs(c) for c in soft_n) < 0.99, soft_n)
 
     print("\nUV sets and vertex colours")
     # These already survive the FBX; nothing in the tool builds them. The

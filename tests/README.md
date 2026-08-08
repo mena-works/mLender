@@ -168,6 +168,24 @@ import  find_mesh_record her obje için bütün kayıtları tarıyor ve isim
         1600 mesh: 60.8s -> 2.0s
 ```
 
+Instance, locator, curve, set ve render kayıtları eklendikten sonra 2.6.1'de
+yeniden ölçüldü; **regresyon yok** ve yeni keşif fonksiyonları profilin ilk
+yirmisinde bile görünmüyor:
+
+```text
+                    800 mesh   1600 mesh   olcek
+maya.mel FBX export    0.98s      4.52s     4.6x   <- bizim degil
+mesh_records           1.18s      2.83s     2.4x
+write_json             1.02s      2.19s     2.1x
+import (toplam)          -        2.0s       -
+```
+
+Doğrusal olmayan tek adım **Maya'nın kendi FBX yazıcısı**. Bizim tarafta en
+pahalı şey `attributeQuery` (1600 mesh'te 2.2s, alias tuple deseninin bedeli).
+Node **tipine** göre önbelleklemek denendi ve **geri alındı**: aynı tipteki iki
+node'un attribute kümesi `addAttr` yüzünden farklı olabilir, yani önbellek
+sessizce yanlış cevap verebilirdi. Baskın maliyet zaten FBX yazıcısında.
+
 Ayrıca aynı materyal her mesh için baştan okunuyordu; artık shader başına bir
 kez okunuyor (400 mesh / 60 materyal: `shader_channels` 400 → 60 çağrı).
 

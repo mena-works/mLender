@@ -252,6 +252,14 @@ def build_scene():
     except Exception as exc:
         print("  note: Arnold render options unavailable: {0}".format(exc))
 
+    # Hard and soft edges. These already survive the FBX, and the pair is the
+    # point: one cube alone would pass against an export that flattened every
+    # mesh to the same shading.
+    hard_transform, _ = shaded_cube("hardEdgeCube", "aiStandardSurface")
+    cmds.polySoftEdge(hard_transform, angle=0)
+    soft_transform, _ = shaded_cube("softEdgeCube", "aiStandardSurface")
+    cmds.polySoftEdge(soft_transform, angle=180)
+
     # A second UV set and a colour set. Both already survive the FBX, so this
     # cube exists to keep them surviving: nothing else pins them, and a change
     # to FBX_EXPORT_OPTIONS could drop either without a word.
@@ -541,7 +549,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("23 meshes exported", payload["mesh_count"] == 23,
+    check("25 meshes exported", payload["mesh_count"] == 25,
           payload["mesh_count"])
     # Four: the locator, the empty null, the nested locator, and the group
     # holding only a curve. That last one has no mesh below it either, so
