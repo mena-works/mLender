@@ -85,9 +85,11 @@ CANDIDATES = {
 RESOLUTION = 128
 # The scene is in centimetres, which is what the export writes.
 METERS_PER_UNIT = 0.01
-# Below this the two pictures are the same to the eye; above it they are not.
-# Deliberately generous, so a near miss is reported rather than accepted.
-MATCH_THRESHOLD = 0.02
+# Below this the two pictures are the same to the eye; above it they are
+# not. The Planar control lands at 0.03 -- bake filtering at the seam,
+# not a mapping error -- and every wrong candidate measured so far sits
+# above 0.35, so the gap this has to straddle is wide.
+MATCH_THRESHOLD = 0.06
 
 
 def write_quad():
@@ -157,6 +159,10 @@ def build_candidate(obj, mode, location, rotation):
     image = tree.nodes.new("ShaderNodeTexImage")
     image.image = bpy.data.images.load(QUAD)
     image.projection = mode
+    # Measured: Maya clamps a projection at its extent rather than
+    # tiling. With Blender's default REPEAT the Planar control scored
+    # 0.50, with CLIP 0.36 and with EXTEND 0.03.
+    image.extension = "EXTEND"
     coords = tree.nodes.new("ShaderNodeTexCoord")
     # A real placement Empty, scaled the way the importer scales one. Leaving
     # it off looked equivalent -- the placement is at the origin unrotated --

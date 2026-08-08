@@ -35,6 +35,7 @@ from .constants import (
     SHEEN_ROUGHNESS_REMAP,
     GLASS_INPUTS,
     PRINCIPLED_INPUTS,
+    PROJECTION_EXTENSION,
     PROJECTION_MAPPING_OFFSET,
     PROJECTION_MAPPING_ROTATION,
     PROJECTION_MODES,
@@ -820,6 +821,10 @@ def build_projection(material, texture, warnings):
     node.label = "Maya {0} Projection".format(kind)
     node.image = image
     node.projection = PROJECTION_MODES[kind]
+    # Maya clamps a projection at its extent; it does not tile. Measured on
+    # a sphere wider than the projection: Blender's default REPEAT scored
+    # 0.50 against Maya's bake, CLIP 0.36 and EXTEND 0.03.
+    node.extension = PROJECTION_EXTENSION
     node.location = (-500, 0)
 
     empty = _placement_empty(projection)

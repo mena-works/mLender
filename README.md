@@ -482,10 +482,31 @@ comes back through a Mapping node rotated **−90° about X** and moved by
 output has already applied, putting the texture back in Maya's space. `+90°`
 renders vertically flipped and `0°` has no vertical variation at all.
 
-Only Planar is rebuilt. Spherical, Cylindrical, Ball, Cubic, TriPlanar,
-Concentric and Perspective each need their own measurement before they can be
-claimed, so with baking off they say so instead of arriving in the wrong
-shape:
+The image is **clamped** at the projection's edge, not tiled. That was
+measured too: against Maya's own bake on a sphere wider than the projection,
+Blender's default `REPEAT` scored 0.50, `CLIP` 0.36 and `EXTEND` 0.03.
+
+**Only Planar is rebuilt, and the other eight were measured rather than
+assumed.** Every one of Maya's nine types was baked onto one sphere and
+compared against a candidate Blender node tree baked into the same UV space
+([`tests/docs/projection_calibration.md`](tests/docs/projection_calibration.md)):
+
+| Maya type | best Blender candidate | difference | |
+|---|---|---|---|
+| Planar | `FLAT` | **0.028** | matches |
+| Spherical | `SPHERE` | 0.106 | close, not the same |
+| Ball | `SPHERE` | 0.107 | no |
+| Cylindrical | `TUBE` | 0.415 | no |
+| Cubic | `BOX` | 0.412 | no |
+| TriPlanar | `BOX` | 0.412 | no |
+| Concentric | — | — | no equivalent |
+| Perspective | — | — | no equivalent |
+
+Spherical is the near miss, and every combination of axis rotation and sign
+flip plateaus at the same 0.106: Blender's `SPHERE` and Maya's spherical are
+parameterised differently, so it is not an orientation that can be corrected.
+Shipping it would be a projection that looks nearly right, which is worse
+than one that says it needs the bake:
 
 ```text
 mLender warning: Maya projection "ballProjection" is Ball, which this build

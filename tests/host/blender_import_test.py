@@ -1673,6 +1673,12 @@ def main():
                 node = images[0]
                 check("projected flat, not wrapped on the UVs",
                       node.projection == "FLAT", node.projection)
+                # Maya clamps a projection at its edge. Measured against
+                # Maya's own bake on a sphere wider than the projection:
+                # REPEAT, which is Blender's default, scored 0.50 and EXTEND
+                # 0.03.
+                check("and clamped at its edge, not tiled",
+                      node.extension == "EXTEND", node.extension)
                 mapping = node.inputs["Vector"].links[0].from_node
                 check("through a Mapping node",
                       mapping.bl_idname == "ShaderNodeMapping",

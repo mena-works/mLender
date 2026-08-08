@@ -46,6 +46,11 @@ PROJECTION_MODES = {
     "Planar": "FLAT",
 }
 
+# Maya clamps a projection at its extent rather than tiling it. Measured on
+# a sphere wider than the projection, against Maya's own bake: Blender's
+# default REPEAT scored 0.50, CLIP 0.36 and EXTEND 0.03.
+PROJECTION_EXTENSION = "EXTEND"
+
 # Measured with the tool's own bake as ground truth. Maya's planar projection
 # covers the placement's local -0.5..0.5 with u along +X and v along +Y, so
 # the Mapping node moves the origin by half. The -90 degrees about X undoes
