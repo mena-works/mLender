@@ -51,6 +51,11 @@ def import_particles(package_data, root_collection, import_scale, warnings,
     built = 0
     baked = 0
     for record in records:
+        # An emitting system the Alembic cache carries must not also be
+        # rebuilt here, or the frozen snapshot would sit inside the cached
+        # one under a numbered name.
+        if record.get("alembic"):
+            continue
         try:
             obj = _build_particles(record, position_scale, warnings)
         except Exception as exc:

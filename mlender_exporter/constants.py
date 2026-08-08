@@ -17,7 +17,7 @@ LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
 LIVELINK_PROTOCOL = "mlender_livelink"
 LIVELINK_VERSION = 3
-EXPORT_SCHEMA_VERSION = 29
+EXPORT_SCHEMA_VERSION = 30
 
 LIGHT_NODE_TYPES = (
     "RedshiftPhysicalLight",
@@ -412,6 +412,23 @@ DEFAULT_FPS = 24.0
 # range writes a large JSON and takes real time, so the range is clamped and
 # the package says it was clamped rather than quietly shipping less.
 MAX_ANIMATION_FRAMES = 2000
+
+# Alembic. The base type catches every deformer -- cluster, lattice, wrap,
+# skinCluster, blendShape -- which is the point: what matters is that the
+# points move, not what moves them.
+ALEMBIC_EXPORT_PLUGIN = "AbcExport"
+DEFORMER_NODE_TYPE = "geometryFilter"
+ALEMBIC_FILE_SUFFIX = "_cache.abc"
+
+# uvWrite and writeUVSets so a cached mesh keeps the UVs the FBX would have
+# carried; worldSpace is deliberately absent, so the transform stays on the
+# object rather than being folded into the points.
+ALEMBIC_EXPORT_FLAGS = (
+    "-uvWrite",
+    "-writeUVSets",
+    "-writeVisibility",
+    "-dataFormat ogawa",
+)
 
 # A particle bake writes three numbers per point per frame, and the live link
 # refuses a message over 32 MB, so a dense simulation would fail as a transfer

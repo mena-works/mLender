@@ -13,6 +13,7 @@ import maya.cmds as cmds
 
 from .bake import BakeContext
 from .constants import (
+    ALEMBIC_FILE_SUFFIX,
     BAKE_FOLDER_NAME,
     DEFAULT_BAKE_RESOLUTION,
     EXPORT_SCHEMA_VERSION,
@@ -28,6 +29,12 @@ from .particles import (
     particle_sample,
     resolve_samples,
     scene_particle_shapes,
+)
+from .alembic import (
+    cache_roots,
+    deformed_shapes,
+    export_alembic,
+    rig_deformed,
 )
 from .volumes import scene_volume_shapes, volume_records
 from .sets import (
@@ -79,6 +86,7 @@ def export_scene(
     frame_start=None,
     frame_end=None,
     frame_step=None,
+    export_alembic_cache=False,
 ):
     """Write a numbered package folder holding the FBX and the scene JSON.
 
@@ -94,6 +102,9 @@ def export_scene(
     os.makedirs(package_folder)
     fbx_path = os.path.join(package_folder, package_name + ".fbx")
     json_path = os.path.join(package_folder, package_name + "_scene.json")
+    alembic_path = os.path.join(
+        package_folder, package_name + ALEMBIC_FILE_SUFFIX
+    )
 
     warnings = []
     bake_context = BakeContext(
@@ -220,7 +231,35 @@ def export_scene(
                         record.get("particle") or "?"
                     )
                 )
-        export_fbx(mesh_transforms(mesh_shapes), fbx_path, animation)
+        # Alembic covers what FBX cannot: meshes whose points move, and
+        # particle systems the vertex bake refused. A cached mesh leaves the
+        # FBX entirely, or the same object would arrive twice, frozen once.
+        alembic = _write_alembic(
+            alembic_path,
+            mesh_shapes if export_alembic_cache else [],
+            particle_list if export_alembic_cache else [],
+            particle_shapes,
+            animation,
+            warnings,
+        )
+        cached = set(alembic.get("roots") or [])
+        # The flag is what stops the importer building a second, frozen copy
+        # of an object the cache already carries.
+        for record in mesh_records:
+            if record.get("mesh_path") in cached:
+                record["alembic"] = True
+        for record in particle_list:
+            if record.get("particle_path") in cached:
+                record["alembic"] = True
+        export_fbx(
+            [
+                transform
+                for transform in mesh_transforms(mesh_shapes)
+                if transform not in cached
+            ],
+            fbx_path,
+            animation,
+        )
 
         payload = {
             "schema_version": EXPORT_SCHEMA_VERSION,
@@ -244,6 +283,11 @@ def export_scene(
             "volumes": volume_list,
             "particle_count": len(particle_list),
             "particle_baked_count": baked_particles,
+            "alembic": {
+                "file": alembic.get("file") or "",
+                "mesh_count": alembic.get("mesh_count") or 0,
+                "particle_count": alembic.get("particle_count") or 0,
+            },
             "particles": particle_list,
             "transforms": transform_list,
             "light_count": len(light_records),
@@ -267,6 +311,7 @@ def export_scene(
     except Exception:
         remove_file(fbx_path)
         remove_file(json_path)
+        remove_file(alembic_path)
         try:
             # rmtree rather than rmdir: baking may already have written
             # textures into the package, and a half written package must
@@ -356,6 +401,54 @@ def _apply_light_linking(light_records, light_shapes, mesh_records):
             if casting is not None and set(casting) != every_mesh:
                 record["shadow_meshes"] = casting
     return restricted
+
+
+def _write_alembic(path, mesh_shapes, particle_list, particle_shapes,
+                   animation, warnings):
+    """Cache what FBX loses. Returns what the payload should say about it.
+
+    Only two things qualify, and both were measured to need it: a mesh whose
+    points are moved by a deformer, which FBX delivers frozen, and a particle
+    object whose count changes, which no fixed vertex count can hold.
+    """
+    empty = {"roots": [], "file": "", "mesh_count": 0, "particle_count": 0}
+    if not animation.get("enabled"):
+        return empty
+
+    deformed = deformed_shapes(mesh_shapes)
+    varying = [
+        shape
+        for record, shape in zip(particle_list, particle_shapes)
+        if record.get("count_varies") or record.get("bake_too_large")
+    ]
+    mesh_roots = cache_roots(deformed)
+    particle_roots = cache_roots(varying)
+    roots = mesh_roots + particle_roots
+    if not roots:
+        return empty
+
+    if not export_alembic(roots, path, animation):
+        warnings.append(
+            "Alembic cache could not be written, so {0} object(s) that need "
+            "one travel as a single frame.".format(len(roots))
+        )
+        return empty
+
+    # A cache holds the deformed result and nothing that drives it, so a
+    # rigged character arrives as geometry that cannot be posed. Better said
+    # than discovered in Blender.
+    rigged = rig_deformed(deformed)
+    if rigged:
+        warnings.append(
+            "{0} cached mesh(es) are rig driven; the cache carries the "
+            "deformed result, not the rig.".format(len(rigged))
+        )
+    return {
+        "roots": roots,
+        "file": maya_path(path),
+        "mesh_count": len(mesh_roots),
+        "particle_count": len(particle_roots),
+    }
 
 
 def _sampler(function, shape):

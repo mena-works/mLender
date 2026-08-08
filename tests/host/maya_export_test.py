@@ -351,6 +351,18 @@ def build_scene():
     spark_tf, spark_shape = cmds.particle(name="sparkParticle")
     cmds.connectDynamic(spark_tf, emitters=emitter)
 
+    # A mesh deformed by something other than its transform. Measured: this
+    # arrives frozen through FBX, which is the whole reason the Alembic
+    # cache exists, so the fixture has to be a real deformation and not a
+    # keyframed translate.
+    cmds.select(clear=True)
+    wobble = cmds.polyPlane(name="wobblePlane", sx=4, sy=4, w=10, h=10)[0]
+    cluster, cluster_handle = cmds.cluster(
+        wobble + ".vtx[0:8]", name="wobbleCluster"
+    )
+    cmds.setKeyframe(cluster_handle + ".translateY", t=1, v=0)
+    cmds.setKeyframe(cluster_handle + ".translateY", t=25, v=6)
+
     # An Arnold volume. The VDB deliberately does not exist: measured on 4.1
     # and 5.2, Blender takes the path, reports no grids and raises nothing, so
     # the volume still marks where it belongs and can be re-pointed. That is
@@ -631,7 +643,9 @@ def main():
     # is deliberately parked away from the range start, to prove sampling puts
     # it back.
     cmds.currentTime(7, edit=True)
-    result = za.export_scene(OUT, export_animation=True)
+    result = za.export_scene(
+        OUT, export_animation=True, export_alembic_cache=True
+    )
     restored_frame = cmds.currentTime(query=True)
     with open(result["json_path"], "r") as handle:
         payload = json.load(handle)
@@ -652,7 +666,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("26 meshes exported", payload["mesh_count"] == 26,
+    check("27 meshes exported", payload["mesh_count"] == 27,
           payload["mesh_count"])
     # Four: the locator, the empty null, the nested locator, and the group
     # holding only a curve. That last one has no mesh below it either, so
@@ -778,6 +792,34 @@ def main():
           not spark.get("samples"), len(spark.get("samples") or []))
     check("while keeping its snapshot",
           "positions" in spark)
+
+    print("\nalembic cache")
+    cache = payload.get("alembic") or {}
+    cache_path = os.path.join(
+        result["package_folder"], os.path.basename(cache.get("file") or "")
+    )
+    check("a cache file was written",
+          bool(cache.get("file")) and os.path.isfile(cache_path),
+          cache.get("file"))
+    # One deformed mesh and one emitting particle object: exactly the two
+    # cases measured to be untransferable any other way.
+    check("it holds the deformed mesh",
+          cache.get("mesh_count") == 1, cache.get("mesh_count"))
+    check("and the emitting particle object",
+          cache.get("particle_count") == 1, cache.get("particle_count"))
+
+    wobble = by_mesh.get("wobblePlane") or {}
+    check("the deformed mesh record is flagged as cached",
+          wobble.get("alembic") is True, wobble.get("alembic"))
+    check("and the emitting particle record too",
+          spark.get("alembic") is True, spark.get("alembic"))
+    # A mesh nothing deforms must stay in the FBX; caching everything would
+    # make every package a cache and lose the point of the side channel.
+    still = by_mesh.get("cubeA") or by_mesh.get("instSource") or {}
+    check("while an undeformed mesh is not cached",
+          still and not still.get("alembic"), still.get("alembic"))
+    check("and the constant count particle object is not either",
+          not dust.get("alembic"), dust.get("alembic"))
 
     print("\nvolumes")
     by_volume = {

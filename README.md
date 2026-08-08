@@ -164,6 +164,7 @@ light counts) and check the System Console for lines beginning
 | Collect Textures | off | Copy every referenced texture into the package |
 | Export Scope | off | Send only the selected objects |
 | Export Animation | off | Send a frame range instead of a single frame |
+| Alembic Cache | off | Cache deforming meshes and emitting particles |
 | Bake Procedurals | off | Bake fileless shading networks to UVs |
 | Bake Resolution | 1024 | Resolution of those bakes |
 | Light Power Scale | 1.0 | Artistic multiplier over the measured conversion |
@@ -1008,12 +1009,54 @@ A very dense simulation is refused the same way, with its own message, because
 three numbers per point per frame would otherwise exceed the live link's 32 MB
 message limit and fail as a transfer instead of as a bake.
 
-To bring an emitting simulation across in full, cache it in Maya and read the
-cache in Blender; that is a different job from a live scene transfer, and this
-tool does not pretend to do it.
+To bring an emitting simulation across in full, turn on **Alembic Cache**
+below.
 
 The panel's status line reports how many particle objects arrived and how many
 of them were baked.
+
+### Alembic cache
+
+**Alembic Cache** in the Maya window writes a second file next to the FBX and
+the JSON, holding the two kinds of object neither of those can carry. It is off
+by default and needs **Export Animation**.
+
+Both cases were measured, not assumed.
+
+**A mesh whose points are moved by a deformer arrives frozen through FBX.** A
+cluster that moves vertices six units in Maya moved them zero in Blender, with
+no warning. FBX carries a transform's animation and a skin's, but not the
+result of an arbitrary deformer. Through the cache the same mesh reproduces the
+motion exactly.
+
+**An emitting particle system cannot travel at all otherwise**, for the reason
+given above: its count changes. Alembic reproduces the varying counts exactly —
+0, 3, 7 and 15 points at frames 1, 5, 10 and 20, the numbers Maya reported.
+
+What is cached is decided per object, not per scene: a mesh with no deformer
+stays in the FBX, and a particle object with a constant count still travels as
+a vertex bake. Only the objects that need a cache get one, so turning the
+option on does not turn every package into a cache.
+
+Blender receives these objects with a **Mesh Sequence Cache** modifier pointing
+at the `.abc`, which means:
+
+- the file must travel with the package; move the folder, not the file
+- an emitting system arrives as a **point cloud** on Blender 4.5 and later, and
+  as a mesh on 4.1, which is the only datablock those builds can hold it in
+- the geometry is read from disk each frame rather than stored in the `.blend`
+
+A cache carries the deformed *result* and nothing that drives it. Caching a
+skinned character therefore gives you geometry in Blender that plays back but
+cannot be posed, and the export says so:
+
+```text
+mLender warning: 1 cached mesh(es) are rig driven; the cache carries the
+deformed result, not the rig.
+```
+
+If Maya's `AbcExport` plugin cannot be loaded, the export still succeeds and
+warns; the affected objects travel as a single frame.
 
 ### Volumes
 

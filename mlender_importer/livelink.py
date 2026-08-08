@@ -187,7 +187,7 @@ def process_messages():
             "{2} subdivision modifier(s), {3} light(s), {4} camera(s), "
             "{5} collection(s), {6} instance(s), {7} empty(ies), "
             "{8} curve(s), {9} set(s), {10} layer(s), {11} volume(s), "
-            "{12} particle object(s) ({13} baked)."
+            "{12} particle object(s) ({13} baked), {14} cached object(s)."
         ).format(
             result["mesh_count"],
             result["material_count"],
@@ -203,6 +203,7 @@ def process_messages():
             result["volume_count"],
             result["particle_count"],
             result["particle_baked_count"],
+            result["alembic_count"],
         )
         for warning in result.get("warnings") or []:
             print("mLender warning: {0}".format(warning))

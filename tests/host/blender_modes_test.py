@@ -104,6 +104,15 @@ def main():
     # A merge of the same package leaves nothing behind.
     check("nothing went stale re-importing the same package",
           second["stale_count"] == 0, second["stale_count"])
+    # Cached objects are re-read rather than adopted, so they are the ones
+    # most likely to pile up. Counting them by name catches a duplicate that
+    # the scene total can hide, and the mesh-only adoption let exactly this
+    # through on 4.1, where an emitting system lands as a mesh.
+    cached = [obj for obj in bpy.data.objects if "ml_alembic" in obj.keys()]
+    check("cached objects did not accumulate",
+          len(cached) == len(set(obj.name for obj in cached))
+          and not any(obj.name.endswith((".001", ".002")) for obj in cached),
+          sorted(obj.name for obj in cached))
     check("and no second root collection was made",
           len([c for c in bpy.data.collections
                if c.name.startswith("mLender Import")]) == 1,

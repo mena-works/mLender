@@ -113,7 +113,7 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("26 meshes imported", result["mesh_count"] == 26,
+    check("27 meshes imported", result["mesh_count"] == 27,
           result["mesh_count"])
     check("21 materials built", result["material_count"] == 21,
           result["material_count"])
@@ -314,7 +314,9 @@ def main():
     # cannot be built from Python at all, so they arrive as loose vertices.
     dust = bpy.data.objects.get("dustParticle")
     check("the particle object arrived", dust is not None)
-    check("the import reported it", result["particle_count"] == 2,
+    # One, not two: the emitting system travels in the Alembic cache and
+    # must not also be rebuilt here as a frozen snapshot.
+    check("the import reported the uncached one", result["particle_count"] == 1,
           result["particle_count"])
     if dust:
         check("as a mesh of loose vertices",
@@ -385,6 +387,50 @@ def main():
         check("but carries no vertex animation",
               getattr(spark.data, "animation_data", None) is None
               or spark.data.animation_data.action is None)
+
+    print("\nalembic cache")
+    check("the import reported the cached objects",
+          result["alembic_count"] >= 2, result["alembic_count"])
+    wobble = bpy.data.objects.get("wobblePlane")
+    check("the deformed mesh arrived", wobble is not None)
+    if wobble:
+        check("carrying a cache reader",
+              any(m.type == "MESH_SEQUENCE_CACHE" for m in wobble.modifiers),
+              [m.type for m in wobble.modifiers])
+        check("marked as ours", wobble.get("ml_generated") is True)
+        # The whole reason the cache exists: through FBX this mesh arrived
+        # frozen. Maya moved it six units up, a centimetre scene, so the
+        # spread must open by about six centimetres across the range.
+        scene = bpy.context.scene
+        original_frame = scene.frame_current
+
+        def spread(frame):
+            scene.frame_set(frame)
+            evaluated = wobble.evaluated_get(
+                bpy.context.evaluated_depsgraph_get()
+            )
+            heights = [
+                (wobble.matrix_world @ v.co).z
+                for v in evaluated.data.vertices
+            ]
+            return max(heights) - min(heights)
+
+        flat = spread(scene.frame_start)
+        bent = spread(scene.frame_end)
+        scene.frame_set(original_frame)
+        check("and it actually deforms over the range",
+              flat < 1e-4 and abs(bent - 0.06) < 5e-3,
+              (round(flat, 5), round(bent, 5)))
+
+    spark = bpy.data.objects.get("sparkParticle")
+    check("the emitting particle system arrived", spark is not None)
+    if spark:
+        # 4.1 has no point cloud Blender can build, so the cache lands as a
+        # mesh there and as a POINTCLOUD from 4.5 on. Both are acceptable;
+        # arriving with a reader attached is what matters.
+        check("as a cache reader, whatever datablock this build uses",
+              any(m.type == "MESH_SEQUENCE_CACHE" for m in spark.modifiers),
+              (spark.type, [m.type for m in spark.modifiers]))
 
     print("\nvolumes")
     volume_obj = bpy.data.objects.get("smokeVolume")

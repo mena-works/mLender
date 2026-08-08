@@ -14,6 +14,7 @@ from .cameras import import_cameras
 from .curves import import_curves
 from .empties import import_empties
 from .fbx import import_fbx, read_package_json, resolve_fbx_path
+from .alembic import cached_particle_names, import_alembic
 from .animation import apply_scene_range
 from .colormanagement import apply_color_management
 from .lights import import_lights
@@ -100,22 +101,39 @@ def import_scene_package(
     if mode == IMPORT_MODE_REPLACE:
         clear_scene_and_purge()
     elif mode == IMPORT_MODE_MERGE:
+        # Empties, curves, volumes and cached objects are rebuilt rather
+        # than adopted, so the previous ones go or they accumulate with
+        # every send. This runs first: indexing before the clear left the
+        # index holding objects that no longer exist, and adoption then
+        # raised ReferenceError on the first one it reached.
+        clear_rebuilt_objects()
         # Recorded before the FBX lands, or the new objects would be in it.
         existing_by_path = generated_objects_by_path()
-        # Empties, curves and volumes are rebuilt rather than adopted, so
-        # the previous ones go or they accumulate with every send.
-        clear_rebuilt_objects()
 
     # Materials carrying a fake user survive the purge, so the pre-import set
     # is recorded and those materials are left alone afterwards.
     before_objects = set(bpy.data.objects)
     before_materials = set(bpy.data.materials)
+    warnings = []
     import_fbx(fbx_path, import_scale)
+    # The cache goes in before anything is matched, so its objects are
+    # organised, named and given materials by the same passes as the rest.
+    alembic_count = import_alembic(
+        package_folder, package_data, import_scale, warnings
+    )
     imported_objects = [
         obj for obj in bpy.data.objects if obj not in before_objects
     ]
-    imported_meshes = [obj for obj in imported_objects if obj.type == "MESH"]
-    if not imported_meshes:
+    # A cached particle system is not a scene mesh, whichever datablock this
+    # Blender chose for it: measured, 4.1 lands it as a MESH and 4.5 onward
+    # as a POINTCLOUD, and counting by type alone made the same package
+    # report a different mesh count on different versions.
+    cached_particles = cached_particle_names(package_data)
+    imported_meshes = [
+        obj for obj in imported_objects
+        if obj.type == "MESH" and obj.name not in cached_particles
+    ]
+    if not imported_meshes and not alembic_count:
         raise RuntimeError("FBX import produced no mesh objects.")
 
     # The frame range is set before anything is keyed, so the keys land inside
@@ -126,7 +144,6 @@ def import_scene_package(
     )
     material_cache = {}
     assignments = []
-    warnings = []
     mesh_records = list(package_data.get("meshes") or [])
     # Indexed once: matching every object against every record, and
     # re-deriving each record's name keys each time, was quadratic.
@@ -301,6 +318,7 @@ def import_scene_package(
         "volume_count": volume_count,
         "particle_count": particle_count,
         "particle_baked_count": particle_baked_count,
+        "alembic_count": alembic_count,
         "render": render_applied,
         "import_mode": mode,
         "stale_count": len(stale_objects),

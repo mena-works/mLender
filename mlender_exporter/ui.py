@@ -109,6 +109,19 @@ def show_ui():
         adjustableColumn=2,
         columnWidth2=(120, 200),
     )
+    # Off by default: it writes a second file and only two kinds of object
+    # need it, so it is opt in rather than a silent size increase.
+    alembic_field = cmds.checkBoxGrp(
+        label="Alembic Cache",
+        label1="Cache deforming meshes and emitting particles",
+        value1=False,
+        annotation=(
+            "Needs Export Animation. Deformed meshes travel frozen through "
+            "FBX and emitting particles cannot travel at all; both go "
+            "through an Alembic cache instead."
+        ),
+        columnWidth2=(120, 400),
+    )
     cmds.text(
         label="Packages: {0}01, {0}02, {0}03...".format(PACKAGE_PREFIX),
         align="left",
@@ -126,6 +139,7 @@ def show_ui():
             frame_range_field,
             collect_field,
             selection_field,
+            alembic_field,
         ),
     )
     cmds.showWindow(window)
@@ -168,6 +182,7 @@ def export_from_ui(
     frame_range_field=None,
     collect_field=None,
     selection_field=None,
+    alembic_field=None,
 ):
     """Export, then notify Blender, reporting each failure mode separately.
 
@@ -201,6 +216,12 @@ def export_from_ui(
             cmds.textFieldGrp(frame_range_field, query=True, text=True)
         )
 
+    export_alembic_cache = False
+    if alembic_field is not None:
+        export_alembic_cache = bool(
+            cmds.checkBoxGrp(alembic_field, query=True, value1=True)
+        )
+
     collect = False
     if collect_field is not None:
         collect = bool(cmds.checkBoxGrp(collect_field, query=True, value1=True))
@@ -222,6 +243,7 @@ def export_from_ui(
             frame_start=frame_start,
             frame_end=frame_end,
             frame_step=frame_step,
+            export_alembic_cache=export_alembic_cache,
         )
     except Exception as exc:
         cmds.warning("mLender export failed: {0}".format(exc))

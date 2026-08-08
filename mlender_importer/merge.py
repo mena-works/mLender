@@ -56,6 +56,12 @@ REBUILT_MARKERS = (
     "ml_maya_curve",
     "ml_maya_volume",
     "ml_maya_particles",
+    # A cached object's geometry lives in the .abc, so a merge re-reads it
+    # rather than adopting it. Without this a second send left the previous
+    # cache reader behind under a numbered name -- visible only on 4.1,
+    # where an emitting system lands as a mesh and slipped past the
+    # mesh-only adoption.
+    "ml_alembic",
 )
 
 
