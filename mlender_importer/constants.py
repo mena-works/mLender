@@ -8,7 +8,7 @@ message shape changes.
 
 import math
 
-BUILD_VERSION = "2.17.0"
+BUILD_VERSION = "2.18.0"
 
 LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
@@ -22,8 +22,21 @@ LIVELINK_EVENT = "scene_package_ready"
 # branch with both, plus the Arnold channels.
 SUPPORTED_SCHEMA_VERSIONS = (
     1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
-    20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33,
+    20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34,
 )
+
+# rampShader. The mode name the exporter writes when Maya's single colorInput
+# enum is set to the one a Blender shader graph can actually reproduce.
+RAMP_FACING_MODE = "Facing Angle"
+
+# Maya keeps an interpolation per ramp stop; Blender keeps one per ramp, so
+# the first stop's decides. "None" is a hard step, which is CONSTANT here.
+RAMP_INTERPOLATION = {
+    "None": "CONSTANT",
+    "Linear": "LINEAR",
+    "Smooth": "EASE",
+    "Spline": "B_SPLINE",
+}
 
 # The key the exporter writes the cache filename under.
 ALEMBIC_FILE_KEY = "file"

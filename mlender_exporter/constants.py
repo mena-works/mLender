@@ -17,7 +17,7 @@ LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
 LIVELINK_PROTOCOL = "mlender_livelink"
 LIVELINK_VERSION = 3
-EXPORT_SCHEMA_VERSION = 33
+EXPORT_SCHEMA_VERSION = 34
 
 LIGHT_NODE_TYPES = (
     "RedshiftPhysicalLight",
@@ -137,6 +137,48 @@ EXCLUDED_SET_NAMES = (
 ARNOLD_MOTION_BLUR_NODE = "defaultArnoldRenderOptions"
 ARNOLD_MOTION_BLUR_ENABLED_ATTRS = ("motion_blur_enable",)
 ARNOLD_MOTION_BLUR_LENGTH_ATTRS = ("motion_frames",)
+
+# rampShader. Read from a live Maya 2023 node: every ramp is a multi compound
+# whose children are <name>_Position, <name>_Color or <name>_FloatValue, and
+# <name>_Interp. Entries come back in arbitrary index order and have to be
+# sorted by position.
+#
+# One enum drives them all. There is no transparencyInput or
+# incandescenceInput; the single colorInput chooses what every ramp on the
+# shader is a function of, and its default is Light Angle, not Facing Angle.
+RAMP_SHADER_TYPE = "rampShader"
+RAMP_INPUT_ATTR = "colorInput"
+RAMP_INPUT_MODES = (
+    "Light Angle",
+    "Facing Angle",
+    "Brightness",
+    "Normalized Brightness",
+)
+RAMP_FACING_MODE = "Facing Angle"
+RAMP_INTERP_MODES = ("None", "Linear", "Smooth", "Spline")
+
+# Which ramp feeds which channel. Only the three that land on a real
+# Principled socket travel; specularColor, specularRollOff, reflectivity and
+# environment have no ramp-shaped equivalent and are left out rather than
+# approximated into the wrong input.
+RAMP_CHANNEL_ATTRS = (
+    ("base_color", "color", False),
+    ("emission", "incandescence", False),
+    # Maya transparency, so the exporter inverts it into opacity the same way
+    # it does for a flat value, and clears the flag so nobody inverts twice.
+    ("opacity", "transparency", True),
+)
+
+# Measured rather than assumed, with Maya's software renderer because Arnold
+# does not evaluate a rampShader at all -- it substitutes a default grey.
+# An unlit red-to-blue facing ramp renders blue in the centre and red at the
+# rim, so position 1 is facing the camera and position 0 is grazing.
+#
+# Blender's Layer Weight "Facing" runs the other way and is not linear
+# (0.011 facing, 0.221 at the rim on a Blend of 0.5). dot(Normal, Incoming)
+# is the cosine itself -- 0.988 facing, 0.771 toward the rim -- so that is
+# what the importer builds.
+RAMP_FACING_SEMANTIC = "maya_ramp_facing_angle"
 
 # Shaders that blend other shaders rather than describing a surface. Names
 # read from a live MtoA 5.4.8 session: aiMixShader has shader1/shader2/mix,

@@ -34,6 +34,8 @@ from .constants import (
     SHEEN_ROUGHNESS_REMAP,
     GLASS_INPUTS,
     PRINCIPLED_INPUTS,
+    RAMP_FACING_MODE,
+    RAMP_INTERPOLATION,
     SPECULAR_WEIGHT_TO_LEVEL,
     TEXTURE_EXTENSION_CLAMP,
     TEXTURE_EXTENSION_MIRROR,
@@ -770,6 +772,93 @@ def apply_channel(material, bsdf, channel, record, warnings):
     )
 
 
+def build_ramp(material, record, warnings):
+    """A rampShader gradient as a Color Ramp driven by the facing angle.
+
+    Measured, because Arnold does not evaluate a rampShader at all and the
+    direction had to come from Maya's own software renderer: an unlit
+    red-to-blue facing ramp renders blue in the centre and red at the rim, so
+    position 1 faces the camera and position 0 grazes.
+
+    Blender's Layer Weight "Facing" runs the other way and is not linear
+    (0.011 facing, 0.221 toward the rim). dot(Normal, Incoming) is the cosine
+    itself, 0.988 facing and falling toward the rim, so it is what drives the
+    ramp; nothing is inverted on the way.
+
+    Returns the Color Ramp node, or None.
+    """
+    ramp_record = record.get("ramp") or {}
+    entries = ramp_record.get("entries") or []
+    # One stop is a constant, not a gradient, and every rampShader has a
+    # default single entry on every ramp it owns. Building a Color Ramp for
+    # those puts a node tree on channels the artist never touched; the flat
+    # value the record also carries says the same thing.
+    if len(entries) < 2:
+        return None
+
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+
+    geometry = nodes.new("ShaderNodeNewGeometry")
+    geometry.name = "ML_Ramp_Geometry"
+    geometry.location = (-900, 0)
+    facing = nodes.new("ShaderNodeVectorMath")
+    facing.name = "ML_Ramp_Facing"
+    facing.label = "Facing Angle"
+    facing.operation = "DOT_PRODUCT"
+    facing.location = (-700, 0)
+    links.new(geometry.outputs["Normal"], facing.inputs[0])
+    links.new(geometry.outputs["Incoming"], facing.inputs[1])
+
+    ramp = nodes.new("ShaderNodeValToRGB")
+    ramp.name = "ML_Ramp"
+    ramp.label = "Maya Ramp"
+    ramp.location = (-500, 0)
+    # Index, not name: the factor socket is "Fac" on every build measured,
+    # but socket names have moved between versions in this project before.
+    links.new(facing.outputs["Value"], ramp.inputs[0])
+    _fill_ramp(ramp, entries)
+
+    mode = ramp_record.get("input") or ""
+    if mode and mode != RAMP_FACING_MODE:
+        warnings.append(
+            'Maya drove a ramp by "{0}", which a Blender shader graph cannot '
+            "see; the gradient arrived driven by the facing angle "
+            "instead.".format(mode)
+        )
+    return ramp
+
+
+def _fill_ramp(ramp, entries):
+    """Write the stops, keeping the ones Blender cannot hold out of the way.
+
+    A new Color Ramp starts with two stops and its first cannot be removed,
+    so the existing ones are reused before any are added.
+    """
+    elements = ramp.color_ramp.elements
+    while len(elements) > 1:
+        elements.remove(elements[-1])
+
+    for index, entry in enumerate(entries):
+        colour = list(entry.get("color") or [0.0, 0.0, 0.0])[:3]
+        while len(colour) < 3:
+            colour.append(0.0)
+        position = max(0.0, min(1.0, float(entry.get("position", 0.0))))
+        element = elements[0] if index == 0 else elements.new(position)
+        element.position = position
+        element.color = (colour[0], colour[1], colour[2], 1.0)
+
+    # Maya keeps an interpolation per stop and Blender one per ramp, so the
+    # first stop's decides. Writing per stop is not available to choose from.
+    interpolation = RAMP_INTERPOLATION.get(
+        str(entries[0].get("interp") or "Linear"), "LINEAR"
+    )
+    try:
+        ramp.color_ramp.interpolation = interpolation
+    except Exception:
+        pass
+
+
 def apply_record_to_socket(material, shader, target, channel, record, warnings):
     """Wire a channel record into any socket, texture first then flat value.
 
@@ -778,6 +867,14 @@ def apply_record_to_socket(material, shader, target, channel, record, warnings):
     """
     if not record or target is None:
         return
+
+    # Before the texture: a rampShader carries a gradient and a fallback
+    # value in the same record, and taking the value would flatten it.
+    if record.get("ramp"):
+        ramp = build_ramp(material, record, warnings)
+        if ramp is not None:
+            material.node_tree.links.new(ramp.outputs["Color"], target)
+            return
 
     texture = record.get("texture") or {}
     if texture.get("path"):

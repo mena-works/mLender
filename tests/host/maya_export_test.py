@@ -226,6 +226,30 @@ def build_scene():
     cmds.setAttr(phong_e_native + ".color", 0.6, 0.2, 0.2, type="double3")
     cmds.setAttr(phong_e_native + ".roughness", 0.8)
 
+    # A ramp shader with a real gradient. The stops are written out of order
+    # on purpose: Maya returns the indices in creation order, and a ramp an
+    # artist edited comes back shuffled.
+    _, ramp_native = shaded_cube("rampCube", "rampShader")
+    cmds.setAttr(ramp_native + ".colorInput", 1)          # Facing Angle
+    cmds.setAttr(ramp_native + ".color[0].color_Position", 0.0)
+    cmds.setAttr(ramp_native + ".color[0].color_Color", 1, 0, 0,
+                 type="double3")
+    cmds.setAttr(ramp_native + ".color[2].color_Position", 1.0)
+    cmds.setAttr(ramp_native + ".color[2].color_Color", 0, 0, 1,
+                 type="double3")
+    cmds.setAttr(ramp_native + ".color[1].color_Position", 0.5)
+    cmds.setAttr(ramp_native + ".color[1].color_Color", 0, 1, 0,
+                 type="double3")
+    cmds.setAttr(ramp_native + ".color[1].color_Interp", 3)   # Spline
+    # Transparency as a ramp too, so the inversion has a gradient to work on.
+    cmds.setAttr(ramp_native + ".transparency[0].transparency_Position", 0.0)
+    cmds.setAttr(ramp_native + ".transparency[0].transparency_Color",
+                 0.25, 0.25, 0.25, type="double3")
+    cmds.setAttr(ramp_native + ".transparency[1].transparency_Position", 1.0)
+    cmds.setAttr(ramp_native + ".transparency[1].transparency_Color",
+                 0.5, 0.5, 0.5, type="double3")
+    cmds.setAttr(ramp_native + ".eccentricity", 0.6)
+
     # A mix of two real shaders. Measured: Arnold's mix is the weight of
     # shader2, so 0.25 means a quarter of the green one. The two sub-shaders
     # differ in more than colour so a swapped slot is visible.
@@ -732,7 +756,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("33 meshes exported", payload["mesh_count"] == 33,
+    check("34 meshes exported", payload["mesh_count"] == 34,
           payload["mesh_count"])
     # Four: the locator, the empty null, the nested locator, and the group
     # holding only a curve. That last one has no mesh below it either, so
@@ -1573,6 +1597,48 @@ def main():
         check("{0} is reported as supported".format(name),
               (by_material.get(name) or {}).get("supported") is True,
               (by_material.get(name) or {}).get("supported"))
+
+    print("\nramp shader")
+    ramp_channels = (by_material.get("rampCube_shd") or {}).get("channels", {})
+    colour_ramp = (ramp_channels.get("base_color") or {}).get("ramp") or {}
+    entries = colour_ramp.get("entries") or []
+    check("the colour ramp travelled", len(entries) == 3, len(entries))
+    if len(entries) == 3:
+        # Written 0.0, 1.0, 0.5 and returned in creation order by Maya; a
+        # gradient that is not sorted is not the one the artist drew.
+        check("its stops are sorted by position",
+              [round(item["position"], 3) for item in entries]
+              == [0.0, 0.5, 1.0],
+              [item["position"] for item in entries])
+        check("position 0 is the colour Maya put there",
+              entries[0]["color"] == [1.0, 0.0, 0.0], entries[0]["color"])
+        check("and position 1 too",
+              entries[2]["color"] == [0.0, 0.0, 1.0], entries[2]["color"])
+        check("per stop interpolation is carried",
+              entries[1]["interp"] == "Spline", entries[1]["interp"])
+    # One enum drives every ramp; there is no per ramp input attribute.
+    check("the ramp input mode is recorded",
+          colour_ramp.get("input") == "Facing Angle", colour_ramp.get("input"))
+    # The fallback value is the facing end, so a build that cannot use the
+    # gradient still shows the colour the surface has head on.
+    check("a flat fallback value comes with it",
+          (ramp_channels.get("base_color") or {}).get("value")
+          == [0.0, 0.0, 1.0],
+          (ramp_channels.get("base_color") or {}).get("value"))
+
+    opacity_record = ramp_channels.get("opacity") or {}
+    opacity_ramp = (opacity_record.get("ramp") or {}).get("entries") or []
+    check("the transparency ramp became opacity",
+          bool(opacity_ramp)
+          and abs(opacity_ramp[0]["color"][0] - 0.75) < 1e-6,
+          opacity_ramp[0]["color"] if opacity_ramp else None)
+    check("and its invert flag is cleared so nobody inverts twice",
+          opacity_record.get("invert") is False, opacity_record.get("invert"))
+    # eccentricity still drives roughness; the ramps do not replace it.
+    check("eccentricity still drives roughness",
+          abs((ramp_channels.get("roughness") or {}).get("value", -1) - 0.6)
+          < 1e-6,
+          (ramp_channels.get("roughness") or {}).get("value"))
 
     print("\ninstancers")
     instancers = payload.get("instancers") or []

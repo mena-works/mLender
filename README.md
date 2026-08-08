@@ -455,6 +455,44 @@ The Phong conversion is **analytic, not measured**: a Phong lobe and a GGX
 lobe are different shapes, so no single number makes them equal. It tracks the
 artist's intent, which a pinned value did not.
 
+### Ramp shader
+
+`rampShader` builds its look from gradients, and those now travel. The colour,
+incandescence and transparency ramps arrive as **Color Ramp** nodes on Base
+Color, Emission and Alpha; the transparency one is inverted into opacity on the
+way out, the same as a flat `transparency`.
+
+Maya returns a ramp's stops in creation order, so they are sorted by position
+before they travel — a ramp an artist edited comes back shuffled, and an
+unsorted gradient is not the one they drew. A ramp with a single stop is a
+constant, not a gradient, and arrives as a flat value rather than a node tree.
+
+The direction was **measured**, and measuring it needed Maya's own software
+renderer: **Arnold does not evaluate a rampShader at all**, it substitutes a
+default grey. An unlit red-to-blue facing ramp renders blue in the centre and
+red at the rim, so position 1 faces the camera and position 0 grazes.
+
+What drives it in Blender is `dot(Normal, Incoming)` — the cosine itself,
+measured at 0.988 facing and falling toward the rim, which is the same
+quantity and the same direction as Maya's. Layer Weight's `Facing` was measured
+too and rejected: it runs the opposite way and is not linear (0.011 facing,
+0.221 at the rim).
+
+Maya has one `colorInput` enum for the whole shader, not one per ramp, and its
+default is **Light Angle** rather than Facing Angle. Light Angle, Brightness
+and Normalized Brightness depend on the lighting at shading time, which a
+Blender shader graph cannot see; those still arrive as a gradient driven by the
+facing angle, and the import says so:
+
+```text
+mLender warning: Maya drove a ramp by "Light Angle", which a Blender shader
+graph cannot see; the gradient arrived driven by the facing angle instead.
+```
+
+The `specularColor`, `specularRollOff`, `reflectivity` and `environment` ramps
+have no ramp-shaped Principled input and are left out rather than approximated
+into the wrong one. `eccentricity` still drives roughness.
+
 `surfaceShader.outColor` drives an Emission shader and `outTransparency`
 becomes the Mix Shader factor against a Transparent BSDF, so the material
 behaves emissively rather than taking light like a Principled surface.

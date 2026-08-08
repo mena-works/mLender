@@ -35,6 +35,11 @@ from .constants import (
     MIX_SHADER_WEIGHT,
     NATIVE_ROUGHNESS_ATTRS,
     PHONG_EXPONENT_ATTRS,
+    RAMP_CHANNEL_ATTRS,
+    RAMP_INPUT_ATTR,
+    RAMP_INPUT_MODES,
+    RAMP_INTERP_MODES,
+    RAMP_SHADER_TYPE,
     OPENPBR_EMISSION_SEMANTIC,
     OPENPBR_SPECULAR_SEMANTIC,
     REDSHIFT_GLOSSINESS_FLAGS,
@@ -76,6 +81,8 @@ def shader_channels(shader, shader_type, bake_context=None):
         )
     if shader_type == "aiFlat":
         return arnold_flat_channels(shader, bake_context)
+    if shader_type == RAMP_SHADER_TYPE:
+        return ramp_shader_channels(shader, bake_context)
     if shader_type in NATIVE_ROUGHNESS_ATTRS:
         # blinn, phong, phongE and rampShader each carry their own gloss
         # control under a different name; the fallback only applies when the
@@ -194,6 +201,115 @@ def apply_glossiness_conversion(shader, roughness_record):
         roughness_record["invert"] = True
     elif "value" in roughness_record:
         roughness_record["value"] = 1.0 - float(roughness_record["value"])
+
+
+def ramp_entries(shader, attr):
+    """One ramp's stops, sorted by position.
+
+    Maya hands the indices back in whatever order they were created in, so a
+    ramp an artist edited comes out shuffled; sorting is not tidiness, it is
+    what makes the gradient the one they drew.
+    """
+    try:
+        indices = cmds.getAttr(
+            "{0}.{1}".format(shader, attr), multiIndices=True
+        ) or []
+    except Exception:
+        return []
+
+    entries = []
+    for index in indices:
+        base = "{0}.{1}[{2}].{1}_".format(shader, attr, index)
+        try:
+            position = float(cmds.getAttr(base + "Position"))
+        except Exception:
+            continue
+        colour = None
+        try:
+            raw = cmds.getAttr(base + "Color")
+            # A colour ramp reads back as [(r, g, b)]; a float ramp has no
+            # Color child at all and raises, which is what selects the branch.
+            values = list(raw[0]) if isinstance(raw, list) else list(raw)
+            colour = [float(item) for item in values[:3]]
+        except Exception:
+            try:
+                value = float(cmds.getAttr(base + "FloatValue"))
+                colour = [value, value, value]
+            except Exception:
+                continue
+        interp = "Linear"
+        try:
+            index_value = int(cmds.getAttr(base + "Interp"))
+            if 0 <= index_value < len(RAMP_INTERP_MODES):
+                interp = RAMP_INTERP_MODES[index_value]
+        except Exception:
+            pass
+        entries.append({
+            "position": position,
+            "color": colour,
+            "interp": interp,
+        })
+    entries.sort(key=lambda item: item["position"])
+    return entries
+
+
+def ramp_input_mode(shader):
+    """What every ramp on this shader is a function of.
+
+    One enum for the whole shader: there is no per ramp input attribute, and
+    its default is Light Angle rather than Facing Angle.
+    """
+    if not attr_exists(shader, RAMP_INPUT_ATTR):
+        return RAMP_INPUT_MODES[0]
+    try:
+        index = int(cmds.getAttr(shader + "." + RAMP_INPUT_ATTR))
+    except Exception:
+        return RAMP_INPUT_MODES[0]
+    if 0 <= index < len(RAMP_INPUT_MODES):
+        return RAMP_INPUT_MODES[index]
+    return RAMP_INPUT_MODES[0]
+
+
+def ramp_shader_channels(shader, bake_context=None):
+    """Channels for a rampShader, gradients included.
+
+    The flat channels come from the ordinary reader so bump, roughness and
+    anything else keep working; the ramps are then attached to the three
+    channels that have a Principled socket shaped to take one.
+    """
+    result = maya_basic_channels(
+        shader, native_roughness(shader, RAMP_SHADER_TYPE, FALLBACK_ROUGHNESS),
+        bake_context,
+    )
+    mode = ramp_input_mode(shader)
+    for channel, attr, invert in RAMP_CHANNEL_ATTRS:
+        entries = ramp_entries(shader, attr)
+        if not entries:
+            continue
+        if invert:
+            entries = [
+                {
+                    "position": item["position"],
+                    "color": [1.0 - value for value in item["color"]],
+                    "interp": item["interp"],
+                }
+                for item in entries
+            ]
+        record = result.setdefault(channel, {})
+        record["maya_attr"] = attr
+        record["maya_plug"] = "{0}.{1}".format(shader, attr)
+        record["ramp"] = {"input": mode, "entries": entries}
+        if invert:
+            # Inverted here, exactly as a flat transparency is, so the
+            # importer must not invert it a second time.
+            record["invert"] = False
+            record["semantic"] = "maya_transparency_to_opacity"
+        # The stop nearest the facing end, so a build that cannot use the
+        # gradient still shows the colour the surface has head on.
+        record["value"] = list(entries[-1]["color"])
+    if result.get("emission") and "emission_strength" not in result:
+        result["emission_strength"] = {"value": 1.0}
+    return result
 
 
 def upstream_shader(shader, attr):

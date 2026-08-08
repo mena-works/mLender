@@ -113,9 +113,9 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("33 meshes imported", result["mesh_count"] == 33,
+    check("34 meshes imported", result["mesh_count"] == 34,
           result["mesh_count"])
-    check("25 materials built", result["material_count"] == 25,
+    check("26 materials built", result["material_count"] == 26,
           result["material_count"])
     # Four of the eight cubes asked for subdivision in Maya, the displaced one
     # among them; the rest must arrive unmodified.
@@ -1122,6 +1122,52 @@ def main():
         check("roughness came from the blinn's eccentricity",
               abs(value(native_blinn, "Roughness") - 0.45) < 1e-5,
               value(native_blinn, "Roughness"))
+
+    print("\nramp shader")
+    ramp_material = material_for("rampCube")
+    check("the ramp material exists", ramp_material is not None)
+    if ramp_material:
+        nodes = ramp_material.node_tree.nodes
+        ramps = [n for n in nodes if n.bl_idname == "ShaderNodeValToRGB"]
+        # Two: one for the colour ramp and one for the transparency ramp.
+        check("both ramps became Color Ramp nodes", len(ramps) == 2,
+              len(ramps))
+        colour_ramp = next(
+            (n for n in ramps
+             if n.outputs["Color"].links
+             and n.outputs["Color"].links[0].to_socket.name == "Base Color"),
+            None,
+        )
+        check("one drives Base Color", colour_ramp is not None)
+        if colour_ramp:
+            stops = colour_ramp.color_ramp.elements
+            check("with all three stops in order",
+                  [round(e.position, 3) for e in stops] == [0.0, 0.5, 1.0],
+                  [e.position for e in stops])
+            # Measured with Maya's software renderer: position 1 faces the
+            # camera. A ramp built backwards would put red here.
+            check("position 1 is the colour Maya had facing the camera",
+                  [round(v, 3) for v in stops[2].color[:3]] == [0.0, 0.0, 1.0],
+                  list(stops[2].color)[:3])
+            check("and position 0 the one at the rim",
+                  [round(v, 3) for v in stops[0].color[:3]] == [1.0, 0.0, 0.0],
+                  list(stops[0].color)[:3])
+            check("the first stop's interpolation decided the ramp's",
+                  colour_ramp.color_ramp.interpolation == "LINEAR",
+                  colour_ramp.color_ramp.interpolation)
+            # Driven by the cosine itself, not Layer Weight: measured, Layer
+            # Weight runs the other way and is not linear.
+            source = colour_ramp.inputs[0].links[0].from_node
+            check("driven by dot(Normal, Incoming)",
+                  source.bl_idname == "ShaderNodeVectorMath"
+                  and source.operation == "DOT_PRODUCT",
+                  (source.bl_idname, getattr(source, "operation", None)))
+            feeds = sorted(
+                link.from_socket.name for link in ramp_material.node_tree.links
+                if link.to_node.name == source.name
+            )
+            check("fed by the geometry normal and incoming vector",
+                  feeds == ["Incoming", "Normal"], feeds)
 
     print("\ninstancers")
     check("the import reported one instancer",
