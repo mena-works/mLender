@@ -40,6 +40,7 @@ from .mayautils import (
     node_label,
     node_type,
     parent_of,
+    parents_of,
     plug_value,
     unique,
     without_namespace,
@@ -123,25 +124,47 @@ def selected_light_count():
 
 
 def mesh_transforms(mesh_shapes):
-    """Unique transform paths for a list of mesh shapes, for FBX selection."""
-    transforms = unique([parent_of(shape) for shape in mesh_shapes])
+    """Transform paths for a list of mesh shapes, for FBX selection.
+
+    Every transform, not just the first: an instanced shape hangs under
+    several, and selecting only one left the rest out of the FBX.
+    """
+    transforms = unique([
+        transform
+        for shape in mesh_shapes
+        for transform in parents_of(shape)
+    ])
     return [item for item in transforms if item]
 
 
-def mesh_record(mesh_shape, bake_context=None, cache=None):
-    transform = parent_of(mesh_shape)
-    full_name = node_label(transform or mesh_shape)
-    return {
-        "mesh": without_namespace(full_name),
-        "mesh_full_name": full_name,
-        "mesh_path": transform,
-        "shape": node_label(mesh_shape),
-        "shape_path": mesh_shape,
-        "groups": group_path(transform),
-        "visibility": visibility_info(mesh_shape, transform),
-        "subdivision": subdivision_info(mesh_shape),
-        "materials": mesh_materials(mesh_shape, bake_context, cache),
-    }
+def mesh_records(mesh_shape, bake_context=None, cache=None):
+    """One record per transform the shape hangs under.
+
+    Instances share a shape, so everything read off the shape — materials,
+    subdivision — is read once and reused, while the parts that belong to the
+    transform are read per instance: its name, its group trail, its
+    visibility. ``shape_path`` is the same on all of them, which is how the
+    importer recognises them as instances of one another.
+    """
+    transforms = parents_of(mesh_shape) or [""]
+    materials = mesh_materials(mesh_shape, bake_context, cache)
+    subdivision = subdivision_info(mesh_shape)
+    shape_label = node_label(mesh_shape)
+    records = []
+    for transform in transforms:
+        full_name = node_label(transform or mesh_shape)
+        records.append({
+            "mesh": without_namespace(full_name),
+            "mesh_full_name": full_name,
+            "mesh_path": transform,
+            "shape": shape_label,
+            "shape_path": mesh_shape,
+            "groups": group_path(transform),
+            "visibility": visibility_info(mesh_shape, transform),
+            "subdivision": subdivision,
+            "materials": materials,
+        })
+    return records
 
 
 def group_path(transform):

@@ -886,6 +886,33 @@ Maya                              Blender
 Lights and cameras stay together under `mLender Lights` and `mLender Cameras` rather
 than joining this hierarchy, so they stay reachable as a set.
 
+### Instances
+
+A Maya instance is several transforms sharing one shape. The exporter used to
+read only the first of them, so **every instance but one disappeared** — no
+object, no geometry, no warning. All of them are now exported, and each keeps
+its own name, transform, visibility and place in the group hierarchy.
+
+In Blender they become linked duplicates: the objects that came from one Maya
+shape share a single mesh datablock, which is what Maya was expressing in the
+first place and what keeps a scene of instanced set dressing from arriving as
+thousands of unique meshes.
+
+```text
+Maya                                   Blender
+treeSource ┐                           treeSource ┐
+treeInstA  ├─ one shape       ->       treeInstA  ├─ one mesh datablock
+treeInstB  ┘                           treeInstB  ┘
+treeCopy    (a real duplicate)         treeCopy    (its own datablock)
+```
+
+Records that share a `shape_path` are what identifies them, so a genuine
+duplicate — same geometry, separate shape — is correctly left alone. Which
+object owns the shared datablock is decided by Maya's parent order rather than
+by FBX import order, so the name is the same every time a package is re-sent.
+The instances are counted on the panel's status line, and each linked object
+records `ml_instance_of`.
+
 ### Meshes with the same name
 
 Two meshes under different groups sharing a short name (`|setA|twin` and

@@ -21,6 +21,7 @@ from .scene import (
     build_record_index,
     clear_scene_and_purge,
     find_mesh_record,
+    link_instance_duplicates,
     organize_imported_objects,
     place_in_group,
     purge_orphans,
@@ -121,6 +122,10 @@ def import_scene_package(
             assign_mesh_materials(obj, mesh_record, material_cache, warnings)
         )
 
+    # After the materials, not before: the assignment writes into obj.data,
+    # and instances share a shape in Maya so they share its materials anyway.
+    instanced_count = link_instance_duplicates(matched_meshes, mesh_records)
+
     namespace_prefixes = package_namespace_prefixes(package_data)
     for obj in imported_objects:
         remove_object_namespace(obj, namespace_prefixes)
@@ -170,6 +175,7 @@ def import_scene_package(
         "view_transform": view_transform,
         "grouped_mesh_count": grouped_count,
         "subdivision_count": subdivision_count,
+        "instanced_count": instanced_count,
         "light_count": light_result["light_count"],
         "light_object_count": light_result["object_count"],
         "dome_count": light_result["dome_count"],

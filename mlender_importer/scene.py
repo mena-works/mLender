@@ -149,6 +149,54 @@ def place_in_group(obj, record, root, cache):
     return True
 
 
+def link_instance_duplicates(matched_meshes, mesh_records=None):
+    """Point every instance of one Maya shape at a single mesh datablock.
+
+    Maya instances share their shape; FBX writes the geometry out once per
+    transform, so they arrive as separate meshes holding identical vertices.
+    Records carrying the same ``shape_path`` came from the same shape, which
+    is what makes them recognisable here.
+
+    Only the datablock is shared. Transform, visibility and collection stay
+    per object, exactly as they are in Maya.
+
+    Returns the number of objects re-pointed.
+    """
+    # Which object owns the shared datablock decides its name, so it is
+    # chosen by the record's position in the package, which is Maya's parent
+    # order. Taking whichever object the FBX importer happened to create
+    # first would name the shared mesh differently between runs.
+    rank = {}
+    for index, record in enumerate(mesh_records or []):
+        rank[id(record)] = index
+
+    by_shape = {}
+    for obj, record in matched_meshes:
+        shape_path = (record or {}).get("shape_path")
+        if not shape_path:
+            continue
+        by_shape.setdefault(shape_path, []).append(
+            (rank.get(id(record), len(rank)), obj)
+        )
+
+    linked = 0
+    for entries in by_shape.values():
+        if len(entries) < 2:
+            continue
+        objects = [obj for _, obj in sorted(entries, key=lambda e: e[0])]
+        master = objects[0].data
+        for obj in objects[1:]:
+            if obj.data is master:
+                continue
+            stale = obj.data
+            obj.data = master
+            obj["ml_instance_of"] = objects[0].name
+            linked += 1
+            if stale.users == 0:
+                bpy.data.meshes.remove(stale)
+    return linked
+
+
 def apply_visibility(obj, record):
     """Rebuild Maya's per-ray visibility and holdout flags on an object.
 

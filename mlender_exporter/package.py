@@ -40,7 +40,7 @@ from .mayautils import (
     parent_of,
 )
 from .meshes import (
-    mesh_record,
+    mesh_records as mesh_records_for,
     mesh_transforms,
     scene_mesh_shapes,
     selected_light_count,
@@ -108,9 +108,13 @@ def export_scene(
         # once and shared. A shader that baked is deliberately not cached:
         # a bake belongs to the mesh whose UVs it was made against.
         export_cache = {}
+        # One record per instance transform, so an instanced shape is not
+        # reduced to whichever transform Maya happens to list first.
         mesh_records = [
-            mesh_record(shape, bake_context, export_cache)
+            record
             for shape in mesh_shapes
+            for record in mesh_records_for(shape, bake_context,
+                                           export_cache)
         ]
         light_shapes = scene_light_shapes()
         camera_shapes = scene_camera_shapes()

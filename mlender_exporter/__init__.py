@@ -26,7 +26,7 @@ from .package import export_scene
 from .ui import show_ui
 
 
-BUILD_VERSION = "2.0.0"
+BUILD_VERSION = "2.1.0"
 
 # Dependency order; reloading follows this list so each module re-imports
 # already refreshed dependencies.

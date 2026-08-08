@@ -198,6 +198,18 @@ def build_scene():
     cmds.setAttr(surface_native + ".outTransparency", 0.2, 0.2, 0.2,
                  type="double3")
 
+    # An instanced shape and, next to it, a real duplicate of the same cube.
+    # The pair is the point: instances must collapse onto one mesh datablock
+    # in Blender and the duplicate must not, so a test that only had instances
+    # would pass on code that merged everything with matching geometry.
+    instance_source, _ = shaded_cube("instSource", "aiStandardSurface")
+    instance_a = cmds.instance(instance_source, name="instA")[0]
+    cmds.setAttr(instance_a + ".translateX", 4)
+    instance_b = cmds.instance(instance_source, name="instB")[0]
+    cmds.setAttr(instance_b + ".translateX", 8)
+    instance_copy = cmds.duplicate(instance_source, name="instCopy")[0]
+    cmds.setAttr(instance_copy + ".translateX", 12)
+
     # Values deliberately outside the ranges the rest of the scene uses. The
     # emission clamp bug survived every test because nothing ever asked for a
     # value on the far side of a limit, so this cube does nothing else.
@@ -454,8 +466,31 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("16 meshes exported", payload["mesh_count"] == 16,
+    check("20 meshes exported", payload["mesh_count"] == 20,
           payload["mesh_count"])
+
+    print("\ninstances")
+    # An instanced shape hangs under several transforms. Reading only the
+    # first dropped the instances from the FBX selection and the JSON alike,
+    # so they never reached Blender at all: no object, no geometry, no warning.
+    by_mesh = {record.get("mesh"): record for record in payload["meshes"]}
+    for name in ("instSource", "instA", "instB", "instCopy"):
+        check("{0} was exported".format(name), name in by_mesh)
+    shapes = {
+        name: (by_mesh.get(name) or {}).get("shape_path")
+        for name in ("instSource", "instA", "instB", "instCopy")
+    }
+    check("the instances share one shape",
+          shapes["instSource"] and shapes["instSource"] == shapes["instA"]
+          == shapes["instB"], shapes)
+    # The duplicate is the control. Without it a test would pass on code that
+    # merged anything whose geometry happened to match.
+    check("and a real duplicate does not",
+          shapes["instCopy"] and shapes["instCopy"] != shapes["instSource"],
+          shapes["instCopy"])
+    check("each instance keeps its own transform",
+          len({(by_mesh.get(n) or {}).get("mesh_path")
+               for n in ("instSource", "instA", "instB")}) == 3)
 
     print("\naiStandardSurface")
     std = channels("stdSurfCube")

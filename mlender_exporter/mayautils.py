@@ -149,6 +149,20 @@ def parent_of(node):
     return (cmds.listRelatives(node, parent=True, fullPath=True) or [""])[0]
 
 
+def parents_of(node):
+    """Every transform a shape hangs under, in Maya's order.
+
+    An instanced shape has more than one. Reading only the first dropped the
+    instances from both the FBX selection and the JSON, so they did not arrive
+    in Blender at all: no geometry, no object, no warning.
+    """
+    return [
+        path for path in
+        (cmds.listRelatives(node, allParents=True, fullPath=True) or [])
+        if path
+    ]
+
+
 def world_matrix(transform):
     if not transform:
         return [

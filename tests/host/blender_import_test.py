@@ -113,9 +113,9 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("16 meshes imported", result["mesh_count"] == 16,
+    check("20 meshes imported", result["mesh_count"] == 20,
           result["mesh_count"])
-    check("14 materials built", result["material_count"] == 14,
+    check("15 materials built", result["material_count"] == 15,
           result["material_count"])
     # Four of the eight cubes asked for subdivision in Maya, the displaced one
     # among them; the rest must arrive unmodified.
@@ -168,6 +168,34 @@ def main():
     check("four collections were reported",
           result["group_collection_count"] == 4,
           result["group_collection_count"])
+
+    print("\ninstances")
+    # Maya instances share a shape. Before this they were dropped on the way
+    # out entirely; now they arrive and must share one mesh datablock, while a
+    # real duplicate of the same cube must keep its own.
+    source = bpy.data.objects.get("instSource")
+    inst_a = bpy.data.objects.get("instA")
+    inst_b = bpy.data.objects.get("instB")
+    copy = bpy.data.objects.get("instCopy")
+    for name, obj in (("instSource", source), ("instA", inst_a),
+                      ("instB", inst_b), ("instCopy", copy)):
+        check("{0} arrived".format(name), obj is not None)
+    if source and inst_a and inst_b and copy:
+        check("both instances share the source's mesh data",
+              inst_a.data is source.data and inst_b.data is source.data,
+              [inst_a.data.name, inst_b.data.name, source.data.name])
+        check("a real duplicate keeps its own",
+              copy.data is not source.data, copy.data.name)
+        check("the shared datablock is named after Maya's first parent",
+              source.data.name == "instSource", source.data.name)
+        check("three users on the shared mesh", source.data.users == 3,
+              source.data.users)
+        # Sharing geometry must not have merged the objects themselves.
+        xs = sorted(round(o.location.x, 4)
+                    for o in (source, inst_a, inst_b, copy))
+        check("each instance kept its own transform", len(set(xs)) == 4, xs)
+        check("the import reported the instances",
+              result["instanced_count"] == 2, result["instanced_count"])
 
     print("\nvalues outside the usual range")
     # The emission clamp survived every test because nothing ever asked for a
