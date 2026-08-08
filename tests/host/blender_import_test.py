@@ -1711,9 +1711,16 @@ def main():
                               abs(place.matrix_world.translation.z - 0.04)
                               < 1e-4,
                               round(place.matrix_world.translation.z, 5))
-                        check("with its scale kept",
-                              abs(place.matrix_world.to_scale().x - 2.0) < 1e-4,
-                              round(place.matrix_world.to_scale().x, 4))
+                        # Maya's scaleX of 2, times the scene unit. The unit
+                        # belongs here and was missing at first: Maya projects
+                        # over half a *Maya unit* while object coordinates
+                        # come out in metres, so without it a centimetre
+                        # scene projected the image a hundred times too
+                        # small. A scale of exactly 2.0 is that bug.
+                        check("with its scale kept, scene unit included",
+                              abs(place.matrix_world.to_scale().x - 0.02)
+                              < 1e-5,
+                              round(place.matrix_world.to_scale().x, 5))
         # A type this build does not reproduce must say so.
         check("a Ball projection is refused with a warning",
               any("Ball" in item for item in unbaked_result["warnings"]),

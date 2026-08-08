@@ -852,6 +852,13 @@ def import_projection_placements(package_data, collection, import_scale,
     Scale is kept, unlike the light and camera conversion that strips it. A
     placement's scale is what sets how large the projection is, so dropping it
     would project the image at the wrong size.
+
+    The scene unit belongs in that scale too, and this is the one thing the
+    first measurement could not see because it was made at a scale of one.
+    Maya's projection covers half a *Maya unit* either side of the placement,
+    while Blender's object coordinates come out in metres; without the unit
+    in the Empty's scale a centimetre scene projects the image a hundred
+    times too small, which on a sphere reads as one flat colour.
     """
     meters_per_unit = scalar(package_data.get("meters_per_maya_unit"), 0.01)
     position_scale = meters_per_unit * max(scalar(import_scale, 1.0), 1e-6)
@@ -869,9 +876,8 @@ def import_projection_placements(package_data, collection, import_scale,
             if collection is not None:
                 collection.objects.link(empty)
             basis = maya_matrix_to_blender(projection, position_scale)
-            empty.matrix_world = basis @ Matrix.Diagonal(
-                Vector(_matrix_scale(projection))
-            ).to_4x4()
+            axes = Vector(_matrix_scale(projection)) * position_scale
+            empty.matrix_world = basis @ Matrix.Diagonal(axes).to_4x4()
         except Exception as exc:
             warnings.append(
                 'Texture placement "{0}" could not be built: {1}'.format(
