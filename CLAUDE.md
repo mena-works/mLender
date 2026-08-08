@@ -35,6 +35,13 @@ mlender_exporter/     # Maya (import sırası = bağımlılık sırası)
   bake.py                # prosedürel ağları UV'ye bake etme
   shaders.py             # shader → kanal çıkarımı
   meshes.py              # mesh keşfi, material/face atamaları
+  transforms.py          # locator ve boş null'lar
+  curves.py              # NURBS/bezier eğriler
+  volumes.py             # aiVolume (VDB yolu)
+  particles.py           # parçacık noktaları, kare kare bake
+  instancers.py          # particle instancer (nokta üzerine geometri)
+  render.py              # çözünürlük, aspect, motion blur
+  sets.py                # selection set ve display layer
   lights.py              # ışık keşfi ve kayıtları
   cameras.py             # kamera keşfi ve lens kayıtları
   fbx.py                 # MEL FBXExport
@@ -56,6 +63,15 @@ mlender_importer/     # Blender multi-file add-on
   colormanagement.py     # Maya OCIO ayarı → Blender view transform
   animation.py           # örneklenen animasyonu keyframe olarak kurma
   scene.py               # sahne temizleme, mesh eşleştirme, subdivision
+  attributes.py          # custom property'ler
+  empties.py             # locator → Empty
+  curves.py              # Blender eğrileri
+  volumes.py             # Blender volume objesi
+  particles.py           # vertex-only mesh + konum keyframe'leri
+  instancers.py          # vertex instancing (dupli-verts, ölçüldü)
+  render.py              # sahne render ayarları
+  sets.py                # collection olarak set ve layer
+  merge.py               # Replace / Merge / Add
   fbx.py                 # FBX import, paket dosyası çözümleme
   alembic.py             # paket cache'ini okuma (eksen/ölçek ölçüldü)
   importer.py            # orkestrasyon + şema doğrulaması
