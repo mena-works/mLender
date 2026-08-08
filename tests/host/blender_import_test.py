@@ -309,6 +309,31 @@ def main():
           abs(render.motion_blur_shutter - 0.75) < 1e-5,
           render.motion_blur_shutter)
 
+    print("\nparticles")
+    # Blender has no particle object to receive these, and a point cloud
+    # cannot be built from Python at all, so they arrive as loose vertices.
+    dust = bpy.data.objects.get("dustParticle")
+    check("the particle object arrived", dust is not None)
+    check("the import reported it", result["particle_count"] == 1,
+          result["particle_count"])
+    if dust:
+        check("as a mesh of loose vertices",
+              dust.type == "MESH" and len(dust.data.vertices) == 4
+              and len(dust.data.polygons) == 0,
+              (dust.type, len(dust.data.vertices), len(dust.data.polygons)))
+        # Maya had this ten units up, and the positions were local, so the
+        # particle at the local origin must land at 0.1 m and not at 0.
+        world = [dust.matrix_world @ v.co for v in dust.data.vertices]
+        check("the transform is applied once, not twice",
+              abs(world[0].z - 0.1) < 1e-4, round(world[0].z, 4))
+        # Maya (1, 2, 0) is 1 cm across and 2 cm up, plus the 10 cm offset.
+        check("and the points keep their shape",
+              abs(world[1].x - 0.01) < 1e-4
+              and abs(world[1].z - 0.12) < 1e-4,
+              (round(world[1].x, 4), round(world[1].z, 4)))
+        check("the Maya count is recorded",
+              dust.get("ml_source_count") == 4, dust.get("ml_source_count"))
+
     print("\nvolumes")
     volume_obj = bpy.data.objects.get("smokeVolume")
     check("the volume arrived", volume_obj is not None)

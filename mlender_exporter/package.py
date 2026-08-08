@@ -23,6 +23,7 @@ from .animation import animation_info, sample_records
 from .cameras import camera_record, camera_sample, scene_camera_shapes
 from .curves import curve_records, scene_curve_shapes
 from .render import render_record
+from .particles import particle_records, scene_particle_shapes
 from .volumes import scene_volume_shapes, volume_records
 from .sets import (
     display_layer_records,
@@ -132,6 +133,9 @@ def export_scene(
         transform_list = transform_records(scene_transforms(selected_only))
         curve_list = curve_records(scene_curve_shapes(selected_only))
         volume_list = volume_records(scene_volume_shapes(selected_only))
+        particle_list = particle_records(
+            scene_particle_shapes(selected_only)
+        )
         # Sets and layers may only name what this export carries. A scoped
         # export otherwise sent sets whose members were never in it.
         exported_paths = set(mesh_transforms(mesh_shapes))
@@ -155,6 +159,9 @@ def export_scene(
         disambiguate_names(mesh_records, "mesh", "mesh_full_name")
         disambiguate_names(curve_list, "curve", "curve_full_name")
         disambiguate_names(volume_list, "volume", "volume_full_name")
+        disambiguate_names(
+            particle_list, "particle", "particle_full_name"
+        )
         disambiguate_names(
             transform_list, "transform", "transform_full_name"
         )
@@ -209,6 +216,8 @@ def export_scene(
             "curves": curve_list,
             "volume_count": len(volume_list),
             "volumes": volume_list,
+            "particle_count": len(particle_list),
+            "particles": particle_list,
             "transforms": transform_list,
             "light_count": len(light_records),
             "lights": light_records,

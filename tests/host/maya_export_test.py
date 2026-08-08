@@ -324,6 +324,16 @@ def build_scene():
     cmds.polyColorPerVertex(uv_shape + ".vtx[0:3]", rgb=(1.0, 0.0, 0.0), a=1.0)
     cmds.polyColorPerVertex(uv_shape + ".vtx[4:7]", rgb=(0.0, 0.0, 1.0), a=1.0)
 
+    # Particles. Blender has no equivalent object, so what is asked of the
+    # transfer is that the points land where Maya had them. The transform
+    # is moved after creation on purpose: the positions must stay local, or
+    # they would be applied twice.
+    particle_tf, particle_shape = cmds.particle(
+        p=[(0, 0, 0), (1, 2, 0), (3, 1, 5), (-2, 4, 1)],
+        name="dustParticle",
+    )
+    cmds.setAttr(particle_tf + ".translateY", 10)
+
     # An Arnold volume. The VDB deliberately does not exist: measured on 4.1
     # and 5.2, Blender takes the path, reports no grids and raises nothing, so
     # the volume still marks where it belongs and can be re-pointed. That is
@@ -694,6 +704,34 @@ def main():
     check("a curve transform is not recorded as an empty",
           "probeCurve" not in by_transform and "probeCircle" not in
           by_transform, sorted(by_transform))
+
+    print("\nparticles")
+    by_particle = {
+        item.get("particle"): item
+        for item in (payload.get("particles") or [])
+    }
+    check("1 particle object exported", payload["particle_count"] == 1,
+          payload["particle_count"])
+    dust = by_particle.get("dustParticle") or {}
+    check("its count is carried", dust.get("count") == 4, dust.get("count"))
+    # particle -q -position returns None; the query that works hands back a
+    # flat list of three numbers per particle.
+    positions = dust.get("positions") or []
+    check("positions are a flat triple per particle",
+          len(positions) == 12, len(positions))
+    # Local, not world: the transform was moved ten units up after creation,
+    # and applying that twice is exactly the mistake to guard against.
+    check("and they are local, not world",
+          positions[:3] == [0.0, 0.0, 0.0]
+          and positions[3:6] == [1.0, 2.0, 0.0],
+          positions[:6])
+    check("the render type is carried as its label",
+          str(dust.get("render_type") or "") != "", dust.get("render_type"))
+    # Neither a mesh nor a locator, so neither discovery may claim it.
+    check("a particle object is not exported as a mesh",
+          "dustParticle" not in by_mesh, sorted(by_mesh))
+    check("nor as an empty",
+          "dustParticle" not in by_transform, sorted(by_transform))
 
     print("\nvolumes")
     by_volume = {

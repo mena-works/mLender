@@ -51,7 +51,12 @@ def generated_objects_by_path():
     return found
 
 
-REBUILT_MARKERS = ("ml_maya_transform", "ml_maya_curve", "ml_maya_volume")
+REBUILT_MARKERS = (
+    "ml_maya_transform",
+    "ml_maya_curve",
+    "ml_maya_volume",
+    "ml_maya_particles",
+)
 
 
 def clear_rebuilt_objects():

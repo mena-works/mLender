@@ -26,7 +26,7 @@ from .package import export_scene
 from .ui import show_ui
 
 
-BUILD_VERSION = "2.10.0"
+BUILD_VERSION = "2.11.0"
 
 # Dependency order; reloading follows this list so each module re-imports
 # already refreshed dependencies.
@@ -42,6 +42,7 @@ SUBMODULES = (
     "transforms",
     "curves",
     "volumes",
+    "particles",
     "render",
     "sets",
     "lights",

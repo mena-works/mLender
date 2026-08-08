@@ -963,6 +963,31 @@ colour attribute with the painted values intact.
 They are asserted in the host tests anyway, because nothing else pins them and
 a change to the FBX export options could drop a UV set without a word.
 
+### Particles
+
+Blender has nothing to receive a Maya particle object. Its own particle
+systems are driven by emitters and physics rather than explicit positions, and
+a point cloud — the truer analogue — **cannot be built from Python at all**:
+measured on 4.1, 4.5 and 5.2, the datablock exists but its points collection
+has no `add`.
+
+So what travels is the thing that survives the difference intact, where the
+particles are, and they arrive as a mesh of loose vertices. That works on
+every version, shows the particles where Maya had them, and is what geometry
+nodes instance onto — which is how a Blender artist would put geometry back on
+them. Per-particle radius, colour and opacity arrive as point-domain
+attributes under their own names when Maya had them.
+
+Two readings were measured rather than assumed. `particle -q -position`
+returns **None**; the query that works is `getParticleAttr` with `array`,
+which hands back three numbers per particle in one flat list. And those
+numbers are **local**, so they pair with the world matrix rather than
+replacing it — applying the transform twice is exactly what the test guards
+against.
+
+This is a snapshot at the exported frame, not a simulation. A particle system
+that moves needs the frame range, like everything else animated.
+
 ### Volumes
 
 An Arnold `aiVolume` points at a VDB and Blender's volume object reads the

@@ -28,6 +28,7 @@ from .merge import (
 )
 from .render import apply_render_settings
 from .sets import import_sets
+from .particles import import_particles
 from .volumes import import_volumes
 from .materials import apply_face_assignments, build_material
 from .scene import (
@@ -216,6 +217,14 @@ def import_scene_package(
         object_by_path,
     )
 
+    particle_count = import_particles(
+        package_data,
+        root_collection,
+        import_scale,
+        warnings,
+        group_cache,
+        object_by_path,
+    )
     volume_count = import_volumes(
         package_data,
         root_collection,
@@ -290,6 +299,7 @@ def import_scene_package(
         "transform_count": empty_result["transform_count"],
         "curve_count": curve_count,
         "volume_count": volume_count,
+        "particle_count": particle_count,
         "render": render_applied,
         "import_mode": mode,
         "stale_count": len(stale_objects),
