@@ -109,6 +109,17 @@ def main():
                if c.name.startswith("mLender Import")]) == 1,
           [c.name for c in bpy.data.collections
            if c.name.startswith("mLender Import")])
+    # Empties, curves and volumes are rebuilt rather than adopted, so a second
+    # merge accumulated them: probeLocator beside probeLocator.001. The mesh
+    # count alone could never have shown it, since meshes are adopted.
+    for label, name in (("locator", "probeLocator"), ("curve", "probeCurve"),
+                        ("volume", "smokeVolume")):
+        copies = [
+            obj for obj in bpy.data.objects
+            if obj.name == name or obj.name.startswith(name + ".")
+        ]
+        check("merge did not duplicate the {0}".format(label),
+              len(copies) == 1, [obj.name for obj in copies])
     check("nor duplicate group collections",
           len([c for c in bpy.data.collections if c.name.startswith("props")])
           == 1,

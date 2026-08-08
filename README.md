@@ -963,6 +963,30 @@ colour attribute with the painted values intact.
 They are asserted in the host tests anyway, because nothing else pins them and
 a change to the FBX export options could drop a UV set without a word.
 
+### Volumes
+
+An Arnold `aiVolume` points at a VDB and Blender's volume object reads the
+same format, so nothing is converted: the path travels and Blender opens the
+file itself. A volume is neither a mesh nor a locator, so none of the existing
+discovery found one and it simply did not arrive.
+
+```text
+filename           -> filepath
+useFrameExtension  -> is_sequence, with frame becoming frame_start
+grids, stepSize, stepScale, velocityScale, motionBlur
+                   -> kept as ml_source_*, being Arnold render settings with
+                      no Blender datablock equivalent
+```
+
+**A missing VDB is built anyway**, unlike a missing image plane. Measured on
+4.1 and 5.2: Blender takes the path, reports no grids and raises nothing, so
+the volume still marks where it belongs and can be re-pointed — and a VDB path
+is routinely a per-frame sequence that resolves elsewhere. The missing file is
+reported.
+
+Only Arnold is read. Redshift's volume attribute names cannot be probed here,
+and this project does not write names it has not read off a live session.
+
 ### Curves
 
 NURBS and bezier curves never rode the FBX either — the export selects mesh
@@ -1189,6 +1213,13 @@ unasked, and that is exactly what Replace is for.
 
 Merge also reuses the collections already standing rather than building
 `mLender Import.001` and `props.001` beside the ones holding the same meshes.
+
+Empties, curves and volumes are **rebuilt** rather than adopted, so the
+previous ones are removed first. Without that they accumulated: a second merge
+of the same package left `probeLocator.001` beside the locator already there.
+Only objects the tool made are removed, so this never reaches your own work —
+but it does mean a modifier put on an imported empty or curve, unlike one on a
+mesh, does not survive a merge.
 
 The three-pass scene clear, which raises if anything survives it, is not
 softened by any of this. Merge and Add skip it; they do not weaken it.

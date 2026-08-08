@@ -23,6 +23,7 @@ from .animation import animation_info, sample_records
 from .cameras import camera_record, camera_sample, scene_camera_shapes
 from .curves import curve_records, scene_curve_shapes
 from .render import render_record
+from .volumes import scene_volume_shapes, volume_records
 from .sets import (
     display_layer_records,
     scene_display_layers,
@@ -130,6 +131,7 @@ def export_scene(
         # dropped entirely.
         transform_list = transform_records(scene_transforms(selected_only))
         curve_list = curve_records(scene_curve_shapes(selected_only))
+        volume_list = volume_records(scene_volume_shapes(selected_only))
         # Sets and layers may only name what this export carries. A scoped
         # export otherwise sent sets whose members were never in it.
         exported_paths = set(mesh_transforms(mesh_shapes))
@@ -138,6 +140,9 @@ def export_scene(
         )
         exported_paths.update(
             record["curve_path"] for record in curve_list
+        )
+        exported_paths.update(
+            record["volume_path"] for record in volume_list
         )
         set_list = selection_set_records(
             scene_selection_sets(), warnings, exported_paths
@@ -194,6 +199,8 @@ def export_scene(
             "display_layers": layer_list,
             "curve_count": len(curve_list),
             "curves": curve_list,
+            "volume_count": len(volume_list),
+            "volumes": volume_list,
             "transforms": transform_list,
             "light_count": len(light_records),
             "lights": light_records,

@@ -21,12 +21,14 @@ from .merge import (
     IMPORT_MODE_MERGE,
     IMPORT_MODE_REPLACE,
     adopt,
+    clear_rebuilt_objects,
     generated_objects_by_path,
     mark_stale,
     normalize_mode,
 )
 from .render import apply_render_settings
 from .sets import import_sets
+from .volumes import import_volumes
 from .materials import apply_face_assignments, build_material
 from .scene import (
     add_subdivision_modifiers,
@@ -99,6 +101,9 @@ def import_scene_package(
     elif mode == IMPORT_MODE_MERGE:
         # Recorded before the FBX lands, or the new objects would be in it.
         existing_by_path = generated_objects_by_path()
+        # Empties, curves and volumes are rebuilt rather than adopted, so
+        # the previous ones go or they accumulate with every send.
+        clear_rebuilt_objects()
 
     # Materials carrying a fake user survive the purge, so the pre-import set
     # is recorded and those materials are left alone afterwards.
@@ -203,6 +208,15 @@ def import_scene_package(
         object_by_path,
     )
 
+    volume_count = import_volumes(
+        package_data,
+        root_collection,
+        import_scale,
+        warnings,
+        group_cache,
+        object_by_path,
+    )
+
     # Runs after the empties so both kinds of group transform, the ones the
     # FBX brought and the ones the JSON did, end up in the same place.
     place_group_empties(imported_objects, group_cache)
@@ -267,6 +281,7 @@ def import_scene_package(
         "custom_attribute_count": attribute_count,
         "transform_count": empty_result["transform_count"],
         "curve_count": curve_count,
+        "volume_count": volume_count,
         "render": render_applied,
         "import_mode": mode,
         "stale_count": len(stale_objects),

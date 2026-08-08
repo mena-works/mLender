@@ -51,6 +51,34 @@ def generated_objects_by_path():
     return found
 
 
+REBUILT_MARKERS = ("ml_maya_transform", "ml_maya_curve", "ml_maya_volume")
+
+
+def clear_rebuilt_objects():
+    """Remove the objects a merge is about to build again.
+
+    Empties, curves and volumes are not adopted; they are constructed from
+    their records every time. Left in place they accumulated, so a second
+    merge of the same package produced "probeLocator.001" beside the one
+    already standing. Only objects this tool made are touched.
+
+    Returns how many went.
+    """
+    doomed = [
+        obj for obj in bpy.data.objects
+        if obj.get("ml_generated")
+        and any(marker in obj.keys() for marker in REBUILT_MARKERS)
+    ]
+    removed = 0
+    for obj in doomed:
+        try:
+            bpy.data.objects.remove(obj, do_unlink=True)
+            removed += 1
+        except Exception:
+            continue
+    return removed
+
+
 def adopt(new_object, record, existing_by_path, retired=None):
     """Move an imported object's contents onto the object already standing.
 

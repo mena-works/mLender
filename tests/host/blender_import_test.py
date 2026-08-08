@@ -309,6 +309,42 @@ def main():
           abs(render.motion_blur_shutter - 0.75) < 1e-5,
           render.motion_blur_shutter)
 
+    print("\nvolumes")
+    volume_obj = bpy.data.objects.get("smokeVolume")
+    check("the volume arrived", volume_obj is not None)
+    check("the import reported it", result["volume_count"] == 1,
+          result["volume_count"])
+    if volume_obj:
+        check("as a Blender volume object", volume_obj.type == "VOLUME",
+              volume_obj.type)
+        data = volume_obj.data
+        check("pointing at the VDB",
+              str(data.filepath).endswith("smoke.vdb"), data.filepath)
+        # The file is deliberately absent. Measured: Blender takes the path,
+        # reports no grids and raises nothing, so the volume still marks where
+        # it belongs and the missing file is reported instead.
+        check("a missing VDB still builds the object", len(data.grids) == 0,
+              len(data.grids))
+        check("and is reported",
+              any("smoke.vdb" in str(w) for w in result["warnings"]),
+              [w for w in result["warnings"] if "vdb" in str(w).lower()])
+        check("frame extension became a sequence",
+              data.is_sequence is True and data.frame_start == 12,
+              (data.is_sequence, data.frame_start))
+        # Arnold render settings Blender has no place for.
+        check("the grid names survive as reference",
+              data.get("ml_source_grids") == "density temperature",
+              data.get("ml_source_grids"))
+        check("and the step size",
+              abs(data.get("ml_source_step_size", 0) - 0.25) < 1e-6,
+              data.get("ml_source_step_size"))
+        # Maya had this 40 units up and scaled 3x in X; centimetres, so 0.4 m.
+        check("it lands where Maya had it",
+              abs(volume_obj.matrix_world.translation.z - 0.4) < 1e-4,
+              round(volume_obj.matrix_world.translation.z, 4))
+        check("with its scale, which a second assignment would have halved",
+              abs(volume_obj.scale.x - 3.0) < 1e-4, volume_obj.scale.x)
+
     print("\nimage planes")
     shot_cam = bpy.data.objects.get("shotCam")
     check("shotCam arrived", shot_cam is not None)

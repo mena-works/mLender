@@ -324,6 +324,26 @@ def build_scene():
     cmds.polyColorPerVertex(uv_shape + ".vtx[0:3]", rgb=(1.0, 0.0, 0.0), a=1.0)
     cmds.polyColorPerVertex(uv_shape + ".vtx[4:7]", rgb=(0.0, 0.0, 1.0), a=1.0)
 
+    # An Arnold volume. The VDB deliberately does not exist: measured on 4.1
+    # and 5.2, Blender takes the path, reports no grids and raises nothing, so
+    # the volume still marks where it belongs and can be re-pointed. That is
+    # the case worth pinning, since a VDB path is routinely a per-frame
+    # sequence that resolves somewhere else.
+    volume_shape = cmds.createNode("aiVolume", name="smokeVolumeShape")
+    volume_tf = cmds.listRelatives(volume_shape, parent=True,
+                                   fullPath=True)[0]
+    cmds.rename(volume_tf, "smokeVolume")
+    cmds.setAttr("smokeVolume.translateY", 40)
+    cmds.setAttr("smokeVolume.scaleX", 3)
+    cmds.setAttr(volume_shape + ".filename",
+                 os.path.join(OUT, "smoke.vdb").replace("\\", "/"),
+                 type="string")
+    cmds.setAttr(volume_shape + ".grids", "density temperature", type="string")
+    cmds.setAttr(volume_shape + ".stepSize", 0.25)
+    cmds.setAttr(volume_shape + ".velocityScale", 2.0)
+    cmds.setAttr(volume_shape + ".useFrameExtension", True)
+    cmds.setAttr(volume_shape + ".frame", 12)
+
     # Curves. The circle is the one that matters: it is driven by construction
     # history, and reading control points the obvious way returns zeros for
     # exactly that case. It is also periodic, where Maya repeats control
@@ -674,6 +694,37 @@ def main():
     check("a curve transform is not recorded as an empty",
           "probeCurve" not in by_transform and "probeCircle" not in
           by_transform, sorted(by_transform))
+
+    print("\nvolumes")
+    by_volume = {
+        item.get("volume"): item for item in (payload.get("volumes") or [])
+    }
+    check("1 volume exported", payload["volume_count"] == 1,
+          payload["volume_count"])
+    volume = by_volume.get("smokeVolume") or {}
+    check("the VDB path is carried",
+          str(volume.get("file_path") or "").endswith("smoke.vdb"),
+          volume.get("file_path"))
+    check("the grid names are carried",
+          volume.get("grids") == "density temperature", volume.get("grids"))
+    check("frame extension and frame are carried",
+          volume.get("use_frame_extension") is True
+          and volume.get("frame") == 12,
+          (volume.get("use_frame_extension"), volume.get("frame")))
+    # Arnold render settings with no Blender equivalent, kept so the gap is
+    # visible rather than silently dropped.
+    check("Arnold's step size survives as reference",
+          abs(float(volume.get("step_size") or 0) - 0.25) < 1e-6,
+          volume.get("step_size"))
+    check("and the velocity scale",
+          abs(float(volume.get("velocity_scale") or 0) - 2.0) < 1e-6,
+          volume.get("velocity_scale"))
+    # A volume is neither a mesh nor a locator, so it must not be swept up by
+    # either of those discoveries.
+    check("a volume is not exported as a mesh",
+          "smokeVolume" not in by_mesh, sorted(by_mesh))
+    check("nor as an empty",
+          "smokeVolume" not in by_transform, sorted(by_transform))
 
     print("\nimage planes")
     shot_record = next(
