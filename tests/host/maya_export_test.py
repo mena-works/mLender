@@ -398,6 +398,14 @@ def build_scene():
     spark_tf, spark_shape = cmds.particle(name="sparkParticle")
     cmds.connectDynamic(spark_tf, emitters=emitter)
 
+    # A mesh that blinks. Measured: visibility keys do not survive the FBX at
+    # all, so before this the cube arrived visible for the whole range.
+    blink = cmds.polyCube(name="blinkCube")[0]
+    cmds.setAttr(blink + ".translateZ", -12)
+    cmds.setKeyframe(blink + ".visibility", t=1, v=1)
+    cmds.setKeyframe(blink + ".visibility", t=10, v=0)
+    cmds.setKeyframe(blink + ".visibility", t=20, v=1)
+
     # A mesh deformed by something other than its transform. Measured: this
     # arrives frozen through FBX, which is the whole reason the Alembic
     # cache exists, so the fixture has to be a real deformation and not a
@@ -713,7 +721,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("31 meshes exported", payload["mesh_count"] == 31,
+    check("32 meshes exported", payload["mesh_count"] == 32,
           payload["mesh_count"])
     # Four: the locator, the empty null, the nested locator, and the group
     # holding only a curve. That last one has no mesh below it either, so
@@ -1552,6 +1560,28 @@ def main():
         check("{0} is reported as supported".format(name),
               (by_material.get(name) or {}).get("supported") is True,
               (by_material.get(name) or {}).get("supported"))
+
+    print("\nanimated visibility")
+    blink_record = by_mesh.get("blinkCube") or {}
+    blink_samples = blink_record.get("visibility_samples") or []
+    check("a blinking mesh carries a sample per frame",
+          len(blink_samples) > 1, len(blink_samples))
+    if blink_samples:
+        states = {
+            int(item["frame"]): item.get("visible")
+            for item in blink_samples if item.get("frame") is not None
+        }
+        check("visible at the start", states.get(1) is True, states.get(1))
+        check("hidden where Maya hides it", states.get(10) is False,
+              states.get(10))
+        check("and visible again at the end", states.get(20) is True,
+              states.get(20))
+    # Sampling every mesh over the range would be slow and pointless, so a
+    # mesh with no visibility curve must carry nothing at all.
+    steady = by_mesh.get("stdSurfCube") or {}
+    check("a mesh that does not blink carries no samples",
+          "visibility_samples" not in steady,
+          len(steady.get("visibility_samples") or []))
 
     print("\nblend shaders")
     mix_record = by_material.get("mixCube_shd") or {}

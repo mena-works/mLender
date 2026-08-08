@@ -15,7 +15,7 @@ from .curves import import_curves
 from .empties import import_empties
 from .fbx import import_fbx, read_package_json, resolve_fbx_path
 from .alembic import cached_particle_names, import_alembic
-from .animation import apply_scene_range
+from .animation import animate_visibility, apply_scene_range
 from .colormanagement import apply_color_management
 from .lights import import_lights
 from .merge import (
@@ -160,6 +160,7 @@ def import_scene_package(
         mode == IMPORT_MODE_MERGE) else {}
     grouped_count = 0
     visibility_count = 0
+    visibility_animation_count = 0
     attribute_count = 0
 
     for obj in imported_meshes:
@@ -180,6 +181,10 @@ def import_scene_package(
             grouped_count += 1
         if apply_visibility(obj, mesh_record):
             visibility_count += 1
+        # After the static flags, so a mesh that blinks ends up keyed rather
+        # than pinned to whatever it was on the exported frame.
+        if animate_visibility(obj, mesh_record):
+            visibility_animation_count += 1
         assignments.append(
             assign_mesh_materials(obj, mesh_record, material_cache, warnings)
         )
@@ -308,6 +313,7 @@ def import_scene_package(
         )),
         "group_collection_count": len(group_cache),
         "visibility_count": visibility_count,
+        "visibility_animation_count": visibility_animation_count,
         "view_transform": view_transform,
         "grouped_mesh_count": grouped_count,
         "subdivision_count": subdivision_count,

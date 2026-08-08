@@ -113,7 +113,7 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("31 meshes imported", result["mesh_count"] == 31,
+    check("32 meshes imported", result["mesh_count"] == 32,
           result["mesh_count"])
     check("25 materials built", result["material_count"] == 25,
           result["material_count"])
@@ -1122,6 +1122,42 @@ def main():
         check("roughness came from the blinn's eccentricity",
               abs(value(native_blinn, "Roughness") - 0.45) < 1e-5,
               value(native_blinn, "Roughness"))
+
+    print("\nanimated visibility")
+    check("the import reported one animated visibility",
+          result["visibility_animation_count"] == 1,
+          result["visibility_animation_count"])
+    blink = bpy.data.objects.get("blinkCube")
+    check("the blinking mesh arrived", blink is not None)
+    if blink:
+        action = getattr(
+            getattr(blink, "animation_data", None), "action", None
+        )
+        paths = sorted(set(c.data_path for c in fcurves_of(action)))
+        # Both flags: hiding only the viewport would still render it.
+        check("both hide flags are keyed",
+              paths == ["hide_render", "hide_viewport"], paths)
+        check("and the keys step rather than ease",
+              all(p.interpolation == "CONSTANT"
+                  for c in fcurves_of(action) for p in c.keyframe_points),
+              sorted(set(p.interpolation for c in fcurves_of(action)
+                         for p in c.keyframe_points)))
+        scene = bpy.context.scene
+        original_frame = scene.frame_current
+        states = []
+        for frame in (1, 10, 20):
+            scene.frame_set(frame)
+            states.append((frame, blink.hide_render, blink.hide_viewport))
+        scene.frame_set(original_frame)
+        check("it blinks the way Maya did",
+              states == [(1, False, False), (10, True, True),
+                         (20, False, False)],
+              states)
+    steady = bpy.data.objects.get("stdSurfCube")
+    check("a mesh that does not blink stays unkeyed",
+          steady is not None
+          and getattr(steady, "animation_data", None) is None,
+          getattr(steady, "animation_data", None))
 
     print("\nblend shaders")
     mixed = material_for("mixCube")

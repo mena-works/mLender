@@ -47,6 +47,7 @@ from .mayautils import (
     user_attributes,
     without_namespace,
 )
+from .animation import is_animated
 from .bake import bake_channel
 from .shaders import blend_layers, shader_channels
 from .textures import texture_from_plug
@@ -219,6 +220,42 @@ def group_path(transform):
             continue
         groups.append(without_namespace(part))
     return groups
+
+
+def visibility_animated(transform):
+    """Whether this transform's visibility is driven by a curve.
+
+    Only the animated ones are sampled. Visibility is one getAttr per frame,
+    which is cheap for a handful of objects and not cheap for a scene of
+    hundreds across a long range, and almost nothing in a scene blinks.
+    """
+    if not transform:
+        return False
+    # A dict of semantic name to candidate attributes, so the values are what
+    # Maya knows; iterating it directly asks about "visible", which no node
+    # has, and every mesh then looked unanimated.
+    for attrs in TRANSFORM_VISIBILITY_ATTRS.values():
+        for attr in attrs:
+            if attr_exists(transform, attr) and is_animated(
+                transform + "." + attr
+            ):
+                return True
+    return False
+
+
+def visibility_sample(transform):
+    """Whether the transform is visible at the current frame."""
+    visible = True
+    for attrs in TRANSFORM_VISIBILITY_ATTRS.values():
+        for attr in attrs:
+            if not attr_exists(transform, attr):
+                continue
+            try:
+                if not bool(cmds.getAttr(transform + "." + attr)):
+                    visible = False
+            except Exception:
+                continue
+    return {"visible": visible}
 
 
 def visibility_info(mesh_shape, transform):

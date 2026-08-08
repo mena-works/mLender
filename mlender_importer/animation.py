@@ -99,6 +99,54 @@ def animate_object(obj, record, position_scale, apply_sample=None):
     return keyed
 
 
+def animate_visibility(obj, record):
+    """Key an object's visibility from the exported per frame samples.
+
+    Both hide flags, because Maya's visibility means gone from the render as
+    well as from the viewport; hiding only the viewport would still render it.
+
+    The keys are CONSTANT, not linear. These are booleans stored as float
+    curves, so easing between them would make an object half hidden for
+    several frames and pop at whatever value rounds first.
+    """
+    samples = record.get("visibility_samples") or []
+    if len(samples) < 2 or obj is None:
+        return False
+
+    keyed = 0
+    for sample in samples:
+        frame = sample.get("frame")
+        if frame is None:
+            continue
+        hidden = sample.get("visible") is False
+        for path in ("hide_viewport", "hide_render"):
+            try:
+                setattr(obj, path, hidden)
+                obj.keyframe_insert(path, frame=frame)
+            except Exception:
+                continue
+        keyed += 1
+
+    if keyed < 2:
+        return False
+    set_constant_interpolation(obj, ("hide_viewport", "hide_render"))
+    return True
+
+
+def set_constant_interpolation(holder, paths):
+    """Step, not ease, for the curves driving the given properties."""
+    action = getattr(getattr(holder, "animation_data", None), "action", None)
+    wanted = set(paths)
+    for curve in action_fcurves(action):
+        if curve.data_path not in wanted:
+            continue
+        for point in curve.keyframe_points:
+            try:
+                point.interpolation = "CONSTANT"
+            except Exception:
+                return
+
+
 def key_data_value(data, path, value, frame):
     """Set one data property and key it, ignoring properties this build lacks."""
     if data is None or not hasattr(data, path):

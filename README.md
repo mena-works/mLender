@@ -1023,6 +1023,21 @@ numbers are **local**, so they pair with the world matrix rather than
 replacing it — applying the transform twice is exactly what the test guards
 against.
 
+### Animated visibility
+
+A mesh whose `visibility` is keyed in Maya arrives keyed in Blender, on both
+`hide_viewport` and `hide_render` — hiding only the viewport would still put
+it in the render. The keys are **stepped**, not eased: these are booleans held
+in float curves, and easing would leave an object half hidden for several
+frames.
+
+Visibility does not survive the FBX at all, so before this a mesh that blinked
+in Maya arrived visible for the whole range, with no warning.
+
+Only meshes whose visibility is actually driven by a curve are sampled. Reading
+it for every mesh on every frame costs real time on a large scene over a long
+range, and almost nothing in a scene blinks.
+
 #### Baking a simulation
 
 With **Export Animation** on, the positions are sampled across the frame range

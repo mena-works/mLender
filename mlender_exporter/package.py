@@ -67,6 +67,8 @@ from .meshes import (
     mesh_transforms,
     scene_mesh_shapes,
     selected_light_count,
+    visibility_animated,
+    visibility_sample,
 )
 
 
@@ -211,8 +213,23 @@ def export_scene(
             + [
                 (record, _sampler(particle_sample, shape))
                 for record, shape in zip(particle_list, particle_shapes)
+            ]
+            # Only the meshes that actually blink. Visibility is a getAttr per
+            # frame, cheap for a few objects and not for a whole scene over a
+            # long range, and almost nothing in a scene is keyed this way.
+            + [
+                (record, _sampler(visibility_sample, record["mesh_path"]))
+                for record in mesh_records
+                if visibility_animated(record.get("mesh_path"))
             ],
         )
+        # Renamed off the shared key: for a light this is a lighting sample
+        # and for a particle object a set of positions, and a mesh carrying
+        # something different under the same name invites a wrong reader.
+        for record in mesh_records:
+            samples = record.pop("samples", None)
+            if samples:
+                record["visibility_samples"] = samples
         # Particles are the one sampled thing that can refuse the bake, so
         # the samples are judged before they are written out.
         baked_particles = resolve_samples(particle_list)
