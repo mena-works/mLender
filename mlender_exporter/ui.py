@@ -87,8 +87,15 @@ def show_ui():
         columnWidth2=(120, 120),
     )
     collect_field = cmds.checkBoxGrp(
-        label="Collect Textures",
-        label1="Copy referenced textures into the package folder",
+        label="Collect Files",
+        label1="Copy referenced textures, volumes and standins into the "
+               "package folder",
+        value1=False,
+        columnWidth2=(120, 400),
+    )
+    archive_field = cmds.checkBoxGrp(
+        label="Archive Package",
+        label1="Also write a single .zip beside the package, to hand over",
         value1=False,
         columnWidth2=(120, 400),
     )
@@ -138,6 +145,7 @@ def show_ui():
             animation_field,
             frame_range_field,
             collect_field,
+            archive_field,
             selection_field,
             alembic_field,
         ),
@@ -181,6 +189,7 @@ def export_from_ui(
     animation_field=None,
     frame_range_field=None,
     collect_field=None,
+    archive_field=None,
     selection_field=None,
     alembic_field=None,
 ):
@@ -225,6 +234,9 @@ def export_from_ui(
     collect = False
     if collect_field is not None:
         collect = bool(cmds.checkBoxGrp(collect_field, query=True, value1=True))
+    archive = False
+    if archive_field is not None:
+        archive = bool(cmds.checkBoxGrp(archive_field, query=True, value1=True))
 
     selected_only = False
     if selection_field is not None:
@@ -239,6 +251,7 @@ def export_from_ui(
             bake_procedurals=bake,
             bake_resolution=bake_resolution,
             collect_textures_into_package=collect,
+            archive_package=archive,
             export_animation=export_animation,
             frame_start=frame_start,
             frame_end=frame_end,
@@ -274,8 +287,9 @@ def export_from_ui(
         title="mLender Export Complete",
         message=(
             "Meshes: {0}\nLights: {1}\nCameras: {2}\n"
-            "Baked textures: {3}\nCollected textures: {8}\nFrames: {7}\n"
-            "\nPackage:\n{4}\n\nFBX:\n{5}{6}"
+            "Baked textures: {3}\n"
+            "Collected: {8} texture(s), {9} file(s)\nFrames: {7}\n"
+            "\nPackage:\n{4}{10}\n\nFBX:\n{5}{6}"
         ).format(
             result["mesh_count"],
             result["light_count"],
@@ -286,6 +300,9 @@ def export_from_ui(
             _warning_summary(result.get("warnings")),
             result.get("frame_count", 1),
             result.get("collected_texture_count", 0),
+            result.get("collected_file_count", 0),
+            ("\n\nArchive:\n" + result["archive_path"])
+            if result.get("archive_path") else "",
         ),
         button=["OK"],
         icon="information",

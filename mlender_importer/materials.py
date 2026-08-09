@@ -34,6 +34,12 @@ from .constants import (
     OPENPBR_SPECULAR_SEMANTIC,
     SHEEN_ROUGHNESS_REMAP,
     GLASS_INPUTS,
+    LAYERED_ALPHA_CHANNEL,
+    LAYERED_BLEND_TYPES,
+    LAYERED_BOTTOM_COLOUR,
+    LAYERED_NODE_NAME,
+    LAYERED_REPLACE_MODE,
+    MAYA_LAYER_TEXTURE_MODE,
     PRINCIPLED_INPUTS,
     PROJECTION_DEFAULT_EXTENSION,
     PROJECTION_EXTENSIONS,
@@ -52,6 +58,7 @@ from .constants import (
     TEXTURE_EXTENSION_REPEAT,
     TRANSMISSION_THRESHOLD,
     UNLIT_SHADER_TYPES,
+    UV_MAP_NODE_NAME,
 )
 from .corrections import apply_corrections
 from .transforms import maya_matrix_to_blender
@@ -151,6 +158,12 @@ def build_layer_chain(material, layers, warnings):
         if top is None:
             top = upper
             continue
+        if layer.get("compositing"):
+            # Maya's own layeredShader, which composites its own way.
+            top = _maya_layer_composite(
+                material, top, upper, layer, index, warnings
+            )
+            continue
         mix = nodes.new("ShaderNodeMixShader")
         mix.name = "ML_Layer_Mix_{0}".format(index)
         mix.label = "Maya Layer {0}".format(index)
@@ -165,6 +178,79 @@ def build_layer_chain(material, layers, warnings):
         )
         top = mix
     return top
+
+
+def _maya_layer_composite(material, below, upper, layer, index, warnings):
+    """One step of a Maya layeredShader stack, in whichever mode it is set to.
+
+    Both modes were measured by baking an unlit green over an unlit red:
+    layer_texture fades between them, layer_shaders adds the upper layer to a
+    scaled copy of what is under it and leaves the upper one at full
+    strength. Neither number is inverted on the way; the wiring is what
+    differs.
+    """
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+    record = _maya_layer_transparency(material, layer, warnings)
+
+    if layer.get("compositing") == MAYA_LAYER_TEXTURE_MODE:
+        mix = nodes.new("ShaderNodeMixShader")
+        mix.name = "ML_MayaLayer_Mix_{0}".format(index)
+        mix.label = "Maya layer texture"
+        mix.location = (300 + index * 200, 0)
+        # Upper first: transparency 0 means the upper layer wins, which is a
+        # factor of 0, so the number reads straight off Maya.
+        links.new(upper.outputs[0], mix.inputs[1])
+        links.new(below.outputs[0], mix.inputs[2])
+        apply_record_to_socket(
+            material, mix, mix.inputs[0], "mix", record, warnings
+        )
+        return mix
+
+    scale = nodes.new("ShaderNodeMixShader")
+    scale.name = "ML_MayaLayer_Below_{0}".format(index)
+    scale.label = "Maya layer transparency"
+    scale.location = (300 + index * 200, -160)
+    transparent = nodes.new("ShaderNodeBsdfTransparent")
+    transparent.location = (120 + index * 200, -240)
+    links.new(transparent.outputs[0], scale.inputs[1])
+    links.new(below.outputs[0], scale.inputs[2])
+    apply_record_to_socket(
+        material, scale, scale.inputs[0], "mix", record, warnings
+    )
+
+    add = nodes.new("ShaderNodeAddShader")
+    add.name = "ML_MayaLayer_Add_{0}".format(index)
+    add.label = "Maya layer shaders"
+    add.location = (460 + index * 200, 0)
+    links.new(upper.outputs[0], add.inputs[0])
+    links.new(scale.outputs[0], add.inputs[1])
+    return add
+
+
+def _maya_layer_transparency(material, layer, warnings):
+    """A layeredShader layer's transparency as something a factor can take.
+
+    Maya's is a colour and a Mix factor is one number. A tinted transparency
+    is a real thing there and cannot be one factor here, so the components
+    are averaged and the approximation is reported rather than hidden.
+    """
+    record = dict(layer.get("transparency") or {"value": 0.0})
+    value = record.get("value")
+    if isinstance(value, (list, tuple)) and value:
+        components = [float(item) for item in value]
+        if max(components) - min(components) > 1e-4:
+            warnings.append(
+                'Maya layer "{0}" has a tinted transparency {1}, which one '
+                "mix factor cannot carry; its average was used in material "
+                '"{2}".'.format(
+                    layer.get("shader") or "?",
+                    [round(item, 4) for item in components],
+                    material.name,
+                )
+            )
+        record["value"] = sum(components) / float(len(components))
+    return record
 
 
 def _layer_shader_node(material, layer_record, warnings):
@@ -717,7 +803,7 @@ def _build_unlit(material, channels, warnings):
             image_node = nodes.new("ShaderNodeTexImage")
             image_node.name = "ML_Unlit_Color"
             image_node.image = image
-            _apply_placement(material, image_node, emission_texture)
+            _apply_placement(material, image_node, emission_texture, warnings)
             links.new(
                 apply_corrections(
                     material,
@@ -748,7 +834,7 @@ def _build_unlit(material, channels, warnings):
             image_node = nodes.new("ShaderNodeTexImage")
             image_node.name = "ML_Unlit_Opacity"
             image_node.image = image
-            _apply_placement(material, image_node, opacity_texture)
+            _apply_placement(material, image_node, opacity_texture, warnings)
             rgb_to_bw = nodes.new("ShaderNodeRGBToBW")
             links.new(
                 apply_corrections(
@@ -1199,6 +1285,81 @@ def _matrix_scale(record):
     return tuple(lengths)
 
 
+def build_layered_texture(material, shader, texture, channel, warnings):
+    """A Maya layeredTexture as a stack of Mix nodes, and its output socket.
+
+    Maya lists the top layer first and composites downwards, so the stack is
+    built from the other end: each layer mixes over everything already under
+    it, with its own alpha on the factor.
+
+    One Mix node per layer including the bottom one, which is not waste. The
+    bottom layer composites against black in Maya -- measured, a 0.8 layer at
+    alpha 0.5 bakes to 0.4 -- so its alpha has to multiply it, and a node that
+    mixes it up from black is exactly that.
+    """
+    layers = ((texture.get("layered") or {}).get("layers")) or []
+    if not layers:
+        return None
+
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+    output = None
+    for position, layer in enumerate(reversed(layers)):
+        mode = str(layer.get("blend_mode") or "over").lower()
+        blend = LAYERED_BLEND_TYPES.get(mode)
+        if output is not None and blend is None and mode != LAYERED_REPLACE_MODE:
+            warnings.append(
+                'Maya layer blend mode "{0}" on "{1}" has no Blender '
+                "equivalent; that layer was left out of material "
+                '"{2}".'.format(
+                    mode, (texture.get("layered") or {}).get("node") or "?",
+                    material.name,
+                )
+            )
+            continue
+
+        mix = nodes.new("ShaderNodeMixRGB")
+        mix.name = "{0}_{1}".format(LAYERED_NODE_NAME, position)
+        mix.label = "Maya layer: {0}".format(mode)
+        mix.location = (-1000 + position * 220, 320)
+
+        if output is None:
+            # Nothing under it: the layer comes up from black, so its alpha
+            # multiplies it rather than mixing it with anything.
+            mix.blend_type = "MIX"
+            mix.inputs[1].default_value = LAYERED_BOTTOM_COLOUR
+            _layer_alpha(material, shader, layer, mix.inputs[0], warnings)
+        elif mode == LAYERED_REPLACE_MODE:
+            mix.blend_type = "MIX"
+            mix.inputs[0].default_value = 1.0
+            links.new(output, mix.inputs[1])
+        else:
+            mix.blend_type = blend
+            links.new(output, mix.inputs[1])
+            _layer_alpha(material, shader, layer, mix.inputs[0], warnings)
+
+        # The layer's own colour goes through the ordinary channel wiring, so
+        # a layer holding a file with its placement, a projection or a
+        # gradient needs nothing repeated here.
+        apply_record_to_socket(
+            material, shader, mix.inputs[2], channel,
+            layer.get("color") or {}, warnings,
+        )
+        output = mix.outputs[0]
+    return output
+
+
+def _layer_alpha(material, shader, layer, target, warnings):
+    """Drive a Mix factor from a layer's alpha, texture or flat value."""
+    record = layer.get("alpha")
+    if not record:
+        target.default_value = 1.0
+        return
+    apply_record_to_socket(
+        material, shader, target, LAYERED_ALPHA_CHANNEL, record, warnings
+    )
+
+
 def build_texture_ramp(material, texture, warnings):
     """A Maya ramp *texture* as a Color Ramp driven by a UV coordinate.
 
@@ -1370,6 +1531,27 @@ def apply_record_to_socket(material, shader, target, channel, record, warnings):
             material.node_tree.links.new(projected, target)
             return
 
+    # A layered texture has no path of its own, and the layers under it do:
+    # measured, the upstream walk used to hand over the bottom layer's file
+    # as if it were the whole channel. This has to come before the path check
+    # for the same reason the projection does.
+    if texture.get("layered"):
+        stack = build_layered_texture(
+            material, shader, texture, channel, warnings
+        )
+        if stack is not None:
+            if record.get("invert"):
+                # Maya transparency reaches opacity through here as well, and
+                # the stack has to be inverted whole rather than layer by
+                # layer: inverting each one is a different picture.
+                invert_node = material.node_tree.nodes.new("ShaderNodeInvert")
+                material.node_tree.links.new(
+                    stack, invert_node.inputs.get("Color")
+                )
+                stack = invert_node.outputs.get("Color")
+            material.node_tree.links.new(stack, target)
+            return
+
     # A ramp texture has no file to load, so this has to come before the path
     # check or the gradient is skipped and the flat value wins.
     if texture.get("ramp") and not texture.get("path"):
@@ -1429,7 +1611,7 @@ def connect_image_channel(material, bsdf, target, channel, image, invert,
     image_node.name = "ML_{0}_Texture".format(channel)
     image_node.label = channel.replace("_", " ").title()
     image_node.image = image
-    _apply_placement(material, image_node, texture_record)
+    _apply_placement(material, image_node, texture_record, warnings)
 
     # The Maya correction nodes the exporter walked past go back in here, so
     # every channel sees the corrected colour rather than the raw file.
@@ -1498,30 +1680,32 @@ def _connect_normal(material, source, target, texture_record):
     links.new(normal_map.outputs.get("Normal"), target)
 
 
-def _apply_placement(material, image_node, texture_record):
+def _apply_placement(material, image_node, texture_record, warnings=None):
     """Rebuild a place2dTexture as a Mapping node in front of the image.
 
     Without this a texture tiled four times in Maya arrives tiled once, which
     is a silent and very visible difference.
+
+    The UV source goes in here too, because the two share one Vector input:
+    whatever reads the coordinates has to sit behind the placement, not
+    replace it.
     """
     placement = (texture_record or {}).get("placement") or {}
     _apply_extension(image_node, placement)
-    if not placement:
+    uv_source = _uv_set_source(material, texture_record, warnings)
+
+    if not placement or _placement_is_identity(placement):
+        # Nothing to express; leave the tree uncluttered.
+        if uv_source is not None:
+            material.node_tree.links.new(
+                uv_source, image_node.inputs.get("Vector")
+            )
         return
 
     repeat_u = scalar(placement.get("repeat_u"), 1.0)
     repeat_v = scalar(placement.get("repeat_v"), 1.0)
     offset = placement.get("offset") or [0.0, 0.0]
     rotation = scalar(placement.get("rotate_uv_degrees"), 0.0)
-    if (
-        abs(repeat_u - 1.0) < 1e-6
-        and abs(repeat_v - 1.0) < 1e-6
-        and abs(scalar(offset[0] if offset else 0.0, 0.0)) < 1e-6
-        and abs(scalar(offset[1] if len(offset) > 1 else 0.0, 0.0)) < 1e-6
-        and abs(rotation) < 1e-6
-    ):
-        # Nothing to express; leave the tree uncluttered.
-        return
 
     nodes = material.node_tree.nodes
     links = material.node_tree.links
@@ -1529,8 +1713,10 @@ def _apply_placement(material, image_node, texture_record):
     mapping.name = "ML_Placement"
     mapping.label = "Maya Placement"
     mapping.vector_type = "POINT"
-    coord = nodes.new("ShaderNodeTexCoord")
-    coord.name = "ML_Placement_Coord"
+    if uv_source is None:
+        coord = nodes.new("ShaderNodeTexCoord")
+        coord.name = "ML_Placement_Coord"
+        uv_source = coord.outputs.get("UV")
 
     mapping.inputs["Scale"].default_value = (repeat_u, repeat_v, 1.0)
     mapping.inputs["Location"].default_value = (
@@ -1541,8 +1727,110 @@ def _apply_placement(material, image_node, texture_record):
     # rotateUV is exported in degrees, which is the unit getAttr reports.
     mapping.inputs["Rotation"].default_value = (0.0, 0.0, math.radians(rotation))
 
-    links.new(coord.outputs.get("UV"), mapping.inputs.get("Vector"))
+    links.new(uv_source, mapping.inputs.get("Vector"))
     links.new(mapping.outputs.get("Vector"), image_node.inputs.get("Vector"))
+
+
+def verify_uv_sets(objects, warnings):
+    """Report a UV set a material asks for that its mesh does not carry.
+
+    The UV Map node stores a name resolving to nothing without complaint --
+    measured on 4.1 and 5.2 -- and renders the default set instead. A set lost
+    on the way through the FBX would otherwise look exactly like a texture
+    that is merely mapped wrong, which is the hardest kind of wrong to trace.
+
+    Grouped per material and set rather than per object: a scene where four
+    hundred meshes share the fault should say so once.
+    """
+    requested = {}
+    reported = set()
+    for obj in objects:
+        layers = getattr(getattr(obj, "data", None), "uv_layers", None)
+        if layers is None:
+            continue
+        names = set(layer.name for layer in layers)
+        for slot in getattr(obj, "material_slots", []):
+            material = slot.material
+            if material is None or not material.get("ml_generated"):
+                continue
+            if material.name not in requested:
+                requested[material.name] = _requested_uv_sets(material)
+            for wanted in requested[material.name]:
+                key = (material.name, wanted)
+                if wanted in names or key in reported:
+                    continue
+                reported.add(key)
+                warnings.append(
+                    'Material "{0}" reads UV set "{1}", which mesh "{2}" does '
+                    "not carry; Blender renders its active UV layer "
+                    "instead.".format(material.name, wanted, obj.name)
+                )
+    return warnings
+
+
+def _requested_uv_sets(material):
+    """UV set names the ML_ UV Map nodes of a material ask for."""
+    tree = getattr(material, "node_tree", None)
+    if tree is None:
+        return ()
+    found = []
+    for node in tree.nodes:
+        # A second node in the same tree is suffixed by Blender, so the
+        # prefix is what identifies it rather than the whole name.
+        if not node.name.startswith(UV_MAP_NODE_NAME):
+            continue
+        name = getattr(node, "uv_map", "")
+        if name and name not in found:
+            found.append(name)
+    return tuple(found)
+
+
+def _placement_is_identity(placement):
+    """True when a placement asks for nothing the default UVs do not do."""
+    offset = placement.get("offset") or [0.0, 0.0]
+    return (
+        abs(scalar(placement.get("repeat_u"), 1.0) - 1.0) < 1e-6
+        and abs(scalar(placement.get("repeat_v"), 1.0) - 1.0) < 1e-6
+        and abs(scalar(offset[0] if offset else 0.0, 0.0)) < 1e-6
+        and abs(scalar(offset[1] if len(offset) > 1 else 0.0, 0.0)) < 1e-6
+        and abs(scalar(placement.get("rotate_uv_degrees"), 0.0)) < 1e-6
+    )
+
+
+def _uv_set_source(material, texture_record, warnings=None):
+    """A UV Map node for a texture bound to a non-default UV set, or None.
+
+    The exporter only records a set that differs from the mesh's first one,
+    so a record here always means a node is wanted: without it the image
+    reads the active layer, which is a different set with the same geometry
+    and therefore wrong in a way that looks plausible.
+    """
+    uv_set = (texture_record or {}).get("uv_set") or {}
+    name = uv_set.get("name")
+    if not name or not isinstance(name, str):
+        return None
+
+    conflict = uv_set.get("conflict") or []
+    if conflict and warnings is not None:
+        # One material carries one UV source, so this cannot be honoured on
+        # both meshes; saying which set was picked beats a silent choice.
+        warnings.append(
+            'Texture "{0}" reads different UV sets on different meshes '
+            "({1}); "
+            'used "{2}" for material "{3}".'.format(
+                texture_record.get("node") or "?",
+                ", ".join(str(entry) for entry in conflict),
+                name,
+                material.name,
+            )
+        )
+
+    node = material.node_tree.nodes.new("ShaderNodeUVMap")
+    node.name = UV_MAP_NODE_NAME
+    node.label = "Maya UV set"
+    node.uv_map = name
+    node.location = (-1100, -300)
+    return node.outputs.get("UV")
 
 
 def _apply_extension(image_node, placement):

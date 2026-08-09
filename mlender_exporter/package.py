@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import zipfile
 
 import maya.cmds as cmds
 
@@ -38,6 +39,7 @@ from .alembic import (
 )
 from .instancers import instancer_records, scene_instancers
 from .coverage import coverage_warnings
+from .standins import scene_standin_shapes, standin_records
 from .volumes import scene_volume_shapes, volume_records
 from .sets import (
     display_layer_records,
@@ -46,7 +48,7 @@ from .sets import (
     selection_set_records,
 )
 from .transforms import scene_transforms, transform_records
-from .collect import collect_textures
+from .collect import collect_package_files
 from .fbx import export_fbx
 from .lights import (
     light_record,
@@ -91,6 +93,7 @@ def export_scene(
     frame_end=None,
     frame_step=None,
     export_alembic_cache=False,
+    archive_package=False,
 ):
     """Write a numbered package folder holding the FBX and the scene JSON.
 
@@ -109,6 +112,9 @@ def export_scene(
     alembic_path = os.path.join(
         package_folder, package_name + ALEMBIC_FILE_SUFFIX
     )
+    # Named before the try, so the cleanup can remove it whether or not the
+    # export got as far as writing one.
+    archive_path = ""
 
     warnings = []
     bake_context = BakeContext(
@@ -153,6 +159,9 @@ def export_scene(
         transform_list = transform_records(scene_transforms(selected_only))
         curve_list = curve_records(scene_curve_shapes(selected_only))
         volume_list = volume_records(scene_volume_shapes(selected_only))
+        standin_list = standin_records(
+            scene_standin_shapes(selected_only)
+        )
         particle_shapes = scene_particle_shapes(selected_only)
         particle_list = particle_records(particle_shapes)
         instancer_list = instancer_records(
@@ -171,6 +180,9 @@ def export_scene(
             record["volume_path"] for record in volume_list
         )
         exported_paths.update(
+            record["standin_path"] for record in standin_list
+        )
+        exported_paths.update(
             record["particle_path"] for record in particle_list
         )
         set_list = selection_set_records(
@@ -184,6 +196,9 @@ def export_scene(
         disambiguate_names(mesh_records, "mesh", "mesh_full_name")
         disambiguate_names(curve_list, "curve", "curve_full_name")
         disambiguate_names(volume_list, "volume", "volume_full_name")
+        disambiguate_names(
+            standin_list, "standin", "standin_full_name"
+        )
         disambiguate_names(
             particle_list, "particle", "particle_full_name"
         )
@@ -317,6 +332,8 @@ def export_scene(
             "curves": curve_list,
             "volume_count": len(volume_list),
             "volumes": volume_list,
+            "standin_count": len(standin_list),
+            "standins": standin_list,
             "particle_count": len(particle_list),
             "particle_baked_count": baked_particles,
             "instancer_count": len(instancer_list),
@@ -339,17 +356,27 @@ def export_scene(
             "animation": animation,
             "color_management": color_management_info(),
         }
-        collected = {"collected": 0, "missing": 0, "folder": ""}
+        collected = {"collected": 0, "missing": 0, "textures": 0,
+                     "files": 0, "folder": ""}
         if collect_textures_into_package:
-            # After the payload is complete, so every texture record exists
-            # and can be repointed at its copy in one pass.
-            collected = collect_textures(payload, package_folder, warnings)
+            # After the payload is complete, so every record that names a
+            # file exists and can be repointed at its copy in one pass.
+            collected = collect_package_files(
+                payload, package_folder, warnings
+            )
             payload["collected_textures"] = collected
         write_json(json_path, payload)
+        if archive_package:
+            # One file to hand over. Written beside the folder rather than
+            # instead of it: LiveLink and the importer both read the folder,
+            # and an export that only produced an archive would break the
+            # thing the tool does most.
+            archive_path = archive_folder(package_folder)
     except Exception:
         remove_file(fbx_path)
         remove_file(json_path)
         remove_file(alembic_path)
+        remove_file(archive_path)
         try:
             # rmtree rather than rmdir: baking may already have written
             # textures into the package, and a half written package must
@@ -370,7 +397,9 @@ def export_scene(
         "camera_count": len(camera_records),
         "baked_texture_count": len(bake_context.baked_files),
         "frame_count": animation["frame_count"],
-        "collected_texture_count": collected["collected"],
+        "collected_texture_count": collected.get("textures", 0),
+        "collected_file_count": collected.get("files", 0),
+        "archive_path": archive_path,
         "animated": animation["enabled"],
         "warnings": warnings,
     }
@@ -535,6 +564,33 @@ def normalize_folder(path):
     if not path:
         raise ValueError("Choose an export location.")
     return os.path.abspath(os.path.expanduser(path))
+
+
+def archive_folder(package_folder):
+    """Zip a finished package into one file beside it, and return its path.
+
+    For handing a package to somebody else. It pairs with collecting: an
+    archive of a package that still points at the exporting machine's texture
+    library is a zip of some paths, so the two are offered together in the UI
+    and this says so rather than assuming the user knew.
+
+    ``zipfile`` is standard library on every Maya this supports, so this adds
+    no dependency.
+    """
+    archive_path = package_folder + ".zip"
+    remove_file(archive_path)
+    name = os.path.basename(package_folder)
+    with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for folder, folders, files in os.walk(package_folder):
+            folders.sort()
+            for item in sorted(files):
+                full = os.path.join(folder, item)
+                relative = os.path.relpath(full, package_folder)
+                # The package folder is kept as the archive's top level, so
+                # unzipping produces the folder the importer expects rather
+                # than spilling a package into the user's downloads.
+                archive.write(full, os.path.join(name, relative))
+    return maya_path(archive_path)
 
 
 def write_json(path, data):

@@ -113,9 +113,9 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("44 meshes imported", result["mesh_count"] == 44,
+    check("48 meshes imported", result["mesh_count"] == 48,
           result["mesh_count"])
-    check("36 materials built", result["material_count"] == 36,
+    check("40 materials built", result["material_count"] == 40,
           result["material_count"])
     # Four of the eight cubes asked for subdivision in Maya, the displaced one
     # among them; the rest must arrive unmodified.
@@ -1340,6 +1340,98 @@ def main():
                   abs(mix_nodes[0].inputs[0].default_value - 0.4) < 1e-5,
                   mix_nodes[0].inputs[0].default_value)
 
+    print("\npackage paths")
+    # This package sits where it was written and its sources are all still
+    # there, so nothing should be repointed. The repointing itself is
+    # exercised in tests/check_contracts.py, which can delete a source; the
+    # assertion that earns its place here is that a package which needs no
+    # help is not quietly rewritten.
+    check("an in-place package is left exactly as written",
+          result.get("repointed_paths") == 0, result.get("repointed_paths"))
+
+    print("\nstandins")
+    check("3 standins built", result.get("standin_count") == 3,
+          result.get("standin_count"))
+    # Two of the three name a file Blender can read; the .ass cannot be read
+    # by anything here and must not be counted as loaded.
+    check("two of them loaded, the .ass did not",
+          result.get("standin_loaded") == 2, result.get("standin_loaded"))
+
+    anchor = object_named("standinCube")
+    check("the Alembic standin has an anchor", anchor is not None)
+    if anchor:
+        check("which is an empty carrying the source path",
+              anchor.type == "EMPTY"
+              and str(anchor.get("ml_source_file") or "").endswith(".abc"),
+              (anchor.type, anchor.get("ml_source_file")))
+        # Maya had it 7 units out in a centimetre scene.
+        check("placed where Maya had it",
+              abs(anchor.matrix_world.translation.x - 0.07) < 1e-4,
+              round(anchor.matrix_world.translation.x, 5))
+        children = [obj for obj in bpy.data.objects if obj.parent is anchor]
+        check("and the cache actually arrived under it",
+              any(child.type == "MESH" for child in children),
+              [(c.name, c.type) for c in children])
+        for child in children:
+            if child.type != "MESH":
+                continue
+            # The source cube is 4 Maya units across in a centimetre scene,
+            # and the file carries no units of its own, so the scale has to
+            # come from the package: 4 cm is 0.04 m.
+            check("scaled by the scene unit, not left in Maya units",
+                  abs(max(child.dimensions) - 0.04) < 1e-3,
+                  [round(v, 4) for v in child.dimensions])
+            break
+
+    lost = object_named("standinMissing")
+    check("the unreadable standin still stands somewhere", lost is not None)
+    if lost:
+        check("as a lone box with nothing under it",
+              lost.type == "EMPTY"
+              and lost.empty_display_type == "CUBE"
+              and not [obj for obj in bpy.data.objects if obj.parent is lost],
+              (lost.type, lost.empty_display_type))
+    check("and its file was named in a warning, not swallowed",
+          any(".ass" in item for item in result["warnings"]),
+          [w for w in result["warnings"] if "standin" in w.lower()])
+
+    print("\nMaya layeredShader")
+    # Layer Shaders, Maya's default mode: the upper layer is added to a copy
+    # of what is under it scaled by the transparency, so the upper one is not
+    # faded out. Measured; a plain Mix Shader here would be the other mode.
+    shaders_mode = material_for("mayaLayerCube")
+    check("the layered shader material exists", shaders_mode is not None)
+    if shaders_mode:
+        kinds = [n.bl_idname for n in shaders_mode.node_tree.nodes]
+        check("Layer Shaders mode adds rather than fades",
+              "ShaderNodeAddShader" in kinds, sorted(set(kinds)))
+        check("with the lower layer scaled against a Transparent BSDF",
+              "ShaderNodeBsdfTransparent" in kinds
+              and kinds.count("ShaderNodeMixShader") == 1,
+              sorted(set(kinds)))
+        scale = next((n for n in shaders_mode.node_tree.nodes
+                      if n.bl_idname == "ShaderNodeMixShader"), None)
+        if scale:
+            check("and the transparency used uninverted as its factor",
+                  abs(scale.inputs[0].default_value - 0.4) < 1e-5,
+                  scale.inputs[0].default_value)
+
+    texture_mode = material_for("mayaLayerTexCube")
+    check("the layer-texture material exists", texture_mode is not None)
+    if texture_mode:
+        kinds = [n.bl_idname for n in texture_mode.node_tree.nodes]
+        # The other mode is a plain fade, so nothing is added anywhere.
+        check("Layer Texture mode fades rather than adds",
+              "ShaderNodeAddShader" not in kinds
+              and kinds.count("ShaderNodeMixShader") == 1,
+              sorted(set(kinds)))
+        fade = next((n for n in texture_mode.node_tree.nodes
+                     if n.bl_idname == "ShaderNodeMixShader"), None)
+        if fade:
+            check("its factor is the transparency, read straight",
+                  abs(fade.inputs[0].default_value - 0.25) < 1e-5,
+                  fade.inputs[0].default_value)
+
     print("\nphong and phongE")
     # Both were unsupported until measured, so their materials arrived from
     # the fallback path with a pinned roughness and an "unsupported" warning.
@@ -1511,6 +1603,49 @@ def main():
               abs(value(tiled, "Subsurface Scale") - 2.5) < 1e-5,
               value(tiled, "Subsurface Scale"))
         check("anisotropy 0.35", abs(value(tiled, "Anisotropic") - 0.35) < 1e-5)
+
+    print("\nuv sets")
+    uv_material = material_for("uvLinkCube")
+    check("the uv set material exists", uv_material is not None)
+    if uv_material:
+        uv_nodes = [n for n in uv_material.node_tree.nodes
+                    if n.bl_idname == "ShaderNodeUVMap"]
+        # Exactly one: the other texture on this material rides the default
+        # set, and a build that put a node in front of every texture would
+        # pass a test that only counted "at least one".
+        check("one UV Map node, for the one non-default texture",
+              len(uv_nodes) == 1, [n.uv_map for n in uv_nodes])
+        if uv_nodes:
+            check("naming the Maya UV set",
+                  uv_nodes[0].uv_map == "secondUV", uv_nodes[0].uv_map)
+            targets = [link.to_node.bl_idname
+                       for link in uv_nodes[0].outputs["UV"].links]
+            check("and actually feeding an image, not left dangling",
+                  "ShaderNodeTexImage" in targets, targets)
+
+        obj = object_named("uvLinkCube")
+        if obj is not None:
+            layers = [layer.name for layer in obj.data.uv_layers]
+            # The name only works because the FBX keeps it. If this fails the
+            # UV Map node is pointing at nothing and Blender silently renders
+            # the default set instead.
+            check("both Maya UV sets survived the FBX, in order",
+                  layers[:2] == ["map1", "secondUV"], layers)
+
+        default_image = next(
+            (n for n in uv_material.node_tree.nodes
+             if n.bl_idname == "ShaderNodeTexImage"
+             and "base_color" in n.name), None)
+        check("the default-set texture exists", default_image is not None)
+        if default_image:
+            check("and reads the active layer, with no node in front",
+                  not default_image.inputs["Vector"].links,
+                  [l.from_node.bl_idname
+                   for l in default_image.inputs["Vector"].links])
+
+    check("no uv set went unresolved",
+          not [w for w in result["warnings"] if "UV set" in w],
+          [w for w in result["warnings"] if "UV set" in w])
 
     print("\nbaked procedurals")
     proc = material_for("procCube")
@@ -1861,6 +1996,60 @@ def main():
                   "ShaderNodeValToRGB" in raw_alpha
                   and "ShaderNodeTexImage" not in raw_alpha,
                   sorted(set(raw_alpha)))
+
+        print("\nlayered texture, unbaked package")
+        stack_material = material_for("layerTexCube")
+        check("the layered material exists", stack_material is not None)
+        if stack_material:
+            mixes = [n for n in stack_material.node_tree.nodes
+                     if n.bl_idname == "ShaderNodeMixRGB"
+                     and n.name.startswith("ML_Layer")]
+            # Two, not three: the Saturate layer has no Blender equivalent
+            # and is refused rather than approximated.
+            check("one Mix node per layer the build can make",
+                  len(mixes) == 2, [(n.name, n.blend_type) for n in mixes])
+            blends = sorted(n.blend_type for n in mixes)
+            check("the bottom layer mixes up from black and the one above "
+                  "multiplies",
+                  blends == ["MIX", "MULTIPLY"], blends)
+            multiply = next(
+                (n for n in mixes if n.blend_type == "MULTIPLY"), None)
+            if multiply:
+                check("Maya's layer alpha became the mix factor",
+                      abs(multiply.inputs[0].default_value - 0.5) < 1e-5,
+                      multiply.inputs[0].default_value)
+                check("with the layers under it on the lower input",
+                      bool(multiply.inputs[1].links), "nothing under it")
+            images = [n for n in stack_material.node_tree.nodes
+                      if n.bl_idname == "ShaderNodeTexImage"]
+            # The refused layer must not leave its texture behind either.
+            check("only the layers that were built loaded an image",
+                  len(images) == 2, [n.name for n in images])
+            check("and the hidden Maya layer is not among them",
+                  not any("Hidden" in str(getattr(n.image, "name", ""))
+                          for n in images),
+                  [getattr(n.image, "name", None) for n in images])
+        # The crossing: a layered texture inside a layer of a layered shader.
+        # Both were written alone and had never met.
+        crossed_stack = material_for("mayaLayerCube")
+        check("the crossed layered material exists", crossed_stack is not None)
+        if crossed_stack:
+            crossed_nodes = crossed_stack.node_tree.nodes
+            layer_mixes = [n for n in crossed_nodes
+                           if n.bl_idname == "ShaderNodeMixRGB"
+                           and n.name.startswith("ML_Layer")]
+            check("the texture stack was rebuilt inside the shader stack",
+                  len(layer_mixes) == 2,
+                  [(n.name, n.blend_type) for n in layer_mixes])
+            check("and the shader stack still composites around it",
+                  any(n.bl_idname == "ShaderNodeAddShader"
+                      for n in crossed_nodes),
+                  sorted(set(n.bl_idname for n in crossed_nodes)))
+
+        check("the refused blend mode was reported, not swallowed",
+              any("saturate" in item.lower()
+                  for item in unbaked_result["warnings"]),
+              [w for w in unbaked_result["warnings"] if "blend" in w.lower()])
 
         # A type this build does not reproduce must say so.
         check("a Ball projection is refused with a warning",

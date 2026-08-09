@@ -38,6 +38,7 @@ mlender_exporter/     # Maya (import sırası = bağımlılık sırası)
   transforms.py          # locator ve boş null'lar
   curves.py              # NURBS/bezier eğriler
   volumes.py             # aiVolume (VDB yolu)
+  standins.py            # aiStandIn ve gpuCache (dosya referansı)
   particles.py           # parçacık noktaları, kare kare bake
   instancers.py          # particle instancer (nokta üzerine geometri)
   render.py              # çözünürlük, aspect, motion blur
@@ -68,6 +69,7 @@ mlender_importer/     # Blender multi-file add-on
   empties.py             # locator → Empty
   curves.py              # Blender eğrileri
   volumes.py             # Blender volume objesi
+  standins.py            # standin çapası ve içeriği
   particles.py           # vertex-only mesh + konum keyframe'leri
   instancers.py          # vertex instancing (dupli-verts, ölçüldü)
   render.py              # sahne render ayarları
@@ -79,6 +81,10 @@ mlender_importer/     # Blender multi-file add-on
   livelink.py            # socket listener + ana thread pompası
   ui.py                  # operator, property, panel
   __init__.py            # bl_info, register/unregister, reload bloğu
+
+packaging/               # kurulabilir çıktılar
+  build_release.py       # Blender add-on .zip + Maya modülü
+  verify_release.py      # ikisini de gerçek host'lara kurup dener
 
 tests/                   # amaca göre ayrılmış, ayrıntı tests/README.md
   check_contracts.py     # host gerekmez, saniyeler — en sık çalıştırılan
@@ -109,7 +115,13 @@ Oradan "mevcut davranış" çıkarma; tek doğru kaynak package'lardır.
 3. Importer'da `__init__.py` içindeki reload bloğunun **iki listesine** de ekle.
 
 Bu listeler reload sırasını belirler. Eksik bırakılan modül, geliştirme
-sırasında sessizce eski kodla çalışmaya devam eder.
+sırasında sessizce eski kodla çalışmaya devam eder — ve bu, düzenlemenin
+işlememesi gibi görünür.
+
+Artık `check_contracts.py` üçünü de zorluyor: her `.py` her listede olmak
+zorunda, ve exporter listesi var olmayan bir modül adı taşıyamaz. İki importer
+listesi ayrı ayrı okunuyor; tek desenle bakmak ikisinin birleşimini eşleştirir
+ve birinden eksik bir modül testten geçer.
 
 ---
 
@@ -157,7 +169,7 @@ Kurallar:
 - Breaking bir değişiklik yapıyorsan `LIVELINK_VERSION`'ı **her iki dosyada
   birlikte** artır. Tek taraflı artırma sessiz değil, açık hata verir — bu iyi;
   ama iki tarafı da güncellemeden commit etme.
-- `EXPORT_SCHEMA_VERSION` (exporter, şu an `8`) JSON'a yazılır ve importer
+- `EXPORT_SCHEMA_VERSION` (exporter, şu an `41`) JSON'a yazılır ve importer
   `SUPPORTED_SCHEMA_VERSIONS` ile doğrular. Şema kırıcı bir değişiklik
   yaparsan exporter'da sürümü artır **ve** importer'ın desteklenen sürüm
   listesini güncelle.
@@ -408,7 +420,18 @@ python tests/check_contracts.py
 # 4. Gercek Blender, 3'un yazdigi paketi okur (~30 sn)
 "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" ^
     --background --factory-startup --python tests/host/blender_import_test.py
+
+# 5. Dagitilabilir ciktilar (yalniz surum cikarirken)
+python packaging/build_release.py
+python packaging/verify_release.py
 ```
+
+`verify_release.py` formalite değildir: modülü **repoya erişilemeyen** bir
+çalışma dizininden gerçek mayapy'ye, add-on'u tek kullanımlık bir Blender
+home'una kurar. İki artefakt da bir kez yanlıştı ve yalnız kurunca ortaya
+çıktı. Bir kez de **testin kendisi** yalan söyledi: mayapy çalışma dizinini
+`sys.path`'e koyduğu için repo kopyası import ediliyor, modül hiç denenmiyor
+ve "ok" yazıyordu.
 
 Kurulu Blender sürümleri: 4.1, 4.3, 4.5, 5.2. Kullanıcının hedefi **5.2**.
 Sürüm uyumu iddia eden bir değişiklik yaptıysan 4. adımı birden fazla sürümde
@@ -533,6 +556,26 @@ Kullanıcının elle doğrulaması gereken adımlar:
   (`Fac`→`Factor`, `Bright`→`Brightness`), indeksler değişmedi
 - ❌ Gamma'yı iki tarafta aynı sanma; Maya `in^(1/g)`, Blender `in^g`
 - ❌ Sahneyi export sırasında kalıcı olarak değiştirme (convertSolidTx'in file node'unu temizle)
+- ❌ Bilinmeyen bir shader tipini native okuyucuya düşürme; `attr_exists` bir
+  multi compound'un çocuğu için de "var" der ama `shader.color` adreslenebilir
+  bir plug değildir. Sahnedeki tek `layeredShader` **bütün export'u** öldürdü
+- ❌ Bir DCC çağrısının argümanı kabul etmesini uyguladığı sanma;
+  `wm.usd_import(scale=...)` hata vermeden **hiçbir şey yapmıyor**, ve
+  mesh'in kendi `dimensions`'ına bakmak da yetmez — parent'a uygulanmış
+  olabilir, dünya uzayında ölç
+- ❌ Ölçüm rig'inin bütün satırları aynı çıkınca "rig ölü" deme; sorulmayan
+  sorunun cevabı olabilir. `layeredTexture`'da otuz dört satırın aynı çıkması
+  ölü rig değil, **indeks 0'ın üst katman olduğu** anlamına geliyordu
+- ❌ Ayırt etmeyen değerlerle ölçme; 0.8 üstünde 0.4'te `Difference`, `Darken`
+  ve "hiçbir şey yapmadı" aynı sayıyı verir. Sonucun her adaydan farklı
+  olduğu bir çift seç
+- ❌ Yeni fixture'a ad verirken mevcutlara bakmama; bu depoda iki kez çakıştı
+  (`uvSetCube`, `layerCube`) ve ikisinde de test yanlış materyali ölçtü
+- ❌ Yeni bir dosya referansı taşıyan kayıt tipi ekleyip `collect.py`'a
+  eklememek; "toplanmış" paket sessizce eksik olur (VDB ve standin böyle
+  dışarıda kalmıştı)
+- ❌ Testi repo kökünden çalıştırıp dağıtım artefaktını doğruladığını sanma;
+  host çalışma dizinini `sys.path`'e koyar ve repo kopyası import edilir
 
 ---
 

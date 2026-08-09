@@ -17,17 +17,37 @@ import shutil
 
 from .constants import (
     COLLECT_FOLDER_NAME,
+    FILE_COLLECT_FOLDER_NAME,
     UDIM_TOKEN,
 )
 from .mayautils import maya_path
 
 
-def collect_textures(payload, package_folder, warnings=None):
-    """Copy every referenced texture into the package and repoint the JSON.
+def collect_package_files(payload, package_folder, warnings=None):
+    """Copy every file the package references into it, and repoint the JSON.
 
-    Returns a summary rather than raising: a missing texture is a scene
-    problem the user needs told about, not a reason to lose the whole export.
+    Textures were the only thing this collected for a long time, which made
+    the option a half promise: measured, a package built with collecting on
+    carried its texture and left the VDB and the Alembic standin sitting
+    outside it. Both are collected now, into their own folder.
+
+    Returns a summary rather than raising: a missing file is a scene problem
+    the user needs told about, not a reason to lose the whole export.
     """
+    warnings = warnings if warnings is not None else []
+    textures = collect_textures(payload, package_folder, warnings)
+    files = collect_referenced_files(payload, package_folder, warnings)
+    return {
+        "collected": textures["collected"] + files["collected"],
+        "missing": textures["missing"] + files["missing"],
+        "textures": textures["collected"],
+        "files": files["collected"],
+        "folder": textures["folder"] or files["folder"],
+    }
+
+
+def collect_textures(payload, package_folder, warnings=None):
+    """Copy every referenced texture into the package and repoint the JSON."""
     warnings = warnings if warnings is not None else []
     folder = os.path.join(package_folder, COLLECT_FOLDER_NAME)
     records = list(_texture_records(payload))
@@ -61,6 +81,66 @@ def collect_textures(payload, package_folder, warnings=None):
         "missing": missing,
         "folder": maya_path(folder),
     }
+
+
+def collect_referenced_files(payload, package_folder, warnings=None):
+    """Copy the non-texture files a package points at: VDBs and standins.
+
+    These carry a plain path string rather than a texture record, which is
+    why the texture walk never saw them. A standin is routinely gigabytes, so
+    this only runs when the user asked for a self-contained package.
+    """
+    warnings = warnings if warnings is not None else []
+    entries = list(_referenced_files(payload))
+    if not entries:
+        return {"collected": 0, "missing": 0, "folder": ""}
+
+    folder = os.path.join(package_folder, FILE_COLLECT_FOLDER_NAME)
+    if not os.path.isdir(folder):
+        os.makedirs(folder)
+
+    copied = {}
+    missing = 0
+    for record, key in entries:
+        source = str(record.get(key) or "")
+        if not source:
+            continue
+        if source not in copied:
+            destination = _copy_referenced_file(source, folder, warnings)
+            if not destination:
+                missing += 1
+                continue
+            copied[source] = destination
+        # The original is kept the way texture records keep theirs, so the
+        # source is still readable after the package has been repointed.
+        record.setdefault("original_file_path", maya_path(source))
+        record[key] = copied[source]
+
+    return {
+        "collected": len(copied),
+        "missing": missing,
+        "folder": maya_path(folder),
+    }
+
+
+def _referenced_files(payload):
+    """Every (record, key) holding a path to a file outside the package."""
+    for volume in payload.get("volumes") or []:
+        if volume.get("file_path"):
+            yield volume, "file_path"
+    for standin in payload.get("standins") or []:
+        if standin.get("file_path"):
+            yield standin, "file_path"
+
+
+def _copy_referenced_file(source, folder, warnings):
+    if not os.path.isfile(source):
+        warnings.append(
+            "Referenced file not found, so not collected: {0}".format(source)
+        )
+        return ""
+    destination = os.path.join(folder, os.path.basename(source))
+    return _copy_file(source, destination, warnings)
 
 
 def _texture_records(payload):

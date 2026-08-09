@@ -8,7 +8,7 @@ message shape changes.
 
 import math
 
-BUILD_VERSION = "2.24.0"
+BUILD_VERSION = "2.29.0"
 
 LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
@@ -23,6 +23,7 @@ LIVELINK_EVENT = "scene_package_ready"
 SUPPORTED_SCHEMA_VERSIONS = (
     1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
     20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36,
+    37, 38, 39, 40, 41,
 )
 
 # rampShader. The mode name the exporter writes when Maya's single colorInput
@@ -236,6 +237,109 @@ UNCLAMPED_COLOUR_CHANNELS = (
 TEXTURE_EXTENSION_MIRROR = "MIRROR"
 TEXTURE_EXTENSION_REPEAT = "REPEAT"
 TEXTURE_EXTENSION_CLAMP = "EXTEND"
+
+# UV sets. Measured on 4.1 and 5.2: the FBX importer keeps Maya's UV set names
+# exactly and in order, so the name the exporter read in Maya goes straight
+# into the node. Index 0 arrives active and active_render, which is why only a
+# non-default set gets a node at all.
+#
+# The node accepts a name no mesh carries without complaint -- measured, it
+# stores the string and renders the default set -- so a name that resolves to
+# nothing has to be reported here rather than seen.
+UV_MAP_NODE_NAME = "ML_UVMap"
+
+# layeredTexture. Measured by baking every mode in Maya 2023 -- 0.2 over 0.6,
+# because the first sweep used 0.8 over 0.4 where |a-b|, min(a,b) and the
+# backdrop are all 0.4 and Difference, Darken and "did nothing" were the same
+# number. A colour pair was baked too, which ruled out a luminance-only
+# operation: all of these work per channel.
+#
+# Every mode below computes lerp(lower, f(lower, upper), alpha), which is
+# exactly Blender's Mix node with the layer's alpha on Fac. Six of Maya's
+# fourteen are missing on purpose:
+#
+#   in, out       alpha compositing against the backdrop, not a colour blend
+#   saturate, desaturate, illuminate   HSV-space operations with no Mix
+#                                      equivalent; measured and left out
+#                                      rather than approximated
+#   cpv_modulate  needs colour per vertex, which is not in the package
+LAYERED_BLEND_TYPES = {
+    "over": "MIX",
+    "add": "ADD",
+    "subtract": "SUBTRACT",
+    "multiply": "MULTIPLY",
+    "difference": "DIFFERENCE",
+    "lighten": "LIGHTEN",
+    "darken": "DARKEN",
+}
+# Measured: "None" ignores its alpha and replaces everything under it.
+LAYERED_REPLACE_MODE = "none"
+# Spelled out rather than left as "whatever is not in the table", so the
+# contract check can prove every mode Maya has is accounted for one way or
+# the other. A mode added to the exporter and forgotten here fails the check
+# instead of silently becoming a dropped layer.
+LAYERED_UNSUPPORTED_MODES = (
+    "in",
+    "out",
+    "saturate",
+    "desaturate",
+    "illuminate",
+    "cpv_modulate",
+)
+LAYERED_NODE_NAME = "ML_Layer"
+# The bottom layer composites against black, so its alpha multiplies its own
+# colour: measured 0.8 at alpha 0.5 arriving as 0.4, and at alpha 0 as black.
+LAYERED_BOTTOM_COLOUR = (0.0, 0.0, 0.0, 1.0)
+# A neutral name for the per-layer wiring, so the channel-specific behaviour
+# in apply_record_to_socket keys off the outer channel and not off a layer.
+LAYERED_ALPHA_CHANNEL = "layer_alpha"
+
+# Maya's layeredShader. Its weight is a transparency -- how much of what is
+# below shows through -- and its two compositing modes spend it differently.
+# Measured by baking an unlit green over an unlit red at five transparencies:
+#
+#   layer_shaders   T=0.5 -> (0.5, 1.0, 0)    upper + T * below
+#   layer_texture   T=0.5 -> (0.5, 0.5, 0)    lerp(upper, below, T)
+#
+# The green holding at 1.0 in the first is the whole difference: that mode
+# adds the layers, it does not fade the upper one out. It is also Maya's
+# default, so it is not the rare branch.
+#
+# Neither needs the number inverted. layer_texture puts the upper shader on
+# the Mix Shader's first input and the lower on its second, so a factor of T
+# reads straight; layer_shaders scales the lower shader by T against a
+# Transparent BSDF and adds the result.
+MAYA_LAYER_SHADERS_MODE = "layer_shaders"
+MAYA_LAYER_TEXTURE_MODE = "layer_texture"
+
+# Standins. What a standin's file can be, and how each format answers the
+# question of units -- measured on 4.1 and 5.2, in world space:
+#
+#   .abc  no unit metadata, so the scale must be supplied
+#   .obj  no unit metadata either, and global_scale works: a four unit cube
+#         at 0.01 arrives 0.04 across
+#   .usd  describes its own units, and the importer's "scale" argument is
+#         accepted and then ignored -- the cube arrived four units across
+#         whatever was passed. So nothing is passed.
+#
+# Arnold's own .ass is not here and cannot be: Blender has no reader for it.
+STANDIN_ALEMBIC_FORMATS = (".abc",)
+STANDIN_OBJ_FORMATS = (".obj",)
+STANDIN_USD_FORMATS = (".usd", ".usda", ".usdc", ".usdz")
+
+# The anchor empty is drawn as the box Maya draws in place of the geometry.
+STANDIN_PLACEHOLDER_DISPLAY = "CUBE"
+STANDIN_PLACEHOLDER_SIZE = 0.5
+
+# Where the exporter puts the files it collects. Repeated here rather than
+# shared, because the two packages run in different Python runtimes and must
+# not import each other -- so these two strings are part of the package
+# contract and change on both sides together.
+#
+# They are searched, along with the package root, whenever a recorded path is
+# not on disk. That is what makes a collected package survive being moved: the
+# paths inside it are absolute, written by whichever machine did the export.
+COLLECTED_FOLDERS = ("textures_collected", "files_collected")
 
 # UDIM. Tiles are numbered from 1001. The token pattern covers the spellings
 # different tools write, so a package from any exporter version resolves.

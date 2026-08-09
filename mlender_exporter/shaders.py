@@ -30,6 +30,10 @@ from .constants import (
     LAYER_SHADER_SLOTS,
     LAYER_SHADER_TYPE,
     MAX_BLEND_DEPTH,
+    MAYA_LAYERED_COMPOSITING_ATTR,
+    MAYA_LAYERED_COMPOSITING_MODES,
+    MAYA_LAYERED_SHADER_ENTRIES,
+    MAYA_LAYERED_SHADER_TYPE,
     MIX_SHADER_INPUTS,
     MIX_SHADER_TYPE,
     MIX_SHADER_WEIGHT,
@@ -101,6 +105,12 @@ def shader_channels(shader, shader_type, bake_context=None):
         return maya_basic_channels(shader, LAMBERT_ROUGHNESS, bake_context)
     if shader_type == "surfaceShader":
         return surface_shader_channels(shader, bake_context)
+    if is_blend_shader(shader_type):
+        # A blend shader describes no surface of its own; its channels live
+        # on the shaders it stacks. Reading it as a native surface used to
+        # reach for ".color", which a layeredShader answers to only through
+        # an index, and the whole export died on the exception.
+        return {}
     return maya_basic_channels(shader, FALLBACK_ROUGHNESS, bake_context)
 
 
@@ -337,7 +347,65 @@ def upstream_shader(shader, attr):
 
 
 def is_blend_shader(shader_type):
-    return shader_type in (MIX_SHADER_TYPE, LAYER_SHADER_TYPE)
+    return shader_type in (
+        MIX_SHADER_TYPE, LAYER_SHADER_TYPE, MAYA_LAYERED_SHADER_TYPE
+    )
+
+
+def maya_layered_compositing(shader):
+    """Which of layeredShader's two compositing modes is set."""
+    try:
+        index = int(cmds.getAttr(shader + "." + MAYA_LAYERED_COMPOSITING_ATTR))
+    except Exception:
+        return MAYA_LAYERED_COMPOSITING_MODES[0]
+    if 0 <= index < len(MAYA_LAYERED_COMPOSITING_MODES):
+        return MAYA_LAYERED_COMPOSITING_MODES[index]
+    return MAYA_LAYERED_COMPOSITING_MODES[0]
+
+
+def maya_layered_layers(shader, bake_context=None, depth=0):
+    """Maya's own layeredShader, bottom layer first.
+
+    Index 0 is the top, the same way round as layeredTexture and the reverse
+    of what this returns, so the list is flipped to match the contract the
+    Arnold blend shaders already keep.
+
+    The weight travels as Maya's ``transparency`` rather than as a mix, and
+    the compositing mode travels with it: the two modes use that number
+    differently and only the importer can act on the difference.
+    """
+    mode = maya_layered_compositing(shader)
+    try:
+        indices = cmds.getAttr(
+            shader + "." + MAYA_LAYERED_SHADER_ENTRIES, multiIndices=True
+        ) or []
+    except Exception:
+        return []
+
+    layers = []
+    for index in indices:
+        element = "{0}.{1}[{2}]".format(
+            shader, MAYA_LAYERED_SHADER_ENTRIES, index
+        )
+        found = upstream_shader(
+            shader, "{0}[{1}].color".format(MAYA_LAYERED_SHADER_ENTRIES, index)
+        )
+        if not found:
+            continue
+        node, kind = found
+        layers.append({
+            "shader": node,
+            "shader_type": kind,
+            "channels": shader_channels(node, kind, bake_context),
+            "layers": blend_layers(node, kind, bake_context, depth + 1),
+            "compositing": mode,
+            "transparency": channel_record_for_plug(
+                shader, element + ".transparency", bake_context,
+                "transparency",
+            ) or {"value": 0.0},
+        })
+    layers.reverse()
+    return layers
 
 
 def blend_layers(shader, shader_type, bake_context=None, depth=0):
@@ -354,6 +422,10 @@ def blend_layers(shader, shader_type, bake_context=None, depth=0):
     """
     if depth >= MAX_BLEND_DEPTH or not is_blend_shader(shader_type):
         return []
+    if shader_type == MAYA_LAYERED_SHADER_TYPE:
+        # Indexed compounds rather than numbered attributes, and a weight
+        # that means the opposite of Arnold's, so it reads its own slots.
+        return maya_layered_layers(shader, bake_context, depth)
     if shader_type == MIX_SHADER_TYPE:
         slots = [
             (MIX_SHADER_INPUTS[0], None, None),
@@ -538,34 +610,46 @@ def first_channel_record(shader, attrs, bake_context=None, channel=None):
     for attr in attrs:
         if not attr_exists(shader, attr):
             continue
-        plug = shader + "." + attr
-        record = {
-            "maya_attr": attr,
-            "maya_plug": plug,
-        }
-        texture = texture_from_plug(plug)
-        if texture and not texture.get("path"):
-            # A connection with no file behind it: a checker, a ramp,
-            # layered noise. There is nothing to reference, so bake the
-            # network down to the mesh's UVs instead.
-            #
-            # A plain U or V ramp could be rebuilt natively, but Bake
-            # Procedurals is the user's choice and baking it does something
-            # the native path cannot: it applies the place2dTexture. So the
-            # option wins here, and the gradient only travels as stops when
-            # the user left baking off.
-            baked = bake_channel(
-                bake_context,
-                shader,
-                channel or attr,
-                texture.get("source_plug") or "",
-            )
-            if baked:
-                texture = baked
-        if texture:
-            record["texture"] = texture
-        value = plug_value(plug)
-        if value is not None:
-            record["value"] = value
-        return record
-    return None
+        return channel_record_for_plug(
+            shader, shader + "." + attr, bake_context, channel, attr
+        )
+
+
+def channel_record_for_plug(shader, plug, bake_context=None, channel=None,
+                            attr=None):
+    """The same record from a plug that no attribute table can name.
+
+    An indexed compound -- ``layeredShader.inputs[2].transparency`` -- is a
+    real channel and a perfectly ordinary one, but ``attributeQuery`` cannot
+    be asked about it, so the attribute driven path above cannot reach it.
+    """
+    if not plug:
+        return None
+    record = {"maya_plug": plug}
+    if attr:
+        record["maya_attr"] = attr
+    texture = texture_from_plug(plug)
+    if texture and not texture.get("path"):
+        # A connection with no file behind it: a checker, a ramp,
+        # layered noise. There is nothing to reference, so bake the
+        # network down to the mesh's UVs instead.
+        #
+        # A plain U or V ramp could be rebuilt natively, but Bake
+        # Procedurals is the user's choice and baking it does something
+        # the native path cannot: it applies the place2dTexture. So the
+        # option wins here, and the gradient only travels as stops when
+        # the user left baking off.
+        baked = bake_channel(
+            bake_context,
+            shader,
+            channel or attr,
+            texture.get("source_plug") or "",
+        )
+        if baked:
+            texture = baked
+    if texture:
+        record["texture"] = texture
+    value = plug_value(plug)
+    if value is not None:
+        record["value"] = value
+    return record

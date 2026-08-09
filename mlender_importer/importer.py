@@ -31,11 +31,13 @@ from .render import apply_render_settings
 from .sets import import_sets
 from .particles import import_particles
 from .instancers import import_instancers
+from .standins import import_standins
 from .volumes import import_volumes
 from .materials import (
     apply_face_assignments,
     build_material,
     import_projection_placements,
+    verify_uv_sets,
 )
 from .scene import (
     add_subdivision_modifiers,
@@ -52,7 +54,11 @@ from .scene import (
     remove_object_namespace,
     rename_mesh_from_record,
 )
-from .utils import normalize_folder, package_namespace_prefixes
+from .utils import (
+    normalize_folder,
+    package_namespace_prefixes,
+    resolve_package_paths,
+)
 
 
 def validate_schema_version(package_data):
@@ -94,6 +100,10 @@ def import_scene_package(
     if package_data is None:
         package_data = read_package_json(package_folder)
     validate_schema_version(package_data)
+    # Before anything reads a path: a collected package carries absolute
+    # paths written by the machine that exported it, and this is where they
+    # are pointed back inside the package when it has moved.
+    repointed = resolve_package_paths(package_data, package_folder)
     fbx_path = resolve_fbx_path(package_folder, package_data)
 
     if bpy.data.filepath:
@@ -264,6 +274,16 @@ def import_scene_package(
         group_cache,
         object_by_path,
     )
+    # After the volumes and before the instancers, for no reason beyond
+    # reading order: a standin depends on nothing in the package, only on a
+    # file outside it.
+    standin_result = import_standins(
+        package_data,
+        root_collection,
+        import_scale,
+        warnings,
+        group_cache,
+    )
 
     # Last of the rebuilt kinds: an instancer needs both its points object
     # and its source geometry to exist before it can point at them.
@@ -313,6 +333,10 @@ def import_scene_package(
     # counted; removing it is a button the user presses.
     stale_objects = mark_stale(existing_by_path, adopted_paths)
 
+    # After the meshes carry their UV layers and their materials: a UV set a
+    # material asks for can only be checked once both exist.
+    verify_uv_sets([obj for obj, _record in matched_meshes], warnings)
+
     view_transform = apply_color_management(package_data, warnings)
     render_applied = apply_render_settings(package_data, warnings)
 
@@ -341,6 +365,9 @@ def import_scene_package(
         "transform_count": empty_result["transform_count"],
         "curve_count": curve_count,
         "volume_count": volume_count,
+        "repointed_paths": repointed,
+        "standin_count": standin_result["standin_count"],
+        "standin_loaded": standin_result["standin_loaded"],
         "particle_count": particle_count,
         "particle_baked_count": particle_baked_count,
         "instancer_count": instancer_count,

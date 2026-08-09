@@ -6,13 +6,19 @@ around it, which cannot work when a channel is driven by a network with no
 file behind it at all: a checker, a ramp, layered noise. Those are baked to
 the mesh's UVs so Blender has something to load.
 
-Two measured facts shape this module, both from a live Maya 2023 session:
+Measured facts shape this module, all from a live Maya 2023 session:
 
 * convertSolidTx writes **linear** values into the image regardless of colour
   management, so a baked map must be read as Non-Color in Blender even when it
   drives a colour channel. Loading it as sRGB would darken every bake.
 * It cannot write EXR. The file node is created pointing at the path but
   nothing lands on disk, so the format list here is deliberately short.
+* UV sets need no handling here, which was measured rather than hoped: the
+  bake evaluates the network through its own ``uvLink``, and writes into the
+  mesh's **default** set whatever the current one is. Blender activates that
+  same first layer, so a procedural authored on a second UV set is resolved
+  during the bake and lands right. Passing ``uvSetName`` would change where it
+  writes -- and a name the mesh does not carry raises -- so it stays unset.
 """
 from __future__ import absolute_import
 

@@ -50,6 +50,40 @@ package JSON schema.
 
 ## Installation
 
+### From a release
+
+`packaging/build_release.py` writes the two artefacts each host already knows
+how to install, and refuses to build if the Maya and Blender version numbers
+have drifted apart:
+
+```bash
+python packaging/build_release.py     # writes dist/
+python packaging/verify_release.py    # installs them into the real hosts
+```
+
+```text
+dist/mLender-<version>-blender-addon.zip   Preferences > Add-ons > Install
+dist/mLender-<version>-maya-module.zip     unzip into a Maya modules folder
+```
+
+The Maya artefact is a **module**: a `.mod` file naming a folder beside it,
+dropped anywhere on `MAYA_MODULE_PATH` — for example
+`Documents/maya/modules/`. Maya then puts the exporter on its Python path
+itself, so nothing shared has to be edited and removing the tool is deleting
+two things.
+
+`verify_release.py` is not a formality. It installs the module into a real
+mayapy with a working directory the repository cannot be reached from, and the
+add-on into a throwaway Blender home, then checks the import came from the
+artefact rather than from somewhere else. Both artefacts were wrong once while
+this was being written and only installing them showed it.
+
+> The zip keeps `mlender_importer` as its top folder because that folder name
+> **is** the add-on's module name. Rename it and Blender treats the result as
+> a different add-on and installs it alongside the old one instead of updating.
+
+The manual routes below still work and remain right for development.
+
 ### Maya
 
 The exporter is a plain Python package. Add the directory **containing**
@@ -161,7 +195,8 @@ light counts) and check the System Console for lines beginning
 
 | Control | Default | Effect |
 |---|---|---|
-| Collect Textures | off | Copy every referenced texture into the package |
+| Collect Files | off | Copy referenced textures, volumes and standins into the package |
+| Archive Package | off | Also write a single `.zip` beside the package |
 | Export Scope | off | Send only the selected objects |
 | Export Animation | off | Send a frame range instead of a single frame |
 | Alembic Cache | off | Cache deforming meshes and emitting particles |
@@ -224,9 +259,8 @@ texture path and Blender's image node opens the same file. When both
 applications run on one machine this is the correct behaviour and it avoids
 duplicating a texture library.
 
-Ticking **Collect Textures** copies every referenced texture into
-`textures_collected/` inside the package and rewrites the JSON paths, making
-the package portable:
+Ticking **Collect Files** copies everything the package references into it and
+rewrites the JSON paths, making the package portable:
 
 ```text
 mLender_01/
@@ -236,7 +270,41 @@ mLender_01/
     wood_basecolor.tx
     tile.1001.tx
     tile.1002.tx
+  files_collected/
+    smoke.vdb
+    hero_prop.abc
 ```
+
+The option used to collect textures only, which made it a half promise:
+measured, a package built with collecting on carried its texture and left the
+VDB and the Alembic standin sitting outside it. Volumes and standins are
+collected too now, into their own folder because they are not textures.
+
+**Archive Package** writes `mLender_01.zip` beside the folder, with the folder
+as the archive's only top level so unzipping produces what the importer wants.
+It is written beside the package rather than instead of it: LiveLink and the
+importer both read the folder. Pair it with collecting — an archive of a
+package that still points at the exporting machine's texture library is a zip
+of some paths.
+
+### A package that has moved
+
+A package records absolute paths, written by whichever machine exported it, and
+collecting copies files inside the package but still writes the absolute path
+to the copy. So a collected package opened anywhere else — another machine,
+another drive letter, a folder somebody renamed — used to resolve none of them
+and report every texture as not found.
+
+On import, any recorded file that is missing is now looked for inside the
+package before it is given up on: the package root first, then
+`textures_collected/` and `files_collected/`. The FBX and the Alembic already
+did this for themselves; it now covers textures, UDIM tile sets, the images
+behind projections, the layers of a layered texture, volumes and standins.
+
+A path that still resolves is left exactly as written — the common case is both
+applications on one machine, and rewriting there would change something for
+nothing. The import result reports `repointed_paths` so the difference is
+visible.
 
 Three details matter here:
 
@@ -281,39 +349,68 @@ result beats none.
 Both packages are ordered by dependency: a module may only import ones listed
 above it.
 
+The order below is the one the two packages reload in — `SUBMODULES` on the
+Maya side and the reload block on the Blender side — so it is the dependency
+order rather than a description of it.
+
 ```text
 mlender_exporter/        # Maya side
   constants.py              # protocol constants, attribute alias tables
   mayautils.py              # maya.cmds wrappers and value helpers
-  collect.py                # optional texture collection
+  collect.py                # optional file collection
   animation.py              # frame range and timeline sampling
   textures.py               # upstream texture search
   bake.py                   # baking procedural networks to UVs
   shaders.py                # shader to channel extraction
   meshes.py                 # mesh discovery, material and face assignment
+  transforms.py             # locators and empty nulls
+  curves.py                 # NURBS and bezier curves
+  volumes.py                # aiVolume (VDB path)
+  standins.py               # aiStandIn and gpuCache (file references)
+  particles.py              # particle points, per frame bake
+  instancers.py             # particle instancer
+  coverage.py               # what the export did not account for
+  render.py                 # resolution, aspect, motion blur
+  sets.py                   # selection sets and display layers
   lights.py                 # light discovery and records
   cameras.py                # camera discovery and lens records
   fbx.py                    # MEL FBXExport wrapper
+  alembic.py                # AbcExport for deformed meshes and emitters
   livelink.py               # TCP client
-  package.py                # package folder, JSON, atomic cleanup
+  package.py                # package folder, JSON, archive, atomic cleanup
   ui.py                     # Maya window
 
 mlender_importer/        # Blender side (multi-file add-on)
   constants.py              # protocol constants, socket names, calibration
-  utils.py                  # value and name normalisation
+  utils.py                  # value and name normalisation, path resolution
+  attributes.py             # custom properties
+  transforms.py             # Maya to Blender matrix conversion
+  colormanagement.py        # Maya OCIO settings to Blender view transform
+  animation.py              # sampled animation as keyframes
   images.py                 # texture loading, UDIM
   corrections.py            # rebuilding Maya correction nodes
   materials.py              # node trees
   lights.py                 # Blender lights, dome world
   cameras.py                # Blender cameras
-  transforms.py             # Maya to Blender matrix conversion
-  colormanagement.py        # Maya OCIO settings to Blender view transform
-  animation.py              # sampled animation as keyframes
   scene.py                  # scene clearing, mesh matching, subdivision
+  empties.py                # locators as empties
+  curves.py                 # Blender curves
+  volumes.py                # Blender volume objects
+  standins.py               # standin anchors and their contents
+  particles.py              # vertex-only meshes and position keys
+  instancers.py             # vertex instancing
+  render.py                 # scene render settings
+  sets.py                   # sets and layers as collections
+  merge.py                  # Replace / Merge / Add
   fbx.py                    # FBX import, package file resolution
+  alembic.py                # reading the package cache
   importer.py               # orchestration and schema validation
   livelink.py               # socket listener and main-thread pump
   ui.py                     # operators, properties, panel
+
+packaging/
+  build_release.py          # the two installable artefacts
+  verify_release.py         # installs them into the real hosts
 
 tests/
   check_contracts.py        # no host needed, runs in seconds
@@ -333,7 +430,8 @@ tests/
 **Arnold** (verified against MtoA 5.4.8) — `aiStandardSurface`,
 `aiOpenPBRSurface`, `aiLambert`, `aiFlat`, `aiMixShader`, `aiLayerShader`
 
-**Native Maya** — `lambert`, `blinn`, `phong`, `phongE`, `rampShader`, `surfaceShader`
+**Native Maya** — `lambert`, `blinn`, `phong`, `phongE`, `rampShader`,
+`surfaceShader`, `layeredShader`
 
 ### Blend shaders
 
@@ -353,10 +451,94 @@ so the number travels unchanged.
 inputs with `enable3` unticked produce two layers, not three, because a layer
 Maya was not rendering has no business appearing on top in Blender.
 
+Maya's own **`layeredShader`** joins them, and it is the odd one of the three:
+its index 0 is the *top* layer, and its weight is a **transparency** — how
+much of what is below shows through — rather than a mix. It also has two
+compositing modes that spend that number differently. Both were measured by
+baking an unlit green over an unlit red at five transparencies:
+
+```text
+compositingFlag   T=0     T=0.5           T=1        meaning
+Layer Shaders     green   (0.5, 1.0, 0)   (1,1,0)    upper + T x below
+Layer Texture     green   (0.5, 0.5, 0)   red        lerp(upper, below, T)
+```
+
+The green holding at 1.0 in the first row is the whole difference: **Layer
+Shaders adds**, it does not fade the upper layer out. It is also Maya's
+default, so it is not the rare branch. It becomes an **Add Shader** with the
+lower layers scaled against a Transparent BSDF; Layer Texture becomes a plain
+**Mix Shader**. Neither inverts the number — the wiring is what differs, with
+the upper shader on the Mix Shader's first input so a transparency of 0 reads
+straight through as "the upper layer wins".
+
+Maya's transparency is a colour and a mix factor is one number. A tinted
+transparency is averaged and reported in the import warnings rather than
+quietly picking a channel.
+
+> Before this, a `layeredShader` anywhere in the scene **failed the entire
+> export**. Every unknown shader fell through to the native reader, which
+> reads `.color`; a `layeredShader` answers to that name only through an
+> index, so Maya raised and the package was rolled back. Blend shaders now
+> report no channels of their own, and a plug that cannot be addressed costs
+> one channel instead of the export.
+
 Transferred channels: base colour, reflection roughness, metalness,
 normal/bump, opacity, emission colour and strength, specular weight,
 transmission (weight, colour, roughness), IOR, thin-walled, and the coat, sheen
 and subsurface lobes.
+
+### Layered textures
+
+Maya's `layeredTexture` stacks textures inside a single channel, which is a
+different thing from the blend shaders above: those blend whole surfaces, this
+blends the colour going into one socket. It used to be walked straight past —
+measured, a two layer stack arrived as its bottom texture alone, with the
+layering reported as an unsupported correction but not carried.
+
+It now arrives as a chain of **Mix Color** nodes, one per layer, built from
+the bottom up. Each layer's own colour goes through the ordinary channel
+wiring, so a layer holding a file with its placement, a UV set, a projection
+or a gradient needs none of that repeated.
+
+Everything below was measured by baking each mode in Maya 2023 and reading the
+pixels back, because the node does not evaluate through `getAttr` in batch:
+
+```text
+Maya blendMode          Blender Mix blend type
+None                    the layer replaces what is under it, alpha ignored
+Over                    MIX
+Add                     ADD
+Subtract                SUBTRACT
+Multiply                MULTIPLY
+Difference              DIFFERENCE
+Lighten                 LIGHTEN
+Darken                  DARKEN
+```
+
+Each of those computes `lerp(lower, f(lower, upper), alpha)`, which is exactly
+what Blender's Mix node does with the layer's alpha on the factor, so the alpha
+travels unchanged. The bottom layer composites against black, so its alpha
+multiplies its own colour: measured, a 0.8 layer at alpha 0.5 bakes to 0.4 and
+at alpha 0 to black. That is why it gets a Mix node too, mixing up from black.
+
+**Index 0 is the top layer.** This was measured, and it is the reverse of the
+obvious guess: a first sweep varied index 1 and produced the same colour
+thirty-four times running, which is what an opaque `Over` sitting on top looks
+like when you are reading the table upside down.
+
+A layer Maya is not drawing does not travel. `isVisible` off means the layer
+is dropped, on the same reasoning as a switched-off `aiLayerShader` slot.
+
+Six of Maya's fourteen modes are refused rather than approximated, each with a
+warning naming the mode and the material: `In` and `Out` are alpha compositing
+against the backdrop rather than colour blends, `Saturate`, `Desaturate` and
+`Illuminate` are HSV-space operations with no Mix equivalent, and
+`CPV Modulate` needs colour per vertex, which the package does not carry. A
+refused layer is left out of the stack; the layers around it still build.
+
+With **Bake Procedurals** on the stack is baked instead, like any other
+network, and the bake is the more faithful answer — it is Maya evaluating its
+own node. The rebuild is what happens when baking is off.
 
 ### Three build paths
 
@@ -685,6 +867,57 @@ mirrorU / mirrorV   -> Image extension MIRROR
 `rotateUV` is a `doubleAngle` attribute and `getAttr` returns it in the current
 angle unit, so it is written to JSON as degrees and converted on import. If the
 placement is at its defaults, no Mapping node is created.
+
+### UV sets
+
+A mesh can carry several UV sets, and Maya binds each texture to one of them
+through `uvLink`. All the sets ride the FBX — measured on Blender 4.1 and 5.2,
+they arrive under their Maya names and in Maya's order — but only the first one
+is active, so every texture used to read that one whatever Maya said. A texture
+laid out on a second set arrived mapped with the wrong coordinates, which looks
+like a texture that is merely misplaced rather than one reading the wrong data.
+
+A **UV Map** node is now built for a texture bound to a non-default set:
+
+```text
+uvLink texture -> uvSet[n]   ->  UV Map node -> Mapping (if any) -> Image
+uvLink texture -> uvSet[0]   ->  nothing; the active layer is already right
+```
+
+Only a difference is recorded. `uvLink` answers `uvSet[0]` even for a texture
+nobody ever linked, so recording every answer would put a redundant node in
+front of every texture in the scene; the comparison is against the shape's
+first set, by index rather than by the name `map1`, so a renamed first set is
+still recognised as the default.
+
+Two limits, both reported rather than silent:
+
+- One material carries one UV source. A texture bound to different sets on
+  different meshes cannot be honoured on both, so the first non-default set is
+  used and the disagreement is listed in the import warnings.
+- Blender's UV Map node accepts a name no mesh carries without complaint and
+  quietly renders the active layer instead. After import, every requested set
+  is checked against the meshes that use the material, and a name that
+  resolves to nothing becomes a warning naming the material, the set and the
+  mesh.
+
+Baked procedural networks carry no UV set record, and do not need one.
+Measured on Maya 2023 with an object-space gradient, which is the only source
+that can tell the two halves apart:
+
+- `convertSolidTx` **evaluates the network through its own `uvLink`**. A ramp
+  moved to a flipped second set baked flipped, so a procedural laid out on a
+  second set bakes with the appearance Maya shows.
+- It **writes into the default set, ignoring the mesh's current one**. Setting
+  the current set to the flipped one changed nothing; only passing
+  `uvSetName` explicitly did. The default set is index 0, which is the layer
+  Blender activates, so the two agree without being told to.
+
+Together those mean a baked procedural arrives correct whichever set it was
+authored on: the set is resolved during the bake and flattened into the layout
+Blender reads. A first probe using a ramp could not have shown this — the ramp
+reads UVs, so the read and the write cancelled and all four bakes looked
+identical whatever the answer was.
 
 ### Bump
 
@@ -1331,6 +1564,52 @@ reported.
 
 Only Arnold is read. Redshift's volume attribute names cannot be probed here,
 and this project does not write names it has not read off a live session.
+
+### Standins
+
+An `aiStandIn` and a `gpuCache` hold no geometry at all. Each is a pointer to
+a file the renderer opens later, and Maya draws a proxy in its place. Both used
+to be reported by the coverage scan and left behind; they are now carried.
+
+The file is **referenced, never copied**. A standin is routinely gigabytes,
+and the package already references textures for the same reason.
+
+```text
+aiStandIn.dso            -> the file
+gpuCache.cacheFileName   -> the same idea under a different name
+objectPath / cacheGeomPath, frameNumber, frameOffset,
+useFrameExtension        -> kept as ml_source_*
+Min/MaxBoundingBox       -> the size of the box drawn in place of the file
+```
+
+Every standin gets an **anchor** empty carrying the Maya transform, and
+whatever the file yields is parented under it. That is the arrangement Maya
+describes: the contents live in the file's own space and the standin's
+transform sits on top.
+
+Three formats, three different answers about units, each measured on 4.1 and
+5.2 rather than assumed:
+
+- **Alembic** carries no unit metadata, so the scale is supplied — the same
+  call the package's own cache goes through.
+- **OBJ** carries none either, and `global_scale` does what it says: a four
+  unit cube at 0.01 arrives 0.04 across.
+- **USD** describes its own units, and the importer's `scale` argument is
+  accepted and then **ignored** — measured in world space, the cube arrived
+  four units across whatever was passed. So nothing is passed and the file's
+  own `metersPerUnit` decides.
+
+Arnold's own `.ass` is not on that list and cannot be: Blender has no reader
+for it. **A file that cannot be read, or is not there, leaves the anchor
+standing as a box the size of Maya's proxy**, with the path on it and a
+warning naming both. A placeholder in the right place beats a hole in the
+scene with nothing to explain it — and since paths are referenced, a package
+opened on another machine lands here by design.
+
+> The bounding box is what Maya draws, not a claim about the file. Measured:
+> Arnold fills `Min/MaxBoundingBox` in from the viewport, so a headless export
+> reads its ±1 default and `exactWorldBoundingBox` answers zero. A unit box in
+> Blender is then exactly what Maya was showing too.
 
 ### Curves
 

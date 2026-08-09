@@ -437,6 +437,54 @@ def build_scene():
     cmds.setAttr(layered + ".enable3", False)
     cmds.setAttr(layered + ".mix2", 0.4)
 
+    # Maya's own layeredShader, one cube per compositing mode because the two
+    # build different graphs. Its weight is a transparency and index 0 is the
+    # top, both the reverse of the Arnold blend shaders above.
+    def _maya_layered(cube_name, mode, top_transparency):
+        base = cmds.shadingNode("aiStandardSurface", asShader=True,
+                                name=cube_name + "Base")
+        cmds.setAttr(base + ".baseColor", 0.9, 0.1, 0.1, type="double3")
+        cmds.setAttr(base + ".specularRoughness", 0.77)
+        top_shader = cmds.shadingNode("aiStandardSurface", asShader=True,
+                                      name=cube_name + "Top")
+        cmds.setAttr(top_shader + ".baseColor", 0.1, 0.9, 0.1, type="double3")
+        _, stack = shaded_cube(cube_name, "layeredShader")
+        cmds.setAttr(stack + ".compositingFlag", mode)
+        cmds.connectAttr(top_shader + ".outColor", stack + ".inputs[0].color",
+                         force=True)
+        cmds.connectAttr(base + ".outColor", stack + ".inputs[1].color",
+                         force=True)
+        cmds.setAttr(stack + ".inputs[0].transparency", top_transparency,
+                     top_transparency, top_transparency, type="double3")
+        cmds.setAttr(stack + ".inputs[1].transparency", 0.0, 0.0, 0.0,
+                     type="double3")
+        return top_shader
+
+    maya_top = _maya_layered("mayaLayerCube", 0, 0.4)     # Layer Shaders
+    _maya_layered("mayaLayerTexCube", 1, 0.25)            # Layer Texture
+
+    # The crossing the two features share: a layeredTexture driving a channel
+    # of a shader that is itself one layer of a layeredShader. Each was
+    # written on its own and they had never met.
+    cross_stack = cmds.shadingNode("layeredTexture", asTexture=True,
+                                   name="crossLayerStack")
+    for cross_index, cross_name in enumerate(("crossLayerTop",
+                                              "crossLayerBottom")):
+        cross_path = os.path.join(OUT, cross_name + ".tx").replace("\\", "/")
+        with open(cross_path, "w") as handle:
+            handle.write("crossing fixture")
+        cross_file = cmds.shadingNode("file", asTexture=True, name=cross_name)
+        cmds.setAttr(cross_file + ".fileTextureName", cross_path,
+                     type="string")
+        element = "{0}.inputs[{1}]".format(cross_stack, cross_index)
+        cmds.connectAttr(cross_file + ".outColor", element + ".color",
+                         force=True)
+        cmds.setAttr(element + ".blendMode", 6 if cross_index == 0 else 1)
+        cmds.setAttr(element + ".alpha", 0.5 if cross_index == 0 else 1.0)
+        cmds.setAttr(element + ".isVisible", True)
+    cmds.connectAttr(cross_stack + ".outColor", maya_top + ".baseColor",
+                     force=True)
+
     _, surface_native = shaded_cube("surfaceCube", "surfaceShader")
     cmds.setAttr(surface_native + ".outColor", 0.9, 0.3, 0.1, type="double3")
     cmds.setAttr(surface_native + ".outTransparency", 0.2, 0.2, 0.2,
@@ -831,6 +879,116 @@ def build_scene():
     cmds.connectAttr(normal_file + ".outAlpha", bump + ".bumpValue", force=True)
     cmds.connectAttr(bump + ".outNormal", tiled + ".normalCamera", force=True)
 
+    # Two UV sets on one mesh, with one texture on each. Both halves matter:
+    # a build that records every uvLink answer would put a UV node in front
+    # of the default texture too, and only the pair catches that.
+    link_transform, uv_shader = shaded_cube("uvLinkCube", "aiStandardSurface")
+    uv_shape = cmds.listRelatives(link_transform, shapes=True, fullPath=True)[0]
+    cmds.polyUVSet(uv_shape, create=True, uvSet="secondUV")
+    cmds.polyUVSet(uv_shape, copy=True, uvSet="map1", newUVSet="secondUV")
+    # Offset the second set so the two are not interchangeable in a render.
+    cmds.polyEditUV(
+        link_transform + ".map[*]", uValue=0.25, uvSetName="secondUV"
+    )
+
+    def _uv_texture(name, attribute):
+        path = os.path.join(OUT, name + ".tx").replace("\\", "/")
+        with open(path, "w") as handle:
+            handle.write("uv set fixture")
+        node = cmds.shadingNode("file", asTexture=True, name=name)
+        cmds.setAttr(node + ".fileTextureName", path, type="string")
+        place = cmds.shadingNode(
+            "place2dTexture", asUtility=True, name=name + "Place"
+        )
+        cmds.connectAttr(place + ".outUV", node + ".uvCoord", force=True)
+        cmds.connectAttr(
+            place + ".outUvFilterSize", node + ".uvFilterSize", force=True
+        )
+        cmds.connectAttr(node + ".outColor", uv_shader + "." + attribute,
+                         force=True)
+        return node
+
+    _uv_texture("uvDefaultTex", "baseColor")
+    uv_second_file = _uv_texture("uvSecondTex", "coatColor")
+    cmds.uvLink(
+        make=True,
+        uvSet="{0}.uvSet[1].uvSetName".format(uv_shape),
+        texture=uv_second_file,
+    )
+
+    # A layered texture, with every case that behaves differently in one
+    # stack: a plain bottom, a blend mode the importer can build, one it
+    # cannot, and a layer Maya is not drawing at all. Index 0 is the top.
+    _, layered_shader = shaded_cube("layerTexCube", "aiStandardSurface")
+    layered = cmds.shadingNode("layeredTexture", asTexture=True,
+                               name="layerStack")
+
+    def _layer_texture(name):
+        path = os.path.join(OUT, name + ".tx").replace("\\", "/")
+        with open(path, "w") as handle:
+            handle.write("layer fixture")
+        node = cmds.shadingNode("file", asTexture=True, name=name)
+        cmds.setAttr(node + ".fileTextureName", path, type="string")
+        return node
+
+    # Top to bottom: an unsupported mode, a multiply, then the base.
+    for index, (name, mode, alpha) in enumerate((
+        ("layerSaturateTex", 10, 1.0),      # Saturate, no Blender equivalent
+        ("layerMultiplyTex", 6, 0.5),       # Multiply
+        ("layerBaseTex", 1, 1.0),           # Over
+    )):
+        element = "{0}.inputs[{1}]".format(layered, index)
+        cmds.connectAttr(_layer_texture(name) + ".outColor",
+                         element + ".color", force=True)
+        cmds.setAttr(element + ".blendMode", mode)
+        cmds.setAttr(element + ".alpha", alpha)
+        cmds.setAttr(element + ".isVisible", True)
+    # A hidden layer, which Maya renders as if it were not there.
+    hidden = "{0}.inputs[3]".format(layered)
+    cmds.connectAttr(_layer_texture("layerHiddenTex") + ".outColor",
+                     hidden + ".color", force=True)
+    cmds.setAttr(hidden + ".blendMode", 1)
+    cmds.setAttr(hidden + ".isVisible", False)
+    cmds.connectAttr(layered + ".outColor", layered_shader + ".baseColor",
+                     force=True)
+
+    # Standins: three cases that behave differently. A real Alembic that
+    # must actually load, an .ass that Blender cannot read at all and has to
+    # become a placeholder, and a gpuCache, which is the same idea under a
+    # different attribute name.
+    cmds.loadPlugin("AbcExport", quiet=True)
+    standin_source = cmds.polyCube(name="standinSource", width=4, height=4,
+                                   depth=4)[0]
+    cmds.setAttr(standin_source + ".translateY", 3)
+    standin_cache = os.path.join(OUT, "standin_source.abc").replace("\\", "/")
+    try:
+        cmds.AbcExport(j="-frameRange 1 1 -root |{0} -file {1}".format(
+            standin_source, standin_cache))
+    except Exception as exc:
+        print("  note: standin cache not written: {0}".format(exc))
+    cmds.delete(standin_source)
+
+    def _standin(name, path, node_type="aiStandIn", attr="dso"):
+        shape = cmds.createNode(node_type, name=name + "Shape")
+        transform = cmds.listRelatives(shape, parent=True, fullPath=True)[0]
+        transform = cmds.rename(transform, name)
+        cmds.setAttr(transform + ".translateX", 7)
+        try:
+            cmds.setAttr(shape + "." + attr, path, type="string")
+        except Exception as exc:
+            print("  note: {0}.{1} not set: {2}".format(name, attr, exc))
+        return transform
+
+    _standin("standinCube", standin_cache)
+    _standin("standinMissing",
+             os.path.join(OUT, "no_such_proxy.ass").replace("\\", "/"))
+    try:
+        cmds.loadPlugin("gpuCache", quiet=True)
+        _standin("cacheProxy", standin_cache, node_type="gpuCache",
+                 attr="cacheFileName")
+    except Exception as exc:
+        print("  note: gpuCache unavailable: {0}".format(exc))
+
     # Portals emit nothing and must not become black area lights.
     cmds.createNode("aiLightPortal", name="aiPortalShape")
 
@@ -911,7 +1069,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("44 meshes exported", payload["mesh_count"] == 44,
+    check("48 meshes exported", payload["mesh_count"] == 48,
           payload["mesh_count"])
     # Four: the locator, the empty null, the nested locator, and the group
     # holding only a curve. That last one has no mesh below it either, so
@@ -1479,7 +1637,8 @@ def main():
     # numbering the Blender import test reads from is left alone, and so the
     # first package keeps proving the default of pointing at the Maya paths.
     collected_result = za.export_scene(
-        os.path.join(OUT, "collected"), collect_textures_into_package=True
+        os.path.join(OUT, "collected"), collect_textures_into_package=True,
+        archive_package=True,
     )
     with open(collected_result["json_path"], "r") as handle:
         collected_payload = json.load(handle)
@@ -1491,6 +1650,47 @@ def main():
     check("something was collected",
           collected_result["collected_texture_count"] > 0,
           collected_result["collected_texture_count"])
+
+    # Volumes and standins are referenced files too. Collecting used to walk
+    # past both: the package carried its textures and left the VDB and the
+    # Alembic proxy outside, which is a self-contained package that is not.
+    files_folder = os.path.join(
+        collected_result["package_folder"], "files_collected"
+    )
+    check("the non-texture files were collected as well",
+          collected_result["collected_file_count"] > 0,
+          collected_result["collected_file_count"])
+    collected_names = sorted(os.listdir(files_folder)) if os.path.isdir(
+        files_folder) else []
+    check("the standin's cache is one of them",
+          any(name.endswith(".abc") for name in collected_names),
+          collected_names)
+    for section, key in (("volumes", "file_path"), ("standins", "file_path")):
+        outside_files = [
+            record.get(key) for record in collected_payload.get(section) or []
+            if record.get(key) and "files_collected" not in record.get(key)
+            and os.path.isfile(record.get(key) or "")
+        ]
+        check("every {0} file that exists points inside the package".format(
+            section[:-1]), not outside_files, outside_files[:2])
+
+    archive = collected_result.get("archive_path") or ""
+    check("an archive was written beside the package",
+          os.path.isfile(archive), archive)
+    if os.path.isfile(archive):
+        import zipfile as _zipfile
+
+        names = _zipfile.ZipFile(archive).namelist()
+        top = sorted(set(name.split("/")[0] for name in names))
+        # The package folder is the archive's top level, so unzipping makes
+        # the folder the importer wants rather than spilling files loose.
+        check("with the package folder as its only top level",
+              top == [os.path.basename(collected_result["package_folder"])],
+              top)
+        check("and the collected files inside it",
+              any("files_collected/" in name for name in names)
+              and any("textures_collected/" in name for name in names),
+              [n for n in names if "collected" in n][:3])
 
     collected_paths = []
     for mesh in collected_payload["meshes"]:
@@ -1813,6 +2013,11 @@ def main():
     check("and so is a circular one", radial.get("baked") is True,
           radial.get("baked"))
 
+    baked_stack = base_texture(by_material, "layerTexCube_shd")
+    check("with baking on, a layered texture is baked like any other network",
+          baked_stack.get("baked") is True and "layered" not in baked_stack,
+          dict((key, baked_stack.get(key)) for key in ("baked", "layered")))
+
     # With baking off there is nothing to reference, and this is where the
     # gradient itself has to travel. Its own folder, so the package the
     # Blender import test reads from is left alone.
@@ -1931,6 +2136,89 @@ def main():
     check("a Ball projection travels too, for the importer to refuse",
           ball_proj.get("type") == "Ball", ball_proj.get("type"))
 
+    print("\nlayered texture, unbaked package")
+    stack = base_texture(
+        unbaked_by_material, "layerTexCube_shd").get("layered") or {}
+    layers = stack.get("layers") or []
+    check("the stack was described rather than walked past",
+          bool(stack), stack)
+    # Three, not four: Maya is not drawing the hidden one.
+    check("the hidden layer was dropped", len(layers) == 3,
+          [layer.get("index") for layer in layers])
+    check("layers arrive top first, as Maya orders them",
+          [layer.get("blend_mode") for layer in layers]
+          == ["saturate", "multiply", "over"],
+          [layer.get("blend_mode") for layer in layers])
+    check("each layer carries its own texture",
+          len(layers) == 3
+          and all((layer.get("color") or {}).get("texture", {}).get("path")
+                  for layer in layers),
+          [(layer.get("color") or {}).get("texture", {}).get("node")
+           for layer in layers])
+    check("and its own alpha",
+          len(layers) > 1
+          and abs(((layers[1].get("alpha") or {}).get("value") or 0) - 0.5)
+          < 1e-5,
+          layers[1].get("alpha") if len(layers) > 1 else None)
+    check("the hidden layer's texture is nowhere in the record",
+          "layerHiddenTex" not in json.dumps(stack), stack)
+
+    # The crossing: a layeredTexture driving a channel of a shader that is
+    # itself a layer of a layeredShader. Both features were written alone.
+    crossed = (unbaked_by_material.get("mayaLayerCube_shd") or {}).get(
+        "layers") or []
+    crossed_top = (crossed or [{}, {}])[-1]
+    crossed_stack = (
+        ((crossed_top.get("channels") or {}).get("base_color") or {})
+        .get("texture") or {}
+    ).get("layered") or {}
+    check("a layered texture survives inside a layered shader",
+          len((crossed_stack.get("layers") or [])) == 2,
+          crossed_stack.get("layers"))
+    check("with its blend modes intact",
+          [item.get("blend_mode")
+           for item in (crossed_stack.get("layers") or [])]
+          == ["multiply", "over"],
+          [item.get("blend_mode")
+           for item in (crossed_stack.get("layers") or [])])
+
+    print("\nstandins")
+    standins = payload.get("standins") or []
+    by_standin = dict((item.get("standin"), item) for item in standins)
+    check("3 standins exported", payload.get("standin_count") == 3,
+          payload.get("standin_count"))
+    real = by_standin.get("standinCube") or {}
+    check("the Alembic standin carries its path",
+          str(real.get("file_path") or "").endswith("standin_source.abc"),
+          real.get("file_path"))
+    check("and the file is actually on disk, since it is referenced",
+          os.path.isfile(real.get("file_path") or ""), real.get("file_path"))
+    check("its node type travels", real.get("node_type") == "aiStandIn",
+          real.get("node_type"))
+    check("and the transform Maya put it at",
+          abs((real.get("world_matrix") or [0] * 16)[12] - 7.0) < 1e-4,
+          (real.get("world_matrix") or [])[12:15])
+    missing = by_standin.get("standinMissing") or {}
+    check("the unreadable standin travels too, path and all",
+          str(missing.get("file_path") or "").endswith(".ass"),
+          missing.get("file_path"))
+    proxy = by_standin.get("cacheProxy") or {}
+    check("a gpuCache is read through its own attribute name",
+          str(proxy.get("file_path") or "").endswith(".abc")
+          and proxy.get("node_type") == "gpuCache",
+          (proxy.get("node_type"), proxy.get("file_path")))
+    # Bounds are the proxy Maya draws, not a claim about the file: measured,
+    # the viewport fills them in and a headless export reads the default.
+    check("the bounds travel as Maya has them",
+          len(real.get("bounds_min") or []) == 3
+          and len(real.get("bounds_max") or []) == 3,
+          (real.get("bounds_min"), real.get("bounds_max")))
+    check("and the coverage scan no longer reports them",
+          not [item for item in (result.get("warnings") or [])
+               if "aiStandIn" in item or "gpuCache" in item],
+          [item for item in (result.get("warnings") or [])
+           if "aiStandIn" in item or "gpuCache" in item])
+
     print("\ninstancers")
     instancers = payload.get("instancers") or []
     check("1 instancer exported", payload.get("instancer_count") == 1,
@@ -1972,6 +2260,41 @@ def main():
           len(steady.get("visibility_samples") or []))
 
     print("\nblend shaders")
+    for cube, mode, transparency in (("mayaLayerCube", "layer_shaders", 0.4),
+                                     ("mayaLayerTexCube", "layer_texture",
+                                      0.25)):
+        record = by_material.get(cube + "_shd") or {}
+        stack_layers = record.get("layers") or []
+        check("{0} is supported".format(cube),
+              record.get("supported") is True, record.get("supported"))
+        # A blend shader describes no surface itself; reading it as one used
+        # to reach for ".color" and take the whole export down.
+        check("and carries no channels of its own",
+              not (record.get("channels") or {}),
+              sorted((record.get("channels") or {}).keys()))
+        check("both layers travel", len(stack_layers) == 2,
+              [item.get("shader") for item in stack_layers])
+        if len(stack_layers) == 2:
+            # Maya's index 0 is the top, and this list is bottom first.
+            check("the bottom layer comes first",
+                  str(stack_layers[0].get("shader") or "").endswith("Base"),
+                  [item.get("shader") for item in stack_layers])
+            check("the compositing mode travels",
+                  stack_layers[1].get("compositing") == mode,
+                  stack_layers[1].get("compositing"))
+            value = (stack_layers[1].get("transparency") or {}).get("value")
+            components = value if isinstance(value, list) else [value]
+            check("and the layer's transparency, uninverted",
+                  abs((components[0] or 0) - transparency) < 1e-5, value)
+
+    cross_layers = (by_material.get("mayaLayerCube_shd") or {}).get("layers")
+    cross_top = (cross_layers or [{}, {}])[-1]
+    cross_base = ((cross_top.get("channels") or {}).get("base_color") or {})
+    check("a layered texture inside a layered shader is baked when baking is "
+          "on",
+          (cross_base.get("texture") or {}).get("baked") is True,
+          cross_base.get("texture"))
+
     mix_record = by_material.get("mixCube_shd") or {}
     mix_layers = mix_record.get("layers") or []
     check("aiMixShader is supported", mix_record.get("supported") is True,
@@ -2180,6 +2503,23 @@ def main():
           abs(tiled.get("subsurface_scale", {}).get("value", 0) - 2.5) < 1e-5)
     check("anisotropy 0.35",
           abs(tiled.get("anisotropic", {}).get("value", 0) - 0.35) < 1e-5)
+
+    print("\nuv sets")
+    uv_channels = channels("uvLinkCube")
+    default_texture = (
+        uv_channels.get("base_color", {}).get("texture", {})
+    )
+    second_texture = (
+        uv_channels.get("coat_tint", {}).get("texture", {})
+    )
+    check("the default-linked texture records no uv set",
+          "uv_set" not in default_texture, default_texture.get("uv_set"))
+    check("the linked texture records its uv set",
+          (second_texture.get("uv_set") or {}).get("name") == "secondUV",
+          second_texture.get("uv_set"))
+    check("one mesh, so no conflict is claimed",
+          "conflict" not in (second_texture.get("uv_set") or {}),
+          second_texture.get("uv_set"))
 
     print("\nprocedural baking")
     proc = channels("procCube")

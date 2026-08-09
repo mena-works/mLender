@@ -35,6 +35,11 @@ from .constants import (
     REMAP_INTERPOLATIONS,
     REMAP_RAMP_ATTR,
     REMAP_RAMP_CHILDREN,
+    LAYERED_BLEND_MODES,
+    LAYERED_DEFAULT_BLEND_MODE,
+    LAYERED_TEXTURE_ENTRIES,
+    LAYERED_TEXTURE_TYPE,
+    MAX_LAYERED_DEPTH,
     PLACEMENT_NODE_TYPE,
     PLACEMENT_NUMERIC_ATTRS,
     TEXTURE_PATH_ATTRS,
@@ -42,6 +47,8 @@ from .constants import (
     UDIM_TILING_MODE,
     UDIM_TOKEN,
     UDIM_TOKEN_PATTERN,
+    UV_SET_NAME_PLUG,
+    DEFAULT_UV_SET_INDEX,
 )
 from .mayautils import (
     absolute_user_path,
@@ -57,19 +64,31 @@ from .mayautils import (
 )
 
 
-def texture_from_plug(plug):
+def texture_from_plug(plug, depth=0):
     """Return a texture record for a plug, or None when nothing is connected.
 
     When the plug is connected but no file path can be found anywhere upstream
     the record is still returned with an empty path and ``unsupported_network``
     set, so the importer can fall back to the material's flat value.
+
+    ``depth`` counts how many layered textures this call is already inside;
+    a layer's own colour comes back through here, and the count is what stops
+    a stack of stacks from recursing without end.
     """
-    source_plugs = cmds.listConnections(
-        plug,
-        source=True,
-        destination=False,
-        plugs=True,
-    ) or []
+    # A plug an attribute table names is not always a plug Maya can address.
+    # Measured: attr_exists says "color" is on a layeredShader, because its
+    # multi compound has a child of that name, and reading "shader.color"
+    # then raises -- which used to take the whole export down with it rather
+    # than costing one channel.
+    try:
+        source_plugs = cmds.listConnections(
+            plug,
+            source=True,
+            destination=False,
+            plugs=True,
+        ) or []
+    except Exception:
+        return None
     if not source_plugs:
         return None
 
@@ -99,6 +118,30 @@ def texture_from_plug(plug):
             record["projection"]["image"] = image
         return record
 
+    # A layered texture has files under it, so the walk below would reach one
+    # of them and hand over a single layer as if it were the whole channel:
+    # measured, a two layer stack arrived as its bottom texture alone. The
+    # stack is described instead, and the record stays unsupported so the
+    # bake still wins when baking is on.
+    layered = layered_info(candidates, depth)
+    if layered:
+        record = {
+            "path": "",
+            "node": layered["node"],
+            "node_type": LAYERED_TEXTURE_TYPE,
+            "source_plug": source_plug,
+            "unsupported_network": True,
+            "layered": layered,
+        }
+        corrections, unsupported = correction_chain(
+            candidates, layered["node_path"]
+        )
+        if corrections:
+            record["corrections"] = corrections
+        if unsupported:
+            record["unsupported_corrections"] = unsupported
+        return record
+
     for node in candidates:
         path = texture_path_from_node(node)
         if path:
@@ -118,6 +161,9 @@ def texture_from_plug(plug):
             placement = placement_info(node)
             if placement:
                 record["placement"] = placement
+            uv_set = uv_set_info(node)
+            if uv_set:
+                record["uv_set"] = uv_set
             bump = bump_info(candidates)
             if bump:
                 record["bump"] = bump
@@ -142,6 +188,90 @@ def texture_from_plug(plug):
     if ramp:
         record["ramp"] = ramp
     return record
+
+
+def layered_info(candidates, depth=0):
+    """The layeredTexture driving a channel, described layer by layer.
+
+    Layers come back in Maya's own order, index 0 first, which is the **top**
+    of the stack. The importer rebuilds from the other end, and keeping Maya's
+    order here means the record reads the way the Attribute Editor does.
+    """
+    if depth >= MAX_LAYERED_DEPTH:
+        return {}
+    for node in candidates:
+        if node_type(node) != LAYERED_TEXTURE_TYPE:
+            continue
+        layers = layered_layers(node, depth)
+        if not layers:
+            return {}
+        return {
+            "node": node_label(node),
+            "node_path": node,
+            "layers": layers,
+        }
+    return {}
+
+
+def layered_layers(node, depth=0):
+    """Every visible layer of a layeredTexture, top first.
+
+    A hidden layer is dropped rather than carried with a flag: Maya renders it
+    as if it were not there, and a node in the Blender tree that contributes
+    nothing is a node somebody has to work out the purpose of.
+    """
+    try:
+        indices = cmds.getAttr(
+            node + "." + LAYERED_TEXTURE_ENTRIES, multiIndices=True
+        ) or []
+    except Exception:
+        return []
+
+    layers = []
+    for index in indices:
+        element = "{0}.{1}[{2}]".format(node, LAYERED_TEXTURE_ENTRIES, index)
+        if not _layer_visible(element):
+            continue
+        layers.append({
+            "index": int(index),
+            "blend_mode": _layer_blend_mode(element),
+            "color": _layer_input(element + ".color", depth),
+            "alpha": _layer_input(element + ".alpha", depth),
+        })
+    return layers
+
+
+def _layer_visible(element):
+    try:
+        return bool(cmds.getAttr(element + ".isVisible"))
+    except Exception:
+        return True
+
+
+def _layer_blend_mode(element):
+    try:
+        index = int(cmds.getAttr(element + ".blendMode"))
+    except Exception:
+        return LAYERED_DEFAULT_BLEND_MODE
+    if 0 <= index < len(LAYERED_BLEND_MODES):
+        return LAYERED_BLEND_MODES[index]
+    return LAYERED_DEFAULT_BLEND_MODE
+
+
+def _layer_input(plug, depth):
+    """A layer's colour or alpha: whatever drives it, or the flat value.
+
+    The upstream walk is the same one the channel itself goes through, so a
+    layer can hold a file with its own placement, a projection or a gradient
+    without any of that being repeated here.
+    """
+    texture = texture_from_plug(plug, depth=depth + 1)
+    if texture:
+        return {"texture": texture}
+    value = plug_value(plug)
+    if value is None:
+        return {}
+    return {"value": value}
 
 
 def projection_info(candidates):
@@ -310,6 +440,62 @@ def placement_info(texture_node):
         return None
     values["node"] = node_label(placement)
     return values
+
+
+def uv_set_info(texture_node):
+    """The UV set a texture reads, when it is not the mesh's default one.
+
+    Only a difference is recorded. Maya's default link is index 0, which the
+    FBX writes as the first and active UV layer, so a texture on it already
+    lands right in Blender and needs no node there; measured, ``uvLink`` names
+    index 0 for a texture nobody ever linked, so recording every answer would
+    put a node in front of every texture in the scene.
+
+    ``uvLink`` answers once per mesh the texture reaches, and one material
+    carries one UV source. When those answers disagree the first non-default
+    one is used and the disagreement is reported rather than resolved.
+    """
+    try:
+        plugs = cmds.uvLink(query=True, texture=texture_node) or []
+    except Exception:
+        return None
+
+    found = []
+    non_default = []
+    for plug in plugs:
+        name = _uv_set_name(plug)
+        if not name:
+            continue
+        found.append(name)
+        if name != _default_uv_set_name(plug):
+            non_default.append(name)
+
+    if not non_default:
+        return None
+
+    record = {"name": non_default[0]}
+    distinct = unique(found)
+    if len(distinct) > 1:
+        record["conflict"] = distinct
+    return record
+
+
+def _uv_set_name(plug):
+    try:
+        return cmds.getAttr(plug)
+    except Exception:
+        return None
+
+
+def _default_uv_set_name(plug):
+    """The name of index 0 on the shape a uvLink plug names."""
+    shape = plug.split(".", 1)[0]
+    try:
+        return cmds.getAttr(
+            UV_SET_NAME_PLUG.format(shape, DEFAULT_UV_SET_INDEX)
+        )
+    except Exception:
+        return None
 
 
 def correction_chain(candidates, texture_node):

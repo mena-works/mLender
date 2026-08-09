@@ -13,6 +13,7 @@ see maya_export_test.py and blender_import_test.py.
 """
 import math
 import os
+import re
 import sys
 import types
 
@@ -28,6 +29,24 @@ def check(label, condition, detail=""):
     else:
         failures.append("{0} {1}".format(label, detail))
         print("  FAIL  {0}  {1}".format(label, detail))
+
+
+def _names_in_block(source, opener):
+    """The bare names listed in one parenthesised block, by its opening line."""
+    start = source.find(opener)
+    if start < 0:
+        return set()
+    end = source.find(")", start)
+    body = source[start + len(opener):end]
+    return set(re.findall(r"(\w+)\s*,", body))
+
+
+def package_modules(folder):
+    """Every importable module in a package folder, by name."""
+    return set(
+        name[:-3] for name in os.listdir(folder)
+        if name.endswith(".py") and name != "__init__.py"
+    )
 
 
 def close(label, got, want, tolerance=1e-9):
@@ -131,6 +150,38 @@ def main():
         check("exporter exposes {0}".format(attr), hasattr(exporter, attr))
     for attr in ("register", "unregister", "import_scene_package", "bl_info"):
         check("importer exposes {0}".format(attr), hasattr(importer, attr))
+
+    print("\nevery module is in its reload list")
+    # A module left out of a reload list keeps running its old code through a
+    # reload, which at development time looks like the edit not having worked.
+    # It is on the project's own forbidden list and nothing enforced it.
+    exporter_modules = package_modules(
+        os.path.join(TOOL_ROOT, "mlender_exporter")
+    )
+    listed = set(exporter.SUBMODULES)
+    check("exporter SUBMODULES covers every module",
+          exporter_modules <= listed,
+          "missing {0}".format(sorted(exporter_modules - listed)))
+    check("and names nothing that is not there",
+          listed <= exporter_modules,
+          "stale {0}".format(sorted(listed - exporter_modules)))
+
+    importer_modules = package_modules(
+        os.path.join(TOOL_ROOT, "mlender_importer")
+    )
+    with open(os.path.join(TOOL_ROOT, "mlender_importer", "__init__.py"),
+              encoding="utf-8") as handle:
+        importer_source = handle.read()
+    # Two lists, because the project's own rule says two: the import block and
+    # the tuple that is reloaded. They look identical, so they are read one at
+    # a time -- a single pattern over the whole file matches their union and
+    # a module missing from one of them passes.
+    for label, opener in (("import block", "from . import ("),
+                          ("reload list", "for _module in (")):
+        names = _names_in_block(importer_source, opener)
+        check("importer {0} covers every module".format(label),
+              importer_modules <= names,
+              "missing {0}".format(sorted(importer_modules - names)))
 
     print("\ncross-package contracts")
     for field in (
@@ -534,6 +585,256 @@ def main():
         )
         == ("redshift", "arnold", "maya"),
     )
+
+    print("\nuv sets travel only when they differ from the default")
+    textures = exporter.textures
+
+    class _UvCmds(object):
+        """Just enough of maya.cmds for the uvLink walk."""
+
+        def __init__(self, links, names):
+            self._links = links
+            self._names = names
+
+        def uvLink(self, **kwargs):
+            return self._links
+
+        def getAttr(self, plug):
+            return self._names.get(plug)
+
+    saved_cmds = textures.cmds
+    try:
+        # Measured: uvLink names index 0 even for a texture nobody linked, so
+        # the default answer must record nothing at all.
+        textures.cmds = _UvCmds(
+            ["shapeA.uvSet[0].uvSetName"],
+            {"shapeA.uvSet[0].uvSetName": "map1"},
+        )
+        check(
+            "default uv set records nothing",
+            textures.uv_set_info("someFile") is None,
+        )
+
+        both = {
+            "shapeA.uvSet[0].uvSetName": "map1",
+            "shapeA.uvSet[1].uvSetName": "secondUV",
+            "shapeB.uvSet[0].uvSetName": "map1",
+        }
+        textures.cmds = _UvCmds(["shapeA.uvSet[1].uvSetName"], both)
+        check(
+            "non-default uv set is recorded by name",
+            textures.uv_set_info("someFile") == {"name": "secondUV"},
+            repr(textures.uv_set_info("someFile")),
+        )
+
+        # A first set that is not called map1 is still the default one; the
+        # rule is the index, not the name.
+        textures.cmds = _UvCmds(
+            ["shapeC.uvSet[0].uvSetName"],
+            {"shapeC.uvSet[0].uvSetName": "renamedSet"},
+        )
+        check(
+            "a renamed first set still counts as default",
+            textures.uv_set_info("someFile") is None,
+        )
+
+        textures.cmds = _UvCmds(
+            ["shapeA.uvSet[1].uvSetName", "shapeB.uvSet[0].uvSetName"], both
+        )
+        conflicted = textures.uv_set_info("someFile")
+        check(
+            "disagreeing meshes are reported, not resolved silently",
+            conflicted == {
+                "name": "secondUV",
+                "conflict": ["secondUV", "map1"],
+            },
+            repr(conflicted),
+        )
+    finally:
+        textures.cmds = saved_cmds
+
+    class _UvNode(object):
+        def __init__(self, name, uv_map):
+            self.name = name
+            self.uv_map = uv_map
+
+    class _UvMaterial(dict):
+        def __init__(self, name, nodes):
+            dict.__init__(self)
+            self["ml_generated"] = True
+            self.name = name
+            self.node_tree = type("_Tree", (object,), {"nodes": nodes})()
+
+    def _uv_object(name, layers, materials):
+        return type("_Obj", (object,), {
+            "name": name,
+            "data": type("_Mesh", (object,), {
+                "uv_layers": [
+                    type("_Layer", (object,), {"name": layer})()
+                    for layer in layers
+                ],
+            })(),
+            "material_slots": [
+                type("_Slot", (object,), {"material": material})()
+                for material in materials
+            ],
+        })()
+
+    materials_module = importer.materials
+    asking = _UvMaterial("ML_mat", [_UvNode("ML_UVMap", "secondUV")])
+    found = materials_module.verify_uv_sets(
+        [_uv_object("cube", ["map1", "secondUV"], [asking])], []
+    )
+    check("a uv set the mesh carries is silent", found == [], repr(found))
+
+    missing = materials_module.verify_uv_sets(
+        [
+            _uv_object("cubeA", ["map1"], [asking]),
+            _uv_object("cubeB", ["map1"], [asking]),
+        ],
+        [],
+    )
+    check(
+        "a uv set no mesh carries is reported once, not per mesh",
+        len(missing) == 1 and "secondUV" in missing[0],
+        repr(missing),
+    )
+
+    print("\nevery layered blend mode is accounted for")
+    exporter_modes = set(exporter.constants.LAYERED_BLEND_MODES)
+    handled = set(importer.constants.LAYERED_BLEND_TYPES)
+    replaced = {importer.constants.LAYERED_REPLACE_MODE}
+    refused = set(importer.constants.LAYERED_UNSUPPORTED_MODES)
+    check(
+        "the three sets cover Maya's fourteen modes exactly",
+        handled | replaced | refused == exporter_modes,
+        "unaccounted {0}, unknown {1}".format(
+            sorted(exporter_modes - handled - replaced - refused),
+            sorted(handled | replaced | refused - exporter_modes),
+        ),
+    )
+    check(
+        "and no mode is in two of them",
+        not (handled & refused) and not (handled & replaced)
+        and not (refused & replaced),
+        sorted((handled & refused) | (handled & replaced)
+               | (refused & replaced)),
+    )
+    check(
+        "the default mode is one the importer can build",
+        exporter.constants.LAYERED_DEFAULT_BLEND_MODE in handled,
+        exporter.constants.LAYERED_DEFAULT_BLEND_MODE,
+    )
+
+    print("\nplacement identity survived the uv rewrite")
+    identity = materials_module._placement_is_identity
+    check("an untouched placement is identity", identity({}))
+    check(
+        "repeat 1 and no offset is identity",
+        identity({"repeat_u": 1.0, "repeat_v": 1.0, "offset": [0.0, 0.0]}),
+    )
+    for changed in (
+        {"repeat_u": 4.0},
+        {"repeat_v": 4.0},
+        {"offset": [0.5, 0.0]},
+        {"offset": [0.0, 0.5]},
+        {"rotate_uv_degrees": 90.0},
+        # Past the usual range on purpose: a rule that only looks at sensible
+        # numbers hides the bug that narrows the range.
+        {"repeat_u": -3.0},
+    ):
+        check(
+            "{0!r} is not identity".format(changed),
+            not identity(changed),
+        )
+
+    print("\na collected package survives being moved")
+    check(
+        "both sides name the same collected folders",
+        set(importer.constants.COLLECTED_FOLDERS) == {
+            exporter.constants.COLLECT_FOLDER_NAME,
+            exporter.constants.FILE_COLLECT_FOLDER_NAME,
+        },
+        (importer.constants.COLLECTED_FOLDERS,
+         exporter.constants.COLLECT_FOLDER_NAME,
+         exporter.constants.FILE_COLLECT_FOLDER_NAME),
+    )
+
+    import shutil
+    import tempfile
+
+    resolve = importer.utils.resolve_package_paths
+    package = tempfile.mkdtemp(prefix="mlender_contract_")
+    try:
+        textures = os.path.join(
+            package, exporter.constants.COLLECT_FOLDER_NAME
+        )
+        files = os.path.join(
+            package, exporter.constants.FILE_COLLECT_FOLDER_NAME
+        )
+        os.makedirs(textures)
+        os.makedirs(files)
+        for name, folder in (("wood.png", textures), ("wood.1001.png", textures),
+                             ("smoke.vdb", files), ("proxy.abc", files)):
+            with open(os.path.join(folder, name), "w") as handle:
+                handle.write("x")
+        present = os.path.join(package, "already_here.png")
+        with open(present, "w") as handle:
+            handle.write("x")
+
+        payload = {
+            "meshes": [{"materials": [{"channels": {
+                "base_color": {"texture": {"path": "D:/gone/wood.png"}},
+                "roughness": {"texture": {"path": present}},
+                "opacity": {"texture": {
+                    "path": "D:/gone/wood.<UDIM>.png",
+                    "udim_pattern": "D:/gone/wood.<UDIM>.png",
+                }},
+                "emission": {"texture": {"layered": {"layers": [
+                    {"color": {"texture": {"path": "D:/gone/wood.png"}}},
+                ]}}},
+            }}]}],
+            "volumes": [{"file_path": "D:/gone/smoke.vdb"}],
+            "standins": [{"file_path": "D:/gone/proxy.abc"}],
+        }
+        moved = resolve(payload, package)
+        channels = payload["meshes"][0]["materials"][0]["channels"]
+        check("a missing texture is found inside the package",
+              channels["base_color"]["texture"]["path"].endswith(
+                  "textures_collected/wood.png"),
+              channels["base_color"]["texture"]["path"])
+        check("a texture that still exists is left alone",
+              channels["roughness"]["texture"]["path"] == present,
+              channels["roughness"]["texture"]["path"])
+        # A pattern is not a file, so isfile can never find it; the tiles are
+        # what has to be looked for.
+        check("a UDIM pattern is repointed by its tiles",
+              channels["opacity"]["texture"]["path"].endswith(
+                  "textures_collected/wood.<UDIM>.png"),
+              channels["opacity"]["texture"]["path"])
+        check("a texture inside a layered stack is reached too",
+              (channels["emission"]["texture"]["layered"]["layers"][0]
+               ["color"]["texture"]["path"]).endswith("wood.png"),
+              channels["emission"]["texture"]["layered"]["layers"][0])
+        check("volumes and standins are repointed as well",
+              payload["volumes"][0]["file_path"].endswith("smoke.vdb")
+              and payload["standins"][0]["file_path"].endswith("proxy.abc")
+              and "files_collected" in payload["standins"][0]["file_path"],
+              (payload["volumes"][0], payload["standins"][0]))
+        check("and the Maya original is kept",
+              channels["base_color"]["texture"]["original_package_path"]
+              == "D:/gone/wood.png",
+              channels["base_color"]["texture"].get("original_package_path"))
+        check("the count is what was moved, not what was looked at",
+              moved == 6, moved)
+
+        untouched = {"volumes": [{"file_path": "D:/gone/smoke.vdb"}]}
+        check("a package folder that is not there changes nothing",
+              resolve(untouched, os.path.join(package, "no_such")) == 0
+              and untouched["volumes"][0]["file_path"] == "D:/gone/smoke.vdb",
+              untouched)
+    finally:
+        shutil.rmtree(package, ignore_errors=True)
 
     print("\nschema validation guards the scene")
     validate = importer.importer.validate_schema_version

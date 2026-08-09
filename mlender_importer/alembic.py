@@ -69,7 +69,7 @@ def import_alembic(package_folder, package_data, import_scale, warnings):
 
     before = set(bpy.data.objects)
     try:
-        _run_import(path, scale)
+        run_alembic_import(path, scale)
     except Exception as exc:
         warnings.append("Alembic cache could not be read: {0}".format(exc))
         return 0
@@ -99,8 +99,12 @@ def cached_particle_names(package_data):
     return names
 
 
-def _run_import(path, scale):
-    """Call the operator, dropping arguments an older build rejects."""
+def run_alembic_import(path, scale):
+    """Call the operator, dropping arguments an older build rejects.
+
+    Shared with the standin path, which opens an Alembic the package only
+    points at rather than one it carries.
+    """
     kwargs = {
         "filepath": path,
         "scale": scale,

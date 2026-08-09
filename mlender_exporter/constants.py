@@ -17,7 +17,7 @@ LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
 LIVELINK_PROTOCOL = "mlender_livelink"
 LIVELINK_VERSION = 3
-EXPORT_SCHEMA_VERSION = 36
+EXPORT_SCHEMA_VERSION = 41
 
 LIGHT_NODE_TYPES = (
     "RedshiftPhysicalLight",
@@ -246,6 +246,36 @@ RAMP_TEXTURE_INTERPOLATIONS = (
     "Spike",
 )
 
+# layeredTexture. Attribute names and the blendMode enum read off a live Maya
+# 2023 node; the enum order below is Maya's own spelling, lowercased.
+#
+# Index 0 is the **top** layer, which was measured rather than assumed and is
+# the reverse of the first guess: a sweep that varied index 1 produced the
+# same colour thirty-four times running, because an opaque Over sitting on top
+# hides everything below it including the blend mode of what is below.
+LAYERED_TEXTURE_TYPE = "layeredTexture"
+LAYERED_TEXTURE_ENTRIES = "inputs"
+LAYERED_BLEND_MODES = (
+    "none",
+    "over",
+    "in",
+    "out",
+    "add",
+    "subtract",
+    "multiply",
+    "difference",
+    "lighten",
+    "darken",
+    "saturate",
+    "desaturate",
+    "illuminate",
+    "cpv_modulate",
+)
+LAYERED_DEFAULT_BLEND_MODE = "over"
+# A layered texture may hold another one. The limit is a loop guard, not a
+# judgement about how deep a lookdev artist should stack.
+MAX_LAYERED_DEPTH = 8
+
 # Shaders that blend other shaders rather than describing a surface. Names
 # read from a live MtoA 5.4.8 session: aiMixShader has shader1/shader2/mix,
 # aiLayerShader has input1..8 with mix1..8, enable1..8 and name1..8.
@@ -262,6 +292,24 @@ MIX_SHADER_MODE = "mode"
 LAYER_SHADER_TYPE = "aiLayerShader"
 LAYER_SHADER_SLOTS = 8
 
+# Maya's own layeredShader. Children read off a live 2023 node: inputs is a
+# multi compound of color, transparency and glowColor, and index 0 is the top
+# layer as it is on layeredTexture.
+#
+# Its weight is a transparency -- how much of what is *below* shows through --
+# and its two compositing modes use it differently. Both were measured by
+# baking an unlit green over an unlit red:
+#
+#   Layer Shaders   T=0.5 -> (0.5, 1.0, 0)    upper + T * below
+#   Layer Texture   T=0.5 -> (0.5, 0.5, 0)    lerp(upper, below, T)
+#
+# The green staying at 1.0 in the first is the whole difference: that mode
+# adds, it does not fade the upper layer out. Layer Shaders is the default.
+MAYA_LAYERED_SHADER_TYPE = "layeredShader"
+MAYA_LAYERED_SHADER_ENTRIES = "inputs"
+MAYA_LAYERED_COMPOSITING_ATTR = "compositingFlag"
+MAYA_LAYERED_COMPOSITING_MODES = ("layer_shaders", "layer_texture")
+
 # A blend shader may hold another blend shader. The limit is a loop guard,
 # not a judgement about how deep a lookdev artist should go.
 MAX_BLEND_DEPTH = 8
@@ -269,6 +317,7 @@ MAX_BLEND_DEPTH = 8
 SUPPORTED_SHADER_TYPES = (
     MIX_SHADER_TYPE,
     LAYER_SHADER_TYPE,
+    MAYA_LAYERED_SHADER_TYPE,
     "RedshiftStandardMaterial",
     "RedshiftMaterial",
     "aiStandardSurface",
@@ -462,10 +511,53 @@ PLACEMENT_NUMERIC_ATTRS = {
     "noise_v": "noiseV",
 }
 
+# UV sets. Maya keeps the names on an indexed attribute of the mesh shape, and
+# ``uvLink`` answers in exactly this form -- measured, not guessed:
+# "probeCubeShape.uvSet[1].uvSetName". It answers for an unlinked texture too,
+# naming index 0, so a plug on its own does not mean a non-default set.
+UV_SET_NAME_PLUG = "{0}.uvSet[{1}].uvSetName"
+DEFAULT_UV_SET_INDEX = 0
+
+# Shapes that stand in for a file rather than carrying geometry. Names read
+# off live Maya 2023 nodes: the path is "dso" on a standin and
+# "cacheFileName" on a gpuCache, which is one idea under two names and so a
+# table rather than a branch.
+#
+# Measured: Min/MaxBoundingBox is filled in by the viewport, not the DG, so a
+# headless export reads its plus-minus-one default and exactWorldBoundingBox
+# answers zero. The bounds travel as what Maya draws, not as a claim about
+# what is in the file.
+STANDIN_NODE_TYPES = {
+    "aiStandIn": {
+        "path": ("dso",),
+        "object_path": ("objectPath",),
+        "bounds_min": ("MinBoundingBox",),
+        "bounds_max": ("MaxBoundingBox",),
+        "frame": ("frameNumber",),
+        "frame_offset": ("frameOffset",),
+        "use_frame_extension": ("useFrameExtension",),
+    },
+    "gpuCache": {
+        "path": ("cacheFileName",),
+        "object_path": ("cacheGeomPath",),
+        "bounds_min": ("boundingBoxMin",),
+        "bounds_max": ("boundingBoxMax",),
+        "frame": (),
+        "frame_offset": (),
+        "use_frame_extension": (),
+    },
+}
+
 # Texture collection. Off by default: pointing at the Maya paths is right when
 # both applications run on the same machine and avoids duplicating a texture
 # library, but it breaks the moment the package moves.
 COLLECT_FOLDER_NAME = "textures_collected"
+# Volumes and standins are referenced files too, and collecting used to walk
+# straight past them: measured, a package built with collecting on carried its
+# texture and left the VDB and the Alembic proxy outside. They go in their own
+# folder rather than among the textures, because they are not textures and a
+# user looking for one should not have to know that.
+FILE_COLLECT_FOLDER_NAME = "files_collected"
 
 # Colour management. Flag names read from a live Maya 2023 session, where the
 # defaults are the ACES config: renderingSpaceName "ACEScg" and
@@ -754,7 +846,12 @@ BUMP_INTERP_ATTR = "bumpInterp"  # Bump : Tangent Space Normals : Object Space
 # values whatever the colour management setting, and it cannot write EXR (the
 # file node appears but nothing lands on disk), so the format list is short.
 BAKE_FILE_FORMAT = "png"
-BAKE_BACKGROUND_MODE = "black"
+# Measured: -backgroundMode takes "shader" or "color" and nothing else. This
+# used to read "black", which Maya answered with "Wrong argument to
+# -backgroundMode, using 'shader' mode" and then ignored -- so the constant
+# named one behaviour and the bakes had always used the other. Spelling the
+# real one keeps the bakes identical and stops the constant lying.
+BAKE_BACKGROUND_MODE = "shader"
 BAKE_SEMANTIC = "baked_procedural"
 DEFAULT_BAKE_RESOLUTION = 1024
 MAX_BAKE_RESOLUTION = 8192
