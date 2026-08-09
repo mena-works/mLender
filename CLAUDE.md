@@ -44,6 +44,7 @@ mlender_exporter/     # Maya (import sırası = bağımlılık sırası)
   sets.py                # selection set ve display layer
   lights.py              # ışık keşfi ve kayıtları
   cameras.py             # kamera keşfi ve lens kayıtları
+  coverage.py            # taşınmayanı sayan tarama (sessiz kaybı bitirir)
   fbx.py                 # MEL FBXExport
   alembic.py             # deforme mesh + emitter particle için AbcExport
   livelink.py            # TCP istemci

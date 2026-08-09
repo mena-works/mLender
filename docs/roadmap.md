@@ -45,20 +45,33 @@ FBX'in NURBS ayarının gerçek adı **probe edilmeden** tabloya yazılmamalıd�
 
 ---
 
-## 2. Kontrol edilmedi, aynı sınıfta olabilir
+## 2. Envanter turu — yapıldı
 
-Bunlar **ölçülmedi**. Keşif listesinde aranmadıkları kesin, ama FBX üzerinden
-gelip gelmedikleri bilinmiyor. Her biri yarım saatlik bir probe ile kapanır.
+Probe çalıştırıldı. Sonuçlar:
 
-- `gpuCache` düğümleri — prodüksiyonda yaygın
-- `aiStandIn` (Arnold procedural) — yaygın
-- Işık filtreleri: gobo, barn door, blocker
-- XGen, nHair, nCloth, fluid
-- VDB **dizileri** (kare başına dosya) — volume kaydı tek yol taşıyor
-- Kamera image plane animasyonu, overscan, film offset
+**Sessizce kayboluyordu** (artık uyarılıyor, aşağıya bak):
+`gpuCache`, `aiStandIn`, `fluidShape`, ışık filtreleri (`aiGobo`),
+`hairSystem` — ve daha önce ölçülen NURBS yüzeyler ile Maya subdiv yüzeyleri.
 
-**Bu turu 1'den önce yapmak savunulabilir:** neyin kaybolduğunu bilmeden
-neyin taşınacağını seçmek zordur.
+**Temize çıktı, listeden düştü:**
+
+- **Image plane** — kamera kaydında geliyor, kayıp değil.
+- **Constraint sonucu** — FBX bake'ine düşüyor. Ölçüldü: Maya'da 8 cm
+  sürülen bir küp Blender'da 0.0794 m hareket ediyor.
+- nCloth ve hair'in kaynak mesh'leri mesh oldukları için zaten geliyor.
+
+**Kapatılmadı, hâlâ kontrol edilmedi:** VDB **dizileri** (kare başına dosya),
+kamera overscan/film offset, XGen.
+
+### Sonuç: sınıf kapatıldı
+
+Altı tipi tek tek taşımak yedincisini sessiz bırakırdı. Bunun yerine
+`coverage.py` eklendi: sahnedeki her renderlanabilir shape, paketin
+taşıdığıyla karşılaştırılıyor ve artakalan tip tip, sayı ve örnekle
+bildiriliyor.
+
+Yani **1. kategorinin ilk üç satırı artık sessiz değil** — hâlâ taşınmıyorlar
+ama kullanıcı ne kaybettiğini okuyor. Taşıma işi duruyor, aciliyeti düştü.
 
 ---
 

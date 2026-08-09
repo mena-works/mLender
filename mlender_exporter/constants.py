@@ -180,6 +180,16 @@ RAMP_CHANNEL_ATTRS = (
 # what the importer builds.
 RAMP_FACING_SEMANTIC = "maya_ramp_facing_angle"
 
+# Shape types the coverage scan must not report. Lights and cameras travel
+# through the JSON rather than as geometry, so they are accounted for
+# elsewhere; an image plane belongs to its camera; a particle instancer's
+# output is not a shape the package carries on its own.
+COVERAGE_IGNORED_SHAPE_TYPES = (
+    "imagePlane",
+    "instancer",
+    "locator",
+)
+
 # Texture projection. A projection node maps an image through a
 # place3dTexture rather than through UVs, and the enum below was read from a
 # live Maya 2023 node.

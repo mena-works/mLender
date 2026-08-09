@@ -317,6 +317,12 @@ def build_scene():
                      cyl + ".placementMatrix", force=True)
     cmds.connectAttr(cyl + ".outColor", cyl_shd + ".baseColor", force=True)
 
+    # A geometry kind this build does not carry. Measured before the
+    # coverage scan existed: it left the scene with nothing said, and so did
+    # gpuCache, aiStandIn, fluids and Maya subdivision surfaces.
+    nurbs_surface = cmds.sphere(name="nurbsBall", r=1)[0]
+    cmds.setAttr(nurbs_surface + ".translateZ", -24)
+
     # TriPlanar and Perspective, the two the measurement rig settled last.
     for label, kind in (("tri", 6), ("persp", 8)):
         _, proj_shader = shaded_cube(label + "ProjCube", "aiStandardSurface")
@@ -1814,6 +1820,27 @@ def main():
     check("a circular ramp travels too, for the importer to refuse",
           (unbaked_radial.get("ramp") or {}).get("type") == "Circular Ramp",
           (unbaked_radial.get("ramp") or {}).get("type"))
+
+    print("\ncoverage")
+    export_warnings = payload.get("export_warnings") or []
+    coverage = [w for w in export_warnings if "were not exported" in w]
+    check("an unsupported geometry kind is reported",
+          any("nurbsSurface" in item for item in coverage), coverage)
+    if coverage:
+        # A count and an example, so a scene with four hundred of them says
+        # so in a line rather than four hundred.
+        check("with a count and an example path",
+              any(item.startswith("1 ") and "|nurbsBall" in item
+                  for item in coverage),
+              coverage)
+    # The false positive guard, and it has already earned its keep: lights
+    # travel through the JSON rather than as geometry, and the first version
+    # of the scan reported every one of them as lost.
+    for travelled in ("mesh", "aiAreaLight", "camera", "nurbsCurve",
+                      "particle", "aiVolume"):
+        check('nothing that did travel is called lost: "{0}"'.format(travelled),
+              not any('"{0}"'.format(travelled) in item for item in coverage),
+              [item for item in coverage if travelled in item])
 
     print("\ntexture projection")
     # With baking on the projection is evaluated onto the UVs, which is

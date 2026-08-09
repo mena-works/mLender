@@ -37,6 +37,7 @@ from .alembic import (
     rig_deformed,
 )
 from .instancers import instancer_records, scene_instancers
+from .coverage import coverage_warnings
 from .volumes import scene_volume_shapes, volume_records
 from .sets import (
     display_layer_records,
@@ -169,6 +170,9 @@ def export_scene(
         exported_paths.update(
             record["volume_path"] for record in volume_list
         )
+        exported_paths.update(
+            record["particle_path"] for record in particle_list
+        )
         set_list = selection_set_records(
             scene_selection_sets(), warnings, exported_paths
         )
@@ -190,6 +194,17 @@ def export_scene(
         camera_shapes = scene_camera_shapes()
         light_records = [light_record(shape) for shape in light_shapes]
         camera_records = [camera_record(shape) for shape in camera_shapes]
+
+        # Said, not lost: anything renderable the export did not account
+        # for. A discovery module per kind fixes the kinds already known and
+        # leaves the next one silent, so the leftovers are counted instead.
+        # Lights and cameras travel through the JSON rather than as geometry,
+        # so their transforms count as accounted for.
+        warnings.extend(coverage_warnings(
+            exported_paths
+            | set(parent_of(shape) for shape in light_shapes)
+            | set(parent_of(shape) for shape in camera_shapes)
+        ))
 
         _apply_light_linking(light_records, light_shapes, mesh_records)
 

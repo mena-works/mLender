@@ -173,6 +173,26 @@ light counts) and check the System Console for lines beginning
 
 ## Scope
 
+### What did not travel
+
+Discovery is type by type, so anything the exporter does not look for used to
+leave the scene without a word. Measured, six kinds were doing exactly that:
+NURBS surfaces, Maya subdivision surfaces, `gpuCache`, `aiStandIn`, fluids and
+hair systems.
+
+Adding a discovery module per kind would have fixed those six and left the
+seventh silent. Instead every renderable shape is compared against what the
+package carries, and whatever is left over is reported, grouped by type with a
+count and an example:
+
+```text
+mLender warning: 2 "nurbsSurface" object(s) were not exported; this build
+does not carry that type. First: |nurbsBall
+```
+
+A kind nobody has thought of yet is now a line the user can read rather than
+geometry that quietly is not there.
+
 Deliberately **not** included:
 
 - No Alembic.
