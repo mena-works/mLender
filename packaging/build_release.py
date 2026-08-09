@@ -97,6 +97,74 @@ def module_file(version):
     ).format(MODULE_NAME, version)
 
 
+def install_notes(version):
+    """The install instructions, generated so the version cannot drift.
+
+    Written rather than kept as a static file for the same reason the build
+    refuses to run on mismatched versions: a number in a document nobody
+    regenerates is a number that will be wrong.
+    """
+    return """# Installing mLender {version}
+
+Two files, one per application. **Install both** -- the Maya exporter and the
+Blender importer are two halves of one tool and each checks the other's
+version.
+
+    mLender-{version}-blender-addon.zip
+    mLender-{version}-maya-module.zip
+
+## Blender  (4.1 and later, tested on 4.1, 4.3, 4.5 and 5.2)
+
+1. `Edit > Preferences > Add-ons > Install...` (in 4.2+ the button is under
+   the dropdown at the top right of the Add-ons list).
+2. Pick `mLender-{version}-blender-addon.zip`. Do not unzip it first.
+3. Tick **mLender** in the list to enable it.
+
+Check it worked: press `N` in the 3D viewport and open the **mLender** tab.
+The panel shows `Build {version}`.
+
+## Maya  (2022 and later, tested on 2023 with MtoA 5.4.8)
+
+1. Unzip `mLender-{version}-maya-module.zip`.
+2. Move both the `mLender.mod` file **and** the `mLender` folder next to it
+   into a Maya modules folder. Create the folder if it is not there:
+
+       Windows   %USERPROFILE%\\Documents\\maya\\modules\\
+       macOS     ~/Library/Preferences/Autodesk/maya/modules/
+       Linux     ~/maya/modules/
+
+   Any folder on `MAYA_MODULE_PATH` works; that one needs no setup.
+3. Restart Maya.
+
+Check it worked, in the Script Editor's Python tab:
+
+    import mlender_exporter as ml
+    ml.show_ui()
+
+Nothing shared is edited by this. Removing the tool is deleting the `.mod`
+file and the folder.
+
+## Both sides have to match
+
+The package the exporter writes carries a schema version, and the importer
+refuses one it does not know -- before it touches your Blender scene, so a
+mismatch costs you nothing but a message. If you update one side, update the
+other from the same release.
+
+## Upgrading
+
+Blender: install the new zip over the old one; it replaces it, because the
+add-on's module name is the folder name inside the archive and that does not
+change between releases.
+
+Maya: replace the `mLender` folder and the `.mod` file, then restart Maya.
+
+## Usage
+
+See README.md in the repository: https://github.com/mena-works/mLender
+""".format(version=version)
+
+
 def build_blender_addon(version):
     target = os.path.join(DIST, "mLender-{0}-blender-addon.zip".format(version))
     source = os.path.join(ROOT, IMPORTER)
@@ -125,6 +193,14 @@ def build_maya_module(version):
     with open(os.path.join(staging, MODULE_NAME + ".mod"), "w",
               encoding="utf-8", newline="\n") as handle:
         handle.write(module_file(version))
+    # Beside the .mod, where somebody who has just unzipped it is looking.
+    # Maya only reads .mod files out of a modules folder, so this is inert
+    # there. It is deliberately *not* put inside the Blender archive: that
+    # archive's top folder is installed as the add-on itself, and anything
+    # added to it lands in the user's add-ons directory.
+    with open(os.path.join(staging, "INSTALL.md"), "w",
+              encoding="utf-8", newline="\n") as handle:
+        handle.write(install_notes(version))
 
     target = os.path.join(DIST, "mLender-{0}-maya-module.zip".format(version))
     with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
@@ -157,9 +233,14 @@ def main():
 
     addon = build_blender_addon(version)
     module, staging = build_maya_module(version)
+    # And loose beside the archives, for whoever is looking at the download
+    # before they have unzipped anything.
+    notes = os.path.join(DIST, "INSTALL.md")
+    with open(notes, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(install_notes(version))
 
     print("mLender {0}".format(version))
-    for path in (addon, module):
+    for path in (addon, module, notes):
         print("  {0}  ({1:,} bytes)".format(
             os.path.relpath(path, ROOT), os.path.getsize(path)
         ))

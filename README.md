@@ -64,7 +64,13 @@ python packaging/verify_release.py    # installs them into the real hosts
 ```text
 dist/mLender-<version>-blender-addon.zip   Preferences > Add-ons > Install
 dist/mLender-<version>-maya-module.zip     unzip into a Maya modules folder
+dist/INSTALL.md                            the steps, for whoever downloads it
 ```
+
+`INSTALL.md` is generated rather than kept as a file, and a copy goes inside
+the Maya archive next to the `.mod`. A version number in a document nobody
+regenerates is a number that will be wrong, and an instruction naming last
+release's zip sends people to a 404.
 
 The Maya artefact is a **module**: a `.mod` file naming a folder beside it,
 dropped anywhere on `MAYA_MODULE_PATH` — for example

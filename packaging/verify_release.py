@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import zipfile
 
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -195,6 +196,24 @@ def main():
         (os.path.join(DIST, n) for n in os.listdir(DIST)
          if n.endswith("-maya") and os.path.isdir(os.path.join(DIST, n))), "")
     print("artefacts: {0}".format(", ".join(zips) or "none"))
+
+    print("\ninstall notes")
+    notes = os.path.join(DIST, "INSTALL.md")
+    check("they are beside the archives", os.path.isfile(notes), notes)
+    staged_notes = os.path.join(staging, "INSTALL.md") if staging else ""
+    check("and inside the Maya archive, where the unzipper looks",
+          bool(staged_notes) and os.path.isfile(staged_notes), staged_notes)
+    if os.path.isfile(notes):
+        with open(notes, encoding="utf-8") as handle:
+            body = handle.read()
+        # Generated rather than kept as a file for exactly this reason: an
+        # instruction naming last release's zip sends people to a 404.
+        check("naming the archives that were actually built",
+              all(name in body for name in zips), zips)
+    addon_names = zipfile.ZipFile(os.path.join(DIST, addon)).namelist()
+    check("the Blender archive holds nothing but the add-on folder",
+          all(name.startswith("mlender_importer/") for name in addon_names),
+          [n for n in addon_names if not n.startswith("mlender_importer/")])
 
     maya_version = verify_maya(staging) if staging else None
     blender_versions = []
