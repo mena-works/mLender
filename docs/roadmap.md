@@ -75,6 +75,28 @@ ama kullanıcı ne kaybettiğini okuyor. Taşıma işi duruyor, aciliyeti düşt
 
 ---
 
+## Kendi borcum — ölçüldü, temiz
+
+Bu oturumda çok yüzey eklendi (şema 30→36). İki şey ölçülmemişti:
+
+**Hız.** 400 mesh / 60 materyal → **1.7 s** (mesh başına 4.3 ms). Eklenenler
+şişirmemiş; `coverage.py` profilin ilk yirmisine bile girmiyor. En pahalı
+Python tarafı `visibility_info` (%21) ve o bu oturumdan önce de oradaydı.
+Rig: `tests/calibration/benchmark_export.py`.
+
+**Etkileşim.** Her yol tek başına test edilmişti, birbirleriyle hiç
+denenmemişti. Dört kesişim ölçüldü, dördü de doğru:
+
+- Blend shader katmanının içinde projeksiyon
+- Rampa texture'ı transparency'de (Maya inversiyonunun yaşadığı kanal)
+- Glass materyalinin transmission renginde projeksiyon
+- Instance'lı mesh'te animasyonlu görünürlük
+
+İlk ikisi kalıcı teste alındı, hem bake açık hem kapalı yoluyla — çünkü
+ikisinde farklı davranıyorlar ve ikisi de doğru olmalı.
+
+---
+
 ## 3. Eksik ama dürüst — uyarıyor, sessiz değil
 
 | iş | not |

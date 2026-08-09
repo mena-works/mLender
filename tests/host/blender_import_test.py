@@ -113,9 +113,9 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("42 meshes imported", result["mesh_count"] == 42,
+    check("44 meshes imported", result["mesh_count"] == 44,
           result["mesh_count"])
-    check("34 materials built", result["material_count"] == 34,
+    check("36 materials built", result["material_count"] == 36,
           result["material_count"])
     # Four of the eight cubes asked for subdivision in Maya, the displaced one
     # among them; the rest must arrive unmodified.
@@ -1169,6 +1169,32 @@ def main():
             check("fed by the geometry normal and incoming vector",
                   feeds == ["Incoming", "Normal"], feeds)
 
+    print("\ncrossings")
+    # Every path was tested on its own; these are the combinations, which is
+    # where a later change breaks something quietly. All four were measured
+    # working before being written down here.
+    # This package is baked, so the crossings show the baked outcome: the
+    # blend still builds and the projection inside it became an image. The
+    # native rebuilds are asserted against the unbaked package at the end.
+    crossed = material_for("crossMixProj")
+    check("a projection inside a blend layer exists", crossed is not None)
+    if crossed:
+        crossed_kinds = [n.bl_idname for n in crossed.node_tree.nodes]
+        check("the blend survived and its projection baked to an image",
+              "ShaderNodeMixShader" in crossed_kinds
+              and "ShaderNodeTexImage" in crossed_kinds
+              and "ShaderNodeMapping" not in crossed_kinds,
+              sorted(set(crossed_kinds)))
+
+    ramp_alpha = material_for("crossRampAlpha")
+    check("a gradient on transparency exists", ramp_alpha is not None)
+    if ramp_alpha:
+        alpha_kinds = [n.bl_idname for n in ramp_alpha.node_tree.nodes]
+        check("the gradient on transparency baked to an image",
+              "ShaderNodeTexImage" in alpha_kinds
+              and "ShaderNodeValToRGB" not in alpha_kinds,
+              sorted(set(alpha_kinds)))
+
     print("\nramp texture")
     # Bake Procedurals is on for this package, and it is the user's choice,
     # so both ramps arrive as their baked images. The native rebuild is
@@ -1811,6 +1837,30 @@ def main():
                   and all(abs(n.inputs[1].default_value - 64.0) < 1e-6
                           for n in powers),
                   [n.inputs[1].default_value for n in powers])
+
+        # The crossings again, this time where the native rebuilds happen.
+        crossed_raw = material_for("crossMixProj")
+        check("the crossed blend material exists", crossed_raw is not None)
+        if crossed_raw:
+            raw_kinds = [n.bl_idname for n in crossed_raw.node_tree.nodes]
+            # A projection built inside one layer of a blend: the two paths
+            # were written separately and never crossed until now.
+            check("a projection rebuilt inside a blend layer",
+                  "ShaderNodeMixShader" in raw_kinds
+                  and "ShaderNodeMapping" in raw_kinds
+                  and raw_kinds.count("ShaderNodeTexImage") == 1,
+                  sorted(set(raw_kinds)))
+
+        alpha_raw = material_for("crossRampAlpha")
+        check("the crossed gradient material exists", alpha_raw is not None)
+        if alpha_raw:
+            raw_alpha = [n.bl_idname for n in alpha_raw.node_tree.nodes]
+            # The gradient reached the channel that carries Maya's
+            # inversion, rather than collapsing to a flat value there.
+            check("a gradient rebuilt on the alpha channel",
+                  "ShaderNodeValToRGB" in raw_alpha
+                  and "ShaderNodeTexImage" not in raw_alpha,
+                  sorted(set(raw_alpha)))
 
         # A type this build does not reproduce must say so.
         check("a Ball projection is refused with a warning",

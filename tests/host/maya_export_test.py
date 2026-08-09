@@ -317,6 +317,45 @@ def build_scene():
                      cyl + ".placementMatrix", force=True)
     cmds.connectAttr(cyl + ".outColor", cyl_shd + ".baseColor", force=True)
 
+    # Crossings. Every path above was tested on its own; these are the
+    # combinations, which is where a later change breaks something quietly.
+    _, crossed_mix = shaded_cube("crossMixProj", "aiMixShader")
+    cross_lower = cmds.shadingNode("aiStandardSurface", asShader=True,
+                                   name="crossLower")
+    cross_upper = cmds.shadingNode("aiStandardSurface", asShader=True,
+                                   name="crossUpper")
+    cross_proj = cmds.shadingNode("projection", asTexture=True,
+                                  name="crossProjection")
+    cmds.setAttr(cross_proj + ".projType", 1)
+    cross_file = cmds.shadingNode("file", asTexture=True, name="crossFile")
+    cmds.setAttr(cross_file + ".fileTextureName", texture, type="string")
+    cmds.connectAttr(cross_file + ".outColor", cross_proj + ".image",
+                     force=True)
+    cross_place = cmds.shadingNode("place3dTexture", asUtility=True,
+                                   name="crossPlacement")
+    cmds.connectAttr(cross_place + ".worldInverseMatrix[0]",
+                     cross_proj + ".placementMatrix", force=True)
+    cmds.connectAttr(cross_proj + ".outColor", cross_upper + ".baseColor",
+                     force=True)
+    cmds.connectAttr(cross_lower + ".outColor", crossed_mix + ".shader1",
+                     force=True)
+    cmds.connectAttr(cross_upper + ".outColor", crossed_mix + ".shader2",
+                     force=True)
+    cmds.setAttr(crossed_mix + ".mix", 0.5)
+
+    # A gradient on transparency, which is where the inversion lives.
+    _, cross_ramp_shd = shaded_cube("crossRampAlpha", "lambert")
+    cross_ramp = cmds.shadingNode("ramp", asTexture=True, name="crossRampTex")
+    cmds.setAttr(cross_ramp + ".type", 0)
+    cmds.setAttr(cross_ramp + ".colorEntryList[0].position", 0.0)
+    cmds.setAttr(cross_ramp + ".colorEntryList[0].color", 0.2, 0.2, 0.2,
+                 type="double3")
+    cmds.setAttr(cross_ramp + ".colorEntryList[1].position", 1.0)
+    cmds.setAttr(cross_ramp + ".colorEntryList[1].color", 0.8, 0.8, 0.8,
+                 type="double3")
+    cmds.connectAttr(cross_ramp + ".outColor",
+                     cross_ramp_shd + ".transparency", force=True)
+
     # A geometry kind this build does not carry. Measured before the
     # coverage scan existed: it left the scene with nothing said, and so did
     # gpuCache, aiStandIn, fluids and Maya subdivision surfaces.
@@ -872,7 +911,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("42 meshes exported", payload["mesh_count"] == 42,
+    check("44 meshes exported", payload["mesh_count"] == 44,
           payload["mesh_count"])
     # Four: the locator, the empty null, the nested locator, and the group
     # holding only a curve. That last one has no mesh below it either, so
