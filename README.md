@@ -1605,6 +1605,20 @@ Three formats, three different answers about units, each measured on 4.1 and
   four units across whatever was passed. So nothing is passed and the file's
   own `metersPerUnit` decides.
 
+**A referenced asset does not get to redecorate the scene.** A USD carries its
+own start and end time codes, and can carry lights and cameras of its own; the
+importer's defaults let all three in. Measured on 4.1 and 5.2 through this
+tool's own standin import: a scene set to 1..24 became **40..90**, and the
+asset's `SphereLight` lit it at **9869 on 4.1 and 3141 on 5.2** — the same
+file, 3.14× apart, never through `light_energy()`. A camera arrived too, and
+nothing was reported.
+
+The frame range, the lights and the cameras all come from the Maya scene
+through the JSON, so the USD import now refuses all three. The prims still
+arrive, **as empties**, so the shape of the asset survives and what was left
+out is visible in the outliner — and the refusal is named in the import
+warnings, because trading one silence for another is not a fix.
+
 Arnold's own `.ass` is not on that list and cannot be: Blender has no reader
 for it. **A file that cannot be read, or is not there, leaves the anchor
 standing as a box the size of Maya's proxy**, with the path on it and a

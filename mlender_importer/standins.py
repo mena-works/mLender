@@ -41,6 +41,9 @@ from .constants import (
     STANDIN_PLACEHOLDER_DISPLAY,
     STANDIN_PLACEHOLDER_SIZE,
     STANDIN_USD_FORMATS,
+    USD_CAMERA_PRIM_TYPE,
+    USD_IMPORT_REFUSALS,
+    USD_LIGHT_PRIM_TYPES,
 )
 from .scene import place_in_group
 from .transforms import maya_matrix_to_blender
@@ -130,7 +133,8 @@ def _load_contents(anchor, record, position_scale, warnings):
         elif extension in STANDIN_USD_FORMATS:
             # No scale: measured, the argument is ignored and the file's own
             # metersPerUnit is what Blender honours.
-            bpy.ops.wm.usd_import(filepath=path)
+            _run_usd_import(path)
+            _report_usd_refusals(record, path, warnings)
         else:
             warnings.append(
                 'Standin "{0}" is a {1} file, which Blender cannot read; a '
@@ -175,6 +179,93 @@ def _move_to(obj, collections):
     for collection in collections:
         if obj.name not in collection.objects:
             collection.objects.link(obj)
+
+
+def _run_usd_import(path):
+    """Open a USD without letting the asset redecorate the scene.
+
+    The arguments are filtered against what this build's operator actually
+    declares rather than tried and retried: the USD importer's properties
+    move between versions, and asking it which it has says exactly that,
+    where a TypeError ladder only says that something was rejected. An
+    argument this build has never heard of costs that refusal, not the
+    standin.
+    """
+    kwargs = {"filepath": path}
+    try:
+        declared = set(
+            bpy.ops.wm.usd_import.get_rna_type().properties.keys()
+        )
+    except Exception:
+        declared = set()
+    for name, value in USD_IMPORT_REFUSALS.items():
+        if not declared or name in declared:
+            kwargs[name] = value
+    bpy.ops.wm.usd_import(**kwargs)
+
+
+def _report_usd_refusals(record, path, warnings):
+    """Say what was left inside the asset, rather than leaving it unsaid.
+
+    Refusing the asset's lights is right -- their energy would never go
+    through the measured conversion -- but a refusal nobody is told about is
+    the same silence this tool exists to end, just pointed the other way.
+
+    The prims still arrive, as empties, so the shape of the asset is intact
+    and what is missing is visible in the outliner as well as in the message.
+    """
+    lights, cameras = _usd_light_and_camera_prims(path)
+    if not lights and not cameras:
+        return
+    parts = []
+    if lights:
+        parts.append("{0} light(s)".format(len(lights)))
+    if cameras:
+        parts.append("{0} camera(s)".format(len(cameras)))
+    warnings.append(
+        'Standin "{0}" holds {1}, which were not built: a referenced asset '
+        "does not light or frame the scene, and their units are not the ones "
+        "this tool measured. They arrive as empties. {2}".format(
+            record.get("standin") or "?", " and ".join(parts), path
+        )
+    )
+
+
+def _usd_light_and_camera_prims(path):
+    """What a USD declares, or two empty lists when it cannot be read.
+
+    Blender bundles the USD Python library -- measured on 4.1, 4.3, 4.5 and
+    5.2 -- but it is asked for defensively all the same. Without it the
+    import is still right; only the sentence about it is missing.
+    """
+    try:
+        from pxr import Usd, UsdLux
+    except Exception:
+        return [], []
+    try:
+        stage = Usd.Stage.Open(path)
+    except Exception:
+        return [], []
+    if stage is None:
+        return [], []
+
+    lights = []
+    cameras = []
+    light_api = getattr(UsdLux, "LightAPI", None)
+    for prim in stage.Traverse():
+        kind = str(prim.GetTypeName())
+        if kind == USD_CAMERA_PRIM_TYPE:
+            cameras.append(prim.GetName())
+            continue
+        if kind in USD_LIGHT_PRIM_TYPES:
+            lights.append(prim.GetName())
+            continue
+        try:
+            if light_api is not None and prim.HasAPI(light_api):
+                lights.append(prim.GetName())
+        except Exception:
+            continue
+    return lights, cameras
 
 
 def _run_obj_import(path, scale):

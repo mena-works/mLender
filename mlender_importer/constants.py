@@ -8,7 +8,7 @@ message shape changes.
 
 import math
 
-BUILD_VERSION = "2.29.0"
+BUILD_VERSION = "2.29.1"
 
 LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
@@ -328,6 +328,34 @@ STANDIN_OBJ_FORMATS = (".obj",)
 STANDIN_USD_FORMATS = (".usd", ".usda", ".usdc", ".usdz")
 
 # The anchor empty is drawn as the box Maya draws in place of the geometry.
+# What a standin's file is not allowed to bring with it. The frame range, the
+# lights and the cameras all come from the Maya scene through the JSON, and a
+# referenced asset may not overrule any of them.
+#
+# Measured on 4.1 and 5.2 through this tool's own standin import: with the
+# operator's defaults a scene set to 1..24 became 40..90, and the asset's own
+# SphereLight lit the scene at 9869 on 4.1 and 3141 on 5.2 -- the same file,
+# 3.14x apart, and never through light_energy(). Nothing was reported.
+USD_IMPORT_REFUSALS = {
+    "set_frame_range": False,
+    "import_lights": False,
+    "import_cameras": False,
+}
+
+# Prim types counted when saying what was left out. LightAPI covers the
+# modern spelling; the list is the fallback for older stages.
+USD_LIGHT_PRIM_TYPES = (
+    "SphereLight",
+    "RectLight",
+    "DiskLight",
+    "CylinderLight",
+    "DistantLight",
+    "DomeLight",
+    "GeometryLight",
+    "PortalLight",
+)
+USD_CAMERA_PRIM_TYPE = "Camera"
+
 STANDIN_PLACEHOLDER_DISPLAY = "CUBE"
 STANDIN_PLACEHOLDER_SIZE = 0.5
 

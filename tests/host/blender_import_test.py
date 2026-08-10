@@ -1350,12 +1350,12 @@ def main():
           result.get("repointed_paths") == 0, result.get("repointed_paths"))
 
     print("\nstandins")
-    check("3 standins built", result.get("standin_count") == 3,
+    check("4 standins built", result.get("standin_count") == 4,
           result.get("standin_count"))
     # Two of the three name a file Blender can read; the .ass cannot be read
     # by anything here and must not be counted as loaded.
-    check("two of them loaded, the .ass did not",
-          result.get("standin_loaded") == 2, result.get("standin_loaded"))
+    check("three of them loaded, the .ass did not",
+          result.get("standin_loaded") == 3, result.get("standin_loaded"))
 
     anchor = object_named("standinCube")
     check("the Alembic standin has an anchor", anchor is not None)
@@ -1382,6 +1382,43 @@ def main():
                   abs(max(child.dimensions) - 0.04) < 1e-3,
                   [round(v, 4) for v in child.dimensions])
             break
+
+    # A USD asset arrives with its own time codes, its own light and its own
+    # camera, and the operator's defaults let all three into the scene:
+    # measured, a scene set to 1..24 became 40..90 and the asset's light lit
+    # it at 9869 on 4.1 and 3141 on 5.2 -- the same file, never through
+    # light_energy(), with nothing reported.
+    check("the asset's time codes did not move the scene",
+          (bpy.context.scene.frame_start, bpy.context.scene.frame_end)
+          != (40, 90),
+          (bpy.context.scene.frame_start, bpy.context.scene.frame_end))
+    check("and its light was not built",
+          not [light for light in bpy.data.lights
+               if "assetLight" in light.name],
+          [light.name for light in bpy.data.lights])
+    check("nor its camera",
+          not [camera for camera in bpy.data.cameras
+               if "assetCam" in camera.name],
+          [camera.name for camera in bpy.data.cameras])
+    # Refused, not deleted: the prims still arrive as empties, so the shape
+    # of the asset survives and what is missing is visible in the outliner.
+    check("both still arrive as empties",
+          all(any(obj.name.startswith(name) and obj.type == "EMPTY"
+                  for obj in bpy.data.objects)
+              for name in ("assetLight", "assetCam")),
+          [o.name for o in bpy.data.objects if o.type == "EMPTY"][:6])
+    check("and the refusal was reported, not silent",
+          any("not built" in item and "usdStandIn" in item
+              for item in result["warnings"]),
+          [w for w in result["warnings"] if "usdStandIn" in w])
+    usd_anchor = object_named("usdStandIn")
+    check("while the asset's geometry still came",
+          usd_anchor is not None
+          and any(child.type == "MESH" or any(
+              grand.type == "MESH" for grand in bpy.data.objects
+              if grand.parent is child)
+              for child in bpy.data.objects if child.parent is usd_anchor),
+          [o.name for o in bpy.data.objects if o.parent is usd_anchor])
 
     lost = object_named("standinMissing")
     check("the unreadable standin still stands somewhere", lost is not None)

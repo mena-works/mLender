@@ -979,7 +979,29 @@ def build_scene():
             print("  note: {0}.{1} not set: {2}".format(name, attr, exc))
         return transform
 
+    # A USD standin that tries to redecorate the scene: its own time codes,
+    # its own light, its own camera. Written as text so this needs no USD
+    # library on the Maya side -- the exporter only records the path.
+    usd_asset = os.path.join(OUT, "standin_asset.usda").replace("\\", "/")
+    with open(usd_asset, "w") as handle:
+        handle.write(
+            '#usda 1.0\n(\n    defaultPrim = "AssetRoot"\n'
+            '    metersPerUnit = 1\n    upAxis = "Z"\n'
+            "    startTimeCode = 40\n    endTimeCode = 90\n)\n\n"
+            'def Xform "AssetRoot"\n{\n'
+            '    def Mesh "propGeo"\n    {\n'
+            "        int[] faceVertexCounts = [4]\n"
+            "        int[] faceVertexIndices = [0, 1, 2, 3]\n"
+            "        point3f[] points = [(-1, -1, 0), (1, -1, 0), "
+            "(1, 1, 0), (-1, 1, 0)]\n    }\n\n"
+            '    def SphereLight "assetLight"\n    {\n'
+            "        float inputs:intensity = 1000\n    }\n\n"
+            '    def Camera "assetCam"\n    {\n'
+            "        float focalLength = 3500\n    }\n}\n"
+        )
+
     _standin("standinCube", standin_cache)
+    _standin("usdStandIn", usd_asset)
     _standin("standinMissing",
              os.path.join(OUT, "no_such_proxy.ass").replace("\\", "/"))
     try:
@@ -2185,7 +2207,7 @@ def main():
     print("\nstandins")
     standins = payload.get("standins") or []
     by_standin = dict((item.get("standin"), item) for item in standins)
-    check("3 standins exported", payload.get("standin_count") == 3,
+    check("4 standins exported", payload.get("standin_count") == 4,
           payload.get("standin_count"))
     real = by_standin.get("standinCube") or {}
     check("the Alembic standin carries its path",

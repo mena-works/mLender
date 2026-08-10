@@ -269,6 +269,43 @@ Açık kalan: importer `.zip`'i doğrudan okumuyor, alan taraf açıyor.
 
 ---
 
+## USD turunun a1'i — kapatıldı
+
+USD turunun bulduğu iki canlı hatanın ilki, ve **bir önceki oturumda benim
+soktuğum** koddu: `standins.py`'ın USD dalı operatörü argümansız çağırıyordu,
+üç satır yukarıdaki Alembic kardeşi ise `set_frame_range=False` geçiriyordu.
+
+Kendi `import_standins()`'imiz üzerinden birebir üretildi (4.1 ve 5.2 aynı):
+
+- Sahne 1..24 iken asset'in `startTimeCode/endTimeCode`'u kazanıyor → **40..90**
+- Asset'in `SphereLight`'ı sahneye POINT olarak giriyor: 4.1'de **9869.605**,
+  5.2'de **3141.593** — aynı dosya, 3.14× fark, `light_energy()`'ye hiç
+  uğramadan. Kamera da geliyor (lens 350000).
+- `warnings` **boş**. Sessiz, ve başka bir şeye benziyor: kayan aralık "export
+  yanlış aralık gönderdi", kaçak ışık "ışık kalibrasyonu bozuk" gibi okunur.
+
+Üç argüman da (`set_frame_range`, `import_lights`, `import_cameras`) 4.1/4.3/
+4.5/5.2'nin hepsinde var ve hepsinde varsayılanı `True`.
+
+Kararlar:
+
+- Argümanlar **TypeError merdiveni yerine** operatörün kendi RNA'sına sorularak
+  filtreleniyor. USD importer'ının property'leri sürümler arası oynuyor
+  (`import_subdiv`→`import_subdivision`, `attr_import_mode` yalnız 4.3/4.5'te);
+  "hangilerine sahipsin" diye sormak, "bir şey reddedildi" bilgisinden daha
+  fazlasını söyler.
+- `import_lights=False` prim'i **silmiyor, EMPTY bırakıyor** — test tipe assert
+  ediyor, yokluğa değil. Asset'in yapısı bozulmuyor.
+- Düşürülen ışık/kamera **uyarıya yazılıyor**. Bir sessiz kaybı başkasıyla
+  takas etmek düzeltme değildir. Sayım `pxr` ile yapılıyor: Blender'ın dördü de
+  bundle ediyor (ölçüldü: 4.1→USD 23.11, 5.2→26.3) ama yine de `try/except`
+  ile korunuyor — kütüphane yoksa import doğru kalır, yalnız cümle eksilir.
+
+Fixture olarak Maya testine elle yazılmış bir `.usda` eklendi (Maya tarafında
+USD kütüphanesi gerekmiyor, exporter yalnız yolu kaydediyor).
+
+---
+
 ## Sıradakiler — kararlaştırılan sıra
 
 Kullanıcı sırayı verdi: **2 → 7 → 4 → 3 → 6**. Numaralar bu oturumdaki
