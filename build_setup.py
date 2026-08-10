@@ -103,7 +103,7 @@ def main():
     
     print("Compiling Modern Installer with PyInstaller...")
     
-    # We will build modern_installer.py using PyInstaller and bundle the 'dist' folder
+    # We will build setup_gui.py using PyInstaller and bundle the 'dist' folder
     # Note: the command is cross-platform, but handles windows correctly here.
     dist_dir = os.path.join(ROOT, "dist")
     
@@ -114,7 +114,7 @@ def main():
         "--windowed",
         "--name", "mLender_Setup",
         "--add-data", f"{dist_dir};dist",
-        os.path.join(ROOT, "modern_installer.py")
+        os.path.join(ROOT, "setup_gui.py")
     ]
     
     result = subprocess.run(cmd, capture_output=True, text=True)
