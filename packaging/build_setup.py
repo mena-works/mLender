@@ -13,7 +13,7 @@ import subprocess
 import glob
 
 # Ensure we are in the project root
-ROOT = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DIST = os.path.join(ROOT, "dist")
 
 def run_build():
@@ -114,7 +114,7 @@ def main():
         "--windowed",
         "--name", "mLender_Setup",
         "--add-data", f"{dist_dir};dist",
-        os.path.join(ROOT, "setup_gui.py")
+        os.path.join(ROOT, "packaging", "setup_gui.py")
     ]
     
     result = subprocess.run(cmd, capture_output=True, text=True)
