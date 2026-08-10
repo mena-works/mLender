@@ -19,14 +19,17 @@ from .package import default_export_folder, export_scene
 
 
 def show_ui():
+    workspace_name = WINDOW_NAME + "WorkspaceControl"
+    if cmds.workspaceControl(workspace_name, exists=True):
+        cmds.deleteUI(workspace_name)
     if cmds.window(WINDOW_NAME, exists=True):
         cmds.deleteUI(WINDOW_NAME)
 
-    window = cmds.window(
-        WINDOW_NAME,
-        title=TOOL_NAME,
-        sizeable=False,
-        widthHeight=(620, 470),
+    window = cmds.workspaceControl(
+        workspace_name,
+        label=TOOL_NAME,
+        retain=False,
+        tabToControl=("AttributeEditor", -1),
     )
     cmds.columnLayout(
         adjustableColumn=True,
@@ -150,7 +153,7 @@ def show_ui():
             alembic_field,
         ),
     )
-    cmds.showWindow(window)
+    # workspaceControl displays automatically
     return window
 
 

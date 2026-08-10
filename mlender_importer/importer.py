@@ -12,6 +12,8 @@ from .constants import SUPPORTED_SCHEMA_VERSIONS
 from .attributes import apply_custom_attributes
 from .cameras import import_cameras
 from .curves import import_curves
+from .constraints import rebuild_constraints
+from .aovs import rebuild_aovs
 from .empties import import_empties
 from .fbx import import_fbx, read_package_json, resolve_fbx_path
 from .alembic import cached_particle_names, import_alembic
@@ -322,6 +324,8 @@ def import_scene_package(
         import_scale,
         warnings,
     )
+    
+    rebuild_constraints(package_data.get("constraints") or [])
 
     # Sets and layers name objects that already exist, so this runs after
     # everything that creates them.
@@ -339,6 +343,8 @@ def import_scene_package(
 
     view_transform = apply_color_management(package_data, warnings)
     render_applied = apply_render_settings(package_data, warnings)
+    
+    rebuild_aovs(package_data.get("aovs") or [])
 
     _remove_fbx_placeholder_materials(before_materials)
     purge_orphans()

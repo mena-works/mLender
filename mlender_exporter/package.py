@@ -41,6 +41,8 @@ from .instancers import instancer_records, scene_instancers
 from .coverage import coverage_warnings
 from .standins import scene_standin_shapes, standin_records
 from .volumes import scene_volume_shapes, volume_records
+from .aovs import scene_aovs
+from .rigging import scene_joints, constraint_records
 from .sets import (
     display_layer_records,
     scene_display_layers,
@@ -158,6 +160,13 @@ def export_scene(
         # dropped entirely.
         transform_list = transform_records(scene_transforms(selected_only))
         curve_list = curve_records(scene_curve_shapes(selected_only))
+        joints = scene_joints(mesh_shapes, selected_only=selected_only)
+        all_transforms = (
+            [r.get("transform_path") for r in mesh_records if r.get("transform_path")] +
+            [r.get("transform_path") for r in transform_list if r.get("transform_path")] +
+            joints
+        )
+        constraint_list = constraint_records(all_transforms)
         volume_list = volume_records(scene_volume_shapes(selected_only))
         standin_list = standin_records(
             scene_standin_shapes(selected_only)
@@ -167,6 +176,7 @@ def export_scene(
         instancer_list = instancer_records(
             scene_instancers(selected_only)
         )
+        aov_list = scene_aovs() if not selected_only else []
         # Sets and layers may only name what this export carries. A scoped
         # export otherwise sent sets whose members were never in it.
         exported_paths = set(mesh_transforms(mesh_shapes))
@@ -307,7 +317,7 @@ def export_scene(
                 transform
                 for transform in mesh_transforms(mesh_shapes)
                 if transform not in cached
-            ],
+            ] + joints,
             fbx_path,
             animation,
         )
@@ -328,6 +338,9 @@ def export_scene(
             "render": render_record(),
             "selection_sets": set_list,
             "display_layers": layer_list,
+            "object_sets": set_list,
+            "aovs": aov_list,
+            "constraints": constraint_list,
             "curve_count": len(curve_list),
             "curves": curve_list,
             "volume_count": len(volume_list),
