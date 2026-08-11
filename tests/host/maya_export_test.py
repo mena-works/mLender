@@ -1105,6 +1105,28 @@ def build_scene():
     finally:
         cmds.namespace(set=":")
 
+    # Animation keyed on a group ABOVE a skeleton. Measured: the FBX turns
+    # that group into the armature object and folds its motion there with
+    # the key shape flattened to linear -- and motion driven into such a
+    # group by a connection never arrives at all. The sampled root-joint
+    # truth is what closes both; two axes on purpose, a single-axis check
+    # hides axis bugs.
+    motion_group = cmds.group(empty=True, name="rootMotionGrp")
+    cmds.select(clear=True)
+    motion_root = cmds.joint(name="rootMotionRoot", position=(-6, 0, 0))
+    cmds.joint(name="rootMotionTip", position=(-6, 4, 0))
+    cmds.parent(motion_root, motion_group)
+    motion_cube = cmds.polyCube(name="rootMotionCube", height=4)[0]
+    cmds.setAttr(motion_cube + ".translateX", -6)
+    cmds.setAttr(motion_cube + ".translateY", 2)
+    cmds.parent(motion_cube, motion_group)
+    cmds.skinCluster("rootMotionRoot", "rootMotionTip",
+                     "rootMotionGrp|rootMotionCube", toSelectedBones=True)
+    for attr, end_value in (("translateY", 2.0), ("translateZ", 3.0)):
+        cmds.setKeyframe(motion_group, attribute=attr, time=1, value=0.0)
+        cmds.setKeyframe(motion_group, attribute=attr, time=25,
+                         value=end_value)
+
     # Portals emit nothing and must not become black area lights.
     cmds.createNode("aiLightPortal", name="aiPortalShape")
 
@@ -1185,7 +1207,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("51 meshes exported", payload["mesh_count"] == 51,
+    check("52 meshes exported", payload["mesh_count"] == 52,
           payload["mesh_count"])
     # The locator, the empty null, the nested locator, the group holding
     # only a curve, and the two shapeless FKIK switchers (root and NSRig:).
@@ -2349,7 +2371,8 @@ def main():
     check("the pose samples exactly the bound chains, namespaces kept",
           bridge_names == ["Elbow_L", "NSRig:Elbow_L", "NSRig:Shoulder_L",
                            "NSRig:Wrist_L", "Shoulder_L", "Wrist_L",
-                           "bridgeMid", "bridgeRoot", "bridgeTip"],
+                           "bridgeMid", "bridgeRoot", "bridgeTip",
+                           "rootMotionRoot", "rootMotionTip"],
           bridge_names)
     check("the unbound decoy joint does not travel",
           "bridgeDecoy" not in bridge_names, bridge_names)
@@ -2372,12 +2395,46 @@ def main():
     check("the driven pose moved the tip in Maya",
           abs(tip_world[0] - tip_bind[0]) > 1.0,
           (tip_bind, tip_world))
+    print("\nskeleton root motion")
+    root_records = payload.get("skeleton_root_motion") or []
+    # Only the grouped skeleton: a root joint parented to the world has
+    # nothing above it for the FBX fold to lose, so it gets no record.
+    check("exactly the grouped skeleton travels with its group's truth",
+          [r.get("joint") for r in root_records] == ["rootMotionRoot"]
+          and root_records[0].get("parent_path", "").endswith(
+              "rootMotionGrp"),
+          [(r.get("joint"), r.get("parent_path")) for r in root_records])
+    motion_record = root_records[0] if root_records else {}
+    check("sampled on every frame of the range",
+          len(motion_record.get("samples") or []) == 25,
+          len(motion_record.get("samples") or []))
+    check("joint and group truth in every sample",
+          all(len(s.get("matrix") or []) == 16
+              and len(s.get("parent_matrix") or []) == 16
+              for s in motion_record.get("samples") or []))
+    reference = motion_record.get("reference") or {}
+    check("with the calibration anchor at the export frame",
+          abs(reference.get("frame", 0) - 7.0) < 1e-6
+          and len(reference.get("matrix") or []) == 16
+          and len(reference.get("parent_matrix") or []) == 16,
+          reference.get("frame"))
+    # The Maya-evaluated truth for the Blender side to assert parity
+    # against; frame 13 sits mid-curve where the spline shape differs
+    # from a straight line between the keys.
+    root_motion_expected = {}
+    for frame in (1, 13, 25):
+        cmds.currentTime(frame, edit=True)
+        root_motion_expected[str(frame)] = cmds.xform(
+            "rootMotionTip", query=True, worldSpace=True, translation=True)
+    cmds.currentTime(restored_frame, edit=True)
+
     with open(os.path.join(result["package_folder"],
                            "pose_bridge_test.json"), "w") as handle:
         json.dump({
             "bind": bind_pose,
             "posed": posed_pose,
             "expected_cm": {"tip_bind": tip_bind, "tip_posed": tip_world},
+            "root_motion_expected": root_motion_expected,
         }, handle)
 
     print("\nadvanced skeleton manifest")

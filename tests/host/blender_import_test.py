@@ -114,7 +114,7 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("51 meshes imported", result["mesh_count"] == 51,
+    check("52 meshes imported", result["mesh_count"] == 52,
           result["mesh_count"])
     check("40 materials built", result["material_count"] == 40,
           result["material_count"])
@@ -170,8 +170,8 @@ def main():
           ungrouped is not None
           and scene_collections(ungrouped) == [result["root_collection"]],
           [c.name for c in ungrouped.users_collection] if ungrouped else None)
-    check("nine collections were reported",
-          result["group_collection_count"] == 9,
+    check("ten collections were reported",
+          result["group_collection_count"] == 10,
           result["group_collection_count"])
 
     print("\ninstances")
@@ -1504,7 +1504,7 @@ def main():
         applied = apply_pose(bridge_data["bind"]["pose"],
                              warnings=bridge_warnings)
         check("the bind pose applies to every chain, namespaced ones too",
-              applied["applied"] == 9 and applied["unmatched"] == 0, applied)
+              applied["applied"] == 11 and applied["unmatched"] == 0, applied)
         worst = 0.0
         # The FBX puts every skeleton into one armature, so this looks only
         # at the bridge chain: the AS bones beside it are legitimately
@@ -1544,6 +1544,48 @@ def main():
         check("with nothing unmatched and only the FK-park warning",
               all("switched to FK" in item for item in bridge_warnings),
               bridge_warnings)
+
+    print("\nskeleton root motion")
+    motion_arm = next(
+        (obj for obj in bpy.data.objects
+         if obj.type == "ARMATURE"
+         and "rootMotionTip" in obj.pose.bones), None)
+    check("the group-driven skeleton arrived", motion_arm is not None)
+    check("the grouped skeleton's root was re-keyed to its truth",
+          result.get("root_motion_bones") == 1,
+          result.get("root_motion_bones"))
+    if motion_arm:
+        motion_tip = motion_arm.pose.bones["rootMotionTip"]
+        worst = 0.0
+        for frame_key, expected in sorted(
+                bridge_data["root_motion_expected"].items(),
+                key=lambda item: int(item[0])):
+            scene.frame_set(int(frame_key))
+            bpy.context.view_layer.update()
+            got = (motion_arm.matrix_world @ motion_tip.matrix).translation
+            want = maya_cm(expected)
+            delta = max(abs(g - w) for g, w in zip(got, want))
+            worst = max(worst, delta)
+        # Frame 13 sits mid-curve, where a straight line between the
+        # group's two keys is measurably elsewhere: this catches sampling
+        # that is not per-frame, and axis bugs, in one number.
+        check("the tip follows the group's motion on every probed frame",
+              worst < 1e-5, worst)
+        from mlender_importer.animation import action_fcurves
+        motion_action = motion_arm.animation_data.action
+        motion_prefix = 'pose.bones["rootMotionRoot"].'
+        loc_curve = next(
+            (c for c in action_fcurves(motion_action)
+             if c.data_path == motion_prefix + "location"
+             and c.array_index == 1), None)
+        check("the root's keys sit on Maya's own frames, linear",
+              loc_curve is not None
+              and len(loc_curve.keyframe_points) == 25
+              and abs(loc_curve.keyframe_points[0].co[0] - 1.0) < 1e-6
+              and abs(loc_curve.keyframe_points[-1].co[0] - 25.0) < 1e-6
+              and all(p.interpolation == "LINEAR"
+                      for p in loc_curve.keyframe_points),
+              (len(loc_curve.keyframe_points) if loc_curve else None))
 
     print("\nadvanced skeleton control layer")
     check("both rigs' declared chains were built",

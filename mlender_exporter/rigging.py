@@ -3,7 +3,7 @@
 from __future__ import absolute_import
 
 import maya.cmds as cmds
-from .mayautils import unique
+from .mayautils import node_label, unique
 
 
 def scene_joints(mesh_shapes, selected_only=False):
@@ -39,6 +39,57 @@ def scene_joints(mesh_shapes, selected_only=False):
     if not influences:
         return []
     return unique(_with_joint_ancestors(unique(influences)))
+
+
+def skeleton_root_records(joints):
+    """One record per root joint that sits under a group, for per-frame
+    sampling of the joint's world truth alongside its group's.
+
+    The FBX bake drops motion that is not an animCurve on an exported node
+    -- measured twice: a group above the skeleton with its own curves is
+    folded onto the armature object with its key shape flattened to linear,
+    and connection-driven motion, the way Advanced Skeleton's Main drives
+    the root, is frozen at its static value. The joint's evaluated world
+    per frame is the complete truth; the group's world rides along because
+    the importer calibrates the bone-axes convention at the export frame
+    against ``group truth @ baked pose``, which both fold failures leave
+    clean there.
+
+    A root joint parented to the world has nothing above it to lose, so it
+    gets no record.
+    """
+    records = []
+    for joint in joints:
+        try:
+            parents = cmds.listRelatives(joint, parent=True,
+                                         fullPath=True) or []
+        except Exception:
+            parents = []
+        if not parents:
+            continue
+        try:
+            if cmds.nodeType(parents[0]) == "joint":
+                continue
+        except Exception:
+            continue
+        records.append({
+            "joint": node_label(joint),
+            "joint_path": joint,
+            "parent_path": parents[0],
+        })
+    return records
+
+
+def root_motion_sample(record):
+    """The root joint's and its group's world matrices, current frame."""
+    joint = cmds.xform(record["joint_path"], query=True, worldSpace=True,
+                       matrix=True)
+    parent = cmds.xform(record["parent_path"], query=True, worldSpace=True,
+                        matrix=True)
+    return {
+        "matrix": [float(value) for value in joint],
+        "parent_matrix": [float(value) for value in parent],
+    }
 
 
 def skin_clusters(shape):

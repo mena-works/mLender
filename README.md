@@ -1455,13 +1455,19 @@ constraint corrupts the animation — measured, 1.3 cm of error on the first
 frame of a 3 cm character before anything even moved. Raise the FKIK
 properties to puppet on top; scrub back to see the animation again.
 
-One measured limitation stands: motion that lives on **groups above the
-skeleton** — a world offset on AS's `Main`, say — does not bake into the
-joints and does not travel. Measured on a production character: root motion
-keyed on `Main` left the wrist 1.5 cm off while a minimal joint-keyed scene
-transferred exactly. Key world motion on a control that drives joints, or
-carry it on the joints themselves, until group motion is sampled into the
-JSON the way lights and cameras already are.
+**Motion above the skeleton travels too.** The FBX bake alone cannot carry
+it — measured twice: a group with its own keys arrives with the key shape
+flattened to linear, and motion driven into the group or the root by a
+connection, which is how AS's `Main` works, arrives frozen entirely. So for
+every skeleton that sits under a group, the exporter samples the root
+joint's evaluated world per frame — the complete truth, whatever drove it —
+and the importer re-keys the root bone against it, calibrating the constant
+bone-axes difference at the export frame first (a production root bone sits
+a measured 90° of roll from its Maya joint while both are correct). Where
+the bake was already right this is exactly a no-op. Verified on a
+production character with `Main` keyed on two axes: root and wrist land on
+Maya's world positions to six decimals on every probed frame, including
+mid-curve frames where the old linearized fold was measurably wrong.
 
 The bridge and the IK layer drive the same bones, so they take turns rather
 than fight: a streamed Maya pose is an FK dictation, and applying one parks

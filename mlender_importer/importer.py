@@ -34,6 +34,7 @@ from .sets import import_sets
 from .particles import import_particles
 from .instancers import import_instancers
 from .asrig import build_as_rig
+from .posebridge import apply_root_motion
 from .standins import import_standins
 from .volumes import import_volumes
 from .materials import (
@@ -61,6 +62,7 @@ from .utils import (
     normalize_folder,
     package_namespace_prefixes,
     resolve_package_paths,
+    scalar,
 )
 
 
@@ -332,6 +334,15 @@ def import_scene_package(
     # bones with imported curves and promotes other curves into IK targets.
     as_result = build_as_rig(package_data, warnings)
 
+    # After the FBX brought the baked action: the sampled root-joint truth
+    # replaces each root bone's keys, because the bake cannot carry motion
+    # living on unexported nodes above the skeleton.
+    root_scale = (
+        scalar(package_data.get("meters_per_maya_unit"), 0.01)
+        * max(scalar(import_scale, 1.0), 0.000001)
+    )
+    rooted = apply_root_motion(package_data, root_scale, warnings)
+
     # Sets and layers name objects that already exist, so this runs after
     # everything that creates them.
     set_result = import_sets(
@@ -380,6 +391,7 @@ def import_scene_package(
         "standin_count": standin_result["standin_count"],
         "as_fk_shapes": as_result["as_fk_shapes"],
         "as_ik_chains": as_result["as_ik_chains"],
+        "root_motion_bones": rooted,
         "standin_loaded": standin_result["standin_loaded"],
         "particle_count": particle_count,
         "particle_baked_count": particle_baked_count,

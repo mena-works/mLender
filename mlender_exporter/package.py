@@ -43,7 +43,12 @@ from .standins import scene_standin_shapes, standin_records
 from .volumes import scene_volume_shapes, volume_records
 from .aovs import scene_aovs
 from .asrig import as_rig_records
-from .rigging import scene_joints, constraint_records
+from .rigging import (
+    constraint_records,
+    root_motion_sample,
+    scene_joints,
+    skeleton_root_records,
+)
 from .sets import (
     display_layer_records,
     scene_display_layers,
@@ -64,6 +69,7 @@ from .lights import (
 )
 from .mayautils import (
     color_management_info,
+    current_frame,
     maya_linear_unit,
     maya_path,
     meters_per_maya_unit,
@@ -162,6 +168,7 @@ def export_scene(
         transform_list = transform_records(scene_transforms(selected_only))
         curve_list = curve_records(scene_curve_shapes(selected_only))
         joints = scene_joints(mesh_shapes, selected_only=selected_only)
+        root_motion_list = skeleton_root_records(joints)
         all_transforms = (
             [r.get("transform_path") for r in mesh_records if r.get("transform_path")] +
             [r.get("transform_path") for r in transform_list if r.get("transform_path")] +
@@ -267,8 +274,28 @@ def export_scene(
                 (record, _sampler(visibility_sample, record["mesh_path"]))
                 for record in mesh_records
                 if visibility_animated(record.get("mesh_path"))
+            ]
+            # Root joints' evaluated worlds: the FBX bake cannot be trusted
+            # above the skeleton (an unexported group's connection-driven
+            # motion is folded at its static value), so the truth travels
+            # and the importer keys it onto the root bones directly.
+            + [
+                (record, _sampler(root_motion_sample, record))
+                for record in root_motion_list
             ],
         )
+        root_motion_list = [
+            record for record in root_motion_list
+            if len(record.get("samples") or []) >= 2
+        ]
+        # The importer's calibration anchor: at the frame the scene sat on
+        # during the FBX export, both fold failures are clean -- a static
+        # fold holds this very frame's value, and a curve fold's error
+        # lives on the armature object, which the anchor never touches.
+        for record in root_motion_list:
+            reference = root_motion_sample(record)
+            reference["frame"] = current_frame()
+            record["reference"] = reference
         # Renamed off the shared key: for a light this is a lighting sample
         # and for a particle object a set of positions, and a mesh carrying
         # something different under the same name invites a wrong reader.
@@ -343,6 +370,7 @@ def export_scene(
             "object_sets": set_list,
             "aovs": aov_list,
             "as_rigs": as_rigs,
+            "skeleton_root_motion": root_motion_list,
             "constraints": constraint_list,
             "curve_count": len(curve_list),
             "curves": curve_list,

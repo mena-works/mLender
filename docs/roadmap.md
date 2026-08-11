@@ -516,15 +516,40 @@ baked animasyonla kavga ediyordu — 3 cm'lik karakterde daha ilk karede 1.3 cm
 hata. `build_as_rig` artık armature'de action varsa limbleri **FK'ya parklı**
 kuruyor; host testinde dişi var ("an animated package arrives parked").
 
-**Ölçülen sınır (açık):** iskeletin **üstündeki grup katmanında** yaşayan
-hareket (AS `Main` üstüne anahtar) bake'e binmiyor — export seçimi mesh +
-joint. Chubs'ta `Main.translateZ` 1.5 → bilek kare 10'da 1.5 cm eksik; buna
-karşılık minimal joint-anahtarlı sahne (Y ve Z ayrı ayrı) **birebir** geldi,
-yani boru hattında eksen hatası yok, eksik olan yalnız grup hareketi.
-Chubs'ta kalan tuhaf görüntü (kök blender-z'de oynarken bileğin y'de eksik
-kalması) bu kısmi bake'in bileşimi. Çözüm yönü belli ve mevcut desenin
-aynısı: joint köklerinin üstündeki grubun dünya matrisini kare kare JSON'a
-örnekle, importer armature objesine anahtarlasın (ışık/kamera gibi). Ayrı iş.
+**Ölçülen sınır (2.35.0'da kapandı):** iskeletin **üstündeki grup
+katmanında** yaşayan hareket (AS `Main` üstüne anahtar) bake'e binmiyordu.
+Kapatma yolu üç yanlış hipotez eskitti ve her biri ölçümle elendi:
+
+1. Minimal repro sürpriz yaptı: grubun **kendi animCurve'ü** varsa FBX onu
+   katlıyor — uçlar birebir, ara kare 0.8 mm (spline→linear düzleşmesi).
+   Kaybolan şey yalnız **bağlantıyla sürülen** hareketti (Main → connection),
+   o statik değerde donuyor. İki ayrı katlama türü.
+2. "Kök kemiği mutlak gerçekle key'le" → Chubs'ta çocuklar 1 cm kaydı:
+   FBX kemiği Maya joint'inden **90° roll** farklı eksenlerle kuruyor
+   (basis quat 0.707 ölçüldü). Canlı köprü bundan muaf çünkü her kemiği
+   mutlak dikte ediyor; tek kökü key'lemek farkı ilk kez görünür kıldı.
+3. "Referans karede kalibre et" → fixture'da 2.8 mm: referans karesi (7)
+   eğri katlamasının linearize hatasının üstüne denk geldi ve hata
+   kalibrasyona sızdı. "Grup gerçeği @ baked pose" özdeşliği tek başına da
+   yetmedi — Chubs'ta Main kökün **local**'ini sürüyor, grup dünyası hiç
+   kıpırdamıyor.
+
+Nihai bileşim ikisini birleştiriyor: exporter kök joint'in **ve** grubunun
+dünya matrislerini kare kare + export anındaki karede bir referans çifti
+yazıyor (`skeleton_root_motion`); importer eksen farkını
+`(joint_truth)⁻¹ @ (grup_truth @ baked_pose)` ile **temiz** çapada kalibre
+edip her karede `joint_truth @ R`'yi kök kemiğe key'liyor. Çapa iki katlama
+türünde de temiz: statik katlama tam o karenin değerini tutar, eğri
+katlamanın hatası armature objesindedir ve formül ona hiç bakmaz. Bake'in
+doğru olduğu yerde no-op — çift uygulama yok. Anahtar okuma iki geçişli:
+key basmak henüz basılmamış karelerin evaluasyonunu değiştirir (FBX bazen
+seyrek key bırakır, repro'da 1 ve 10).
+
+Doğrulama: minimal repro (iki eksen, spline ara kare) üç karede de 0.0;
+Chubs referanslı + `Main` iki eksende keyli → `Root_M` ve `Wrist_L` üç
+karede de 0.000000. Kalıcı fixture'da keyli grup + skinli zincir; Blender
+testi ara kare 13'te dünya konumu, anahtarların Maya karelerinde durduğu
+ve LINEAR olduğunu assert ediyor. 4 Blender sürümü yeşil.
 
 Ders (yasak listesinde zaten var, bir örneği daha): flatCube animasyon testi
 yalnız **X** ekseninde assert ediyordu; X→X iki konvansiyonda aynı olduğundan
