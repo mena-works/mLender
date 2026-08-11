@@ -396,6 +396,33 @@ envanteri çıkarılıp tasarlanacak.
 
 ---
 
+## Advanced Skeleton — beş rig ölçüldü, köprü kutudan çıktığı gibi çalışıyor
+
+Kullanıcı beş AS karakteri verdi (Chubs, Cubby, Gizmo, Joey, Sam; assets/rig/,
+git dışı). Envanter beşinde de aynı deseni verdi:
+
+- `DeformSet` = gövde bind iskeleti (34-36 eklem) — AS asıl iskeleti kendisi
+  beyan ediyor. `ControlSet` beşinde de tam 121 kontrol; `FaceControlSet` ayrı.
+- FK kontrol ↔ eklem **birebir isim**: `FKElbow_L` ↔ `Elbow_L`.
+- `FKIK{Arm,Leg}_{L,R}.FKIKBlend` (0=FK, 10=IK) ve switcher üstünde
+  `startJoint/middleJoint/endJoint` — IK zinciri attribute olarak yazılı,
+  probe gerekmiyor.
+- Hepsi cm, 13'er blendShape, yüzde ~144 ek eklem (DeformSet dışında ama
+  skinCluster influence'ı, yani keşfimiz hepsini alıyor: 178 ⊇ 34).
+
+Chubs uçtan uca: export 1.5 sn, import 48 mesh / 18 skinli / gövde 53k vertex,
+armature **tek ve temiz** (`DeformationSystem`, 179 kemik). Rig'in kendi
+kontrolüyle poz (`FKIKBlend`→FK, `FKElbow_L` −50°) köprüden geçti: bind ve
+sürülen pozda bilek Maya'yla **10⁻⁷ m** içinde, 178/178 eklem, sıfır uyarı.
+
+Karar (kullanıcı): "exchangeable"in üçüncü katmanı yapılacak — Blender'da
+yerli AS kontrol katmanı: FK kemiklerine kontrol eğrisi siluetleri (custom
+shape), kol/bacak için gerçek Blender IK + pole + FKIKBlend karşılığı limb
+başına özellik. Yüz v1'de dışarıda. Yaklaşıklık yalnız IK çözücünün kendi
+matematiğinde; FK ve köprü birebir kalır.
+
+---
+
 ## Sıradakiler — kararlaştırılan sıra
 
 Kullanıcı sırayı verdi: **2 → 7 → 4 → 3 → 6**. Numaralar bu oturumdaki
