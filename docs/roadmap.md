@@ -470,6 +470,41 @@ doğrulandı, `set_bone_selected()` ikisini de karşılıyor. Host testinde
 manifest, aralık, iki seçim yolu (fonksiyon + gerçek operatör), kayıt ve
 panel poll'u assert'li; 4.1/4.3/4.5/5.2 dördü de yeşil.
 
+**Referanslı ve çoklu rig (2.34.0, şema 43):** kullanıcının "birden fazla AS
+rigi varsa?" sorusu probe'la ölçüldü ve asıl bulgu daha genişti — **tek**
+referanslı rig bile algılanmıyordu: setler `Chubs:DeformSet`'te yaşıyor,
+çıplak `objExists("DeformSet")` ve `ls("FKIK*")` ikisi de boş dönüyor.
+Düzeltme üç ölçüme dayandı:
+
+1. FBX namespace'i Blender'a **aynen** taşıyor, iki nokta dahil
+   (`NS:probeRoot` kemik, `NS:probeCube` obje). Yani çeviri tablosu değil,
+   her yerde tam nitelikli isim: exporter kayıtları, poz köprüsü isimleri
+   (`without_namespace` çağrısı kaldırıldı — soymak referanslı rigin pozunu
+   sessizce eşleşmez bırakıyordu), importer eğri objeleri.
+2. JSON'dan kurulan eğriler FBX'le tutarsızdı: `safe_name` iki noktayı
+   `_`'ye çeviriyordu → `NSRig:IKArm_L` kaydı `NSRig_IKArm_L` objesini
+   bulamıyordu. `safe_object_name` iki noktayı koruyor (ölçüldü, Blender
+   isimleri ':' taşır). Paket tarafında `disambiguate_names` zaten çakışan
+   isimleri namespace'le nitelendiriyordu; artık eğri adı her durumda
+   `curve_full_name`.
+3. `as_rig` → `as_rigs` listesi (şema 43), namespace başına bir kayıt.
+   FKIK property'si rig'e nitelikli: `FKIK_Chubs_Arm_L` — iki rig tek
+   armature'a düşerse slider çakışması yok. Manifest armature başına
+   birleştiriliyor, panel etiketi "Chubs Arm L".
+
+Kalıcı süitte fixture'a namespace'li ikinci mini-AS eklendi — kısa isimleri
+kök rig'le bilerek aynı, prodüksiyondaki çakışma bu. Referanslı Chubs'ta
+uçtan uca: namespace'ten algı, 5 zincir bildirimi (spine IK'sız, açık
+uyarıyla atlandı), 4 zincir kuruldu, 32 siluet, IK rest 0.0, −8 mm çekiş →
+bilek tam −0.00800, 178 poz joint'i hepsi nitelikli. Bilinen kozmetik pürüz:
+iki rigin `ControlSet` koleksiyonları Blender'da `ControlSet` /
+`ControlSet.001` diye numaralanıyor (set adları disambiguate edilmiyor);
+işlevsel etkisi yok.
+
+Desteklenmeyen tek yerleşim (bilinçli): iki rigi namespace'siz import etmek.
+Maya çakışan setleri `DeformSet1` diye yeniden adlandırıyor ve rigleri ayırt
+edecek hiçbir şey kalmıyor; ölçüldü, README'de söylendi.
+
 ---
 
 ## Animasyonlu paket × AS katmanı — çatışma kapandı, bir sınır ölçüldü

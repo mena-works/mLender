@@ -17,7 +17,9 @@ LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
 LIVELINK_PROTOCOL = "mlender_livelink"
 LIVELINK_VERSION = 3
-EXPORT_SCHEMA_VERSION = 42
+# 43: as_rig became as_rigs, a list with one namespace-qualified record per
+# Advanced Skeleton rig in the scene (referenced rigs live in namespaces).
+EXPORT_SCHEMA_VERSION = 43
 # LiveLink events. Adding an event is backwards compatible: the importer's
 # validator rejects an unknown one with an explicit error rather than acting
 # on it, so an old add-on meeting a pose message says so instead of guessing.

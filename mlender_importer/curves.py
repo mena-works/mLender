@@ -23,7 +23,7 @@ from .attributes import apply_custom_attributes
 from .constants import CURVE_FORM_OPEN
 from .scene import place_in_group
 from .transforms import maya_matrix_to_blender
-from .utils import safe_name, scalar
+from .utils import safe_object_name, scalar
 
 
 def import_curves(package_data, root_collection, import_scale, warnings,
@@ -59,7 +59,11 @@ def _build_curve(record, root_collection, position_scale, group_cache):
     if not points:
         raise ValueError("no control points")
 
-    name = safe_name(record.get("curve") or "Curve")
+    # The full name keeps the namespace: an AS record names its control
+    # 'NS:IKArm_L' and the FBX-borne bones beside it are qualified the same
+    # way, so a stripped curve name would break the lookup between them.
+    name = safe_object_name(record.get("curve_full_name")
+                            or record.get("curve") or "Curve")
     data = bpy.data.curves.new(name, "CURVE")
     data.dimensions = "3D"
 

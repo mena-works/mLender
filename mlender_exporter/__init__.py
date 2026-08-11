@@ -27,7 +27,7 @@ from .posebridge import send_pose
 from .ui import show_ui
 
 
-BUILD_VERSION = "2.33.0"
+BUILD_VERSION = "2.34.0"
 
 # Dependency order; reloading follows this list so each module re-imports
 # already refreshed dependencies.

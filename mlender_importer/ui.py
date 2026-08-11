@@ -72,6 +72,16 @@ class ML_OT_remove_stale(bpy.types.Operator):
         return {"FINISHED"}
 
 
+def _chain_label(chain):
+    """The manifest's ready-made label, or limb+side for one written by
+    an older build."""
+    label = chain.get("label") or ""
+    if label:
+        return label
+    return "{0} {1}".format(chain.get("limb") or "",
+                            chain.get("side") or "").strip()
+
+
 class ML_OT_as_select_chain(bpy.types.Operator):
     bl_idname = "mlender.as_select_chain"
     bl_label = "Select Limb"
@@ -79,8 +89,9 @@ class ML_OT_as_select_chain(bpy.types.Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     armature_name: bpy.props.StringProperty()
-    limb: bpy.props.StringProperty()
-    side: bpy.props.StringProperty()
+    # The FKIK property name is the chain's identity: limb and side repeat
+    # when two referenced rigs share one armature, the property never does.
+    prop: bpy.props.StringProperty()
 
     def execute(self, context):
         armature = bpy.data.objects.get(self.armature_name)
@@ -89,17 +100,16 @@ class ML_OT_as_select_chain(bpy.types.Operator):
             self.report({"ERROR"}, "No AS rig on that armature.")
             return {"CANCELLED"}
         for chain in manifest.get("chains") or []:
-            if chain.get("limb") == self.limb and chain.get("side") == self.side:
+            if chain.get("prop") == self.prop:
                 count = select_chain(armature, chain)
                 self.report(
                     {"INFO"},
-                    "Selected {0} item(s) for {1} {2}.".format(
-                        count, self.limb, self.side,
+                    "Selected {0} item(s) for {1}.".format(
+                        count, _chain_label(chain),
                     ),
                 )
                 return {"FINISHED"}
-        self.report({"ERROR"}, "Chain {0} {1} not found.".format(
-            self.limb, self.side))
+        self.report({"ERROR"}, "Chain {0} not found.".format(self.prop))
         return {"CANCELLED"}
 
 
@@ -144,9 +154,8 @@ class ML_PT_as_rig(bpy.types.Panel):
                 box.label(text=armature.name, icon="ARMATURE_DATA")
             manifest = armature.get("ml_as_rig") or {}
             for chain in manifest.get("chains") or []:
-                limb = chain.get("limb") or ""
-                side = chain.get("side") or ""
                 prop = chain.get("prop") or ""
+                label = _chain_label(chain)
                 row = box.row(align=True)
                 op = row.operator(
                     ML_OT_as_select_chain.bl_idname,
@@ -154,17 +163,16 @@ class ML_PT_as_rig(bpy.types.Panel):
                     icon="RESTRICT_SELECT_OFF",
                 )
                 op.armature_name = armature.name
-                op.limb = limb
-                op.side = side
+                op.prop = prop
                 if prop in armature.keys():
                     row.prop(
                         armature,
                         '["{0}"]'.format(prop),
-                        text="{0} {1}".format(limb, side),
+                        text=label,
                         slider=True,
                     )
                 else:
-                    row.label(text="{0} {1}".format(limb, side))
+                    row.label(text=label)
             op = box.operator(ML_OT_as_select_fk.bl_idname, icon="BONE_DATA")
             op.armature_name = armature.name
 

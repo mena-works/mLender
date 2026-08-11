@@ -1066,6 +1066,45 @@ def build_scene():
     cmds.sets(["Shoulder_L", "Elbow_L", "Wrist_L"], name="DeformSet")
     cmds.sets(as_controls + [as_switch], name="ControlSet")
 
+    # A second rig, referenced-style: the same miniature manifest inside a
+    # namespace, with the SAME short names -- that is what two referenced
+    # AS characters look like, and the namespace is the only thing keeping
+    # their joints apart. Measured: a referenced rig's sets live at
+    # NS:DeformSet, so bare-name detection misses them entirely.
+    cmds.namespace(add="NSRig")
+    cmds.namespace(set="NSRig")
+    try:
+        cmds.select(clear=True)
+        cmds.joint(name="Shoulder_L", position=(6, 8, 0))
+        cmds.joint(name="Elbow_L", position=(6, 4, 1))
+        cmds.joint(name="Wrist_L", position=(6, 0, 0))
+        ns_mesh = cmds.polyCylinder(name="nsArmMesh", height=8, radius=0.4,
+                                    subdivisionsHeight=8, axis=(0, 1, 0))[0]
+        cmds.setAttr(ns_mesh + ".translateX", 6)
+        cmds.setAttr(ns_mesh + ".translateY", 4)
+        cmds.skinCluster("NSRig:Shoulder_L", "NSRig:Elbow_L",
+                         "NSRig:Wrist_L", ns_mesh, toSelectedBones=True)
+        ns_controls = [
+            _as_circle("FKShoulder_L", (6, 8, 0)),
+            _as_circle("FKElbow_L", (6, 4, 1)),
+            _as_circle("IKArm_L", (6, 0, 0)),
+            _as_circle("PoleArm_L", (6, 4, 5)),
+        ]
+        ns_switch = cmds.createNode("transform", name="FKIKArm_L")
+        cmds.addAttr(ns_switch, longName="FKIKBlend",
+                     attributeType="double", minValue=0, maxValue=10,
+                     defaultValue=10, keyable=True)
+        for attr, base in (("startJoint", "Shoulder"),
+                           ("middleJoint", "Elbow"),
+                           ("endJoint", "Wrist")):
+            cmds.addAttr(ns_switch, longName=attr, dataType="string")
+            cmds.setAttr(ns_switch + "." + attr, base, type="string")
+        cmds.sets(["NSRig:Shoulder_L", "NSRig:Elbow_L", "NSRig:Wrist_L"],
+                  name="DeformSet")
+        cmds.sets(ns_controls + [ns_switch], name="ControlSet")
+    finally:
+        cmds.namespace(set=":")
+
     # Portals emit nothing and must not become black area lights.
     cmds.createNode("aiLightPortal", name="aiPortalShape")
 
@@ -1146,13 +1185,13 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("50 meshes exported", payload["mesh_count"] == 50,
+    check("51 meshes exported", payload["mesh_count"] == 51,
           payload["mesh_count"])
-    # Four: the locator, the empty null, the nested locator, and the group
-    # holding only a curve. That last one has no mesh below it either, so
-    # the FBX does not carry it any more than it carries the others.
-    check("5 geometry-free transforms exported",
-          payload["transform_count"] == 5, payload["transform_count"])
+    # The locator, the empty null, the nested locator, the group holding
+    # only a curve, and the two shapeless FKIK switchers (root and NSRig:).
+    # None has a mesh below it, so the FBX carries none of them.
+    check("6 geometry-free transforms exported",
+          payload["transform_count"] == 6, payload["transform_count"])
 
     print("\ninstances")
     # An instanced shape hangs under several transforms. Reading only the
@@ -1453,8 +1492,8 @@ def main():
     by_curve = {
         item.get("curve"): item for item in (payload.get("curves") or [])
     }
-    check("7 curves exported: 3 fixtures and 4 AS controls",
-          payload["curve_count"] == 7,
+    check("11 curves exported: 3 fixtures and 4 AS controls per rig",
+          payload["curve_count"] == 11,
           payload["curve_count"])
     for name in ("probeCurve", "probeLine", "probeCircle"):
         check("{0} was exported".format(name), name in by_curve,
@@ -2304,8 +2343,12 @@ def main():
     bridge_names = sorted(
         entry["name"] for entry in bind_pose["pose"]["joints"]
     )
-    check("the pose samples exactly the bound chain",
-          bridge_names == ["Elbow_L", "Shoulder_L", "Wrist_L",
+    # Namespaces stay in the sampled names: FBX keeps them in the bone names
+    # (measured), so stripping them here would leave the NSRig joints
+    # unmatched in Blender -- and collide them with the root rig's.
+    check("the pose samples exactly the bound chains, namespaces kept",
+          bridge_names == ["Elbow_L", "NSRig:Elbow_L", "NSRig:Shoulder_L",
+                           "NSRig:Wrist_L", "Shoulder_L", "Wrist_L",
                            "bridgeMid", "bridgeRoot", "bridgeTip"],
           bridge_names)
     check("the unbound decoy joint does not travel",
@@ -2338,7 +2381,11 @@ def main():
         }, handle)
 
     print("\nadvanced skeleton manifest")
-    as_rig = payload.get("as_rig") or {}
+    as_rigs = payload.get("as_rigs") or []
+    check("both rigs detected, the referenced-style one by its namespace",
+          [r.get("namespace") for r in as_rigs] == ["", "NSRig:"],
+          [r.get("namespace") for r in as_rigs])
+    as_rig = as_rigs[0] if as_rigs else {}
     check("the AS scene was detected from its own sets",
           as_rig.get("detected") is True, as_rig.get("detected"))
     as_chains = as_rig.get("chains") or []
@@ -2361,6 +2408,20 @@ def main():
     check("FK pairs verified by convention, switcher excluded",
           fk_pairs == {"FKShoulder_L": "Shoulder_L",
                        "FKElbow_L": "Elbow_L"}, fk_pairs)
+    ns_rig = as_rigs[1] if len(as_rigs) > 1 else {}
+    ns_chains = ns_rig.get("chains") or []
+    check("the namespaced rig declares its own chain, fully qualified",
+          len(ns_chains) == 1
+          and (ns_chains[0].get("start"), ns_chains[0].get("end"))
+          == ("NSRig:Shoulder_L", "NSRig:Wrist_L")
+          and ns_chains[0].get("ik_control") == "NSRig:IKArm_L"
+          and ns_chains[0].get("pole_control") == "NSRig:PoleArm_L",
+          ns_chains)
+    ns_pairs = dict((p["control"], p["joint"])
+                    for p in ns_rig.get("fk_controls") or [])
+    check("its FK pairs stay inside the namespace",
+          ns_pairs == {"NSRig:FKShoulder_L": "NSRig:Shoulder_L",
+                       "NSRig:FKElbow_L": "NSRig:Elbow_L"}, ns_pairs)
 
     print("\ninstancers")
     instancers = payload.get("instancers") or []

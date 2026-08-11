@@ -39,18 +39,45 @@ LOCKED_AXES = ("lock_ik_x", "lock_ik_y", "lock_ik_z")
 
 
 def build_as_rig(package_data, warnings):
-    """Dress and wire the AS control layer. Returns counts for the report."""
-    record = package_data.get("as_rig") or {}
-    if not record.get("detected"):
-        return {"as_fk_shapes": 0, "as_ik_chains": 0}
+    """Dress and wire the AS control layer. Returns counts for the report.
 
+    One package can carry several rigs -- referenced characters each live in
+    their own namespace, and FBX brings the namespace into the bone names
+    verbatim, so the records' qualified names match the armatures directly.
+    A package older than schema 43 carries a single record under "as_rig".
+    """
+    records = package_data.get("as_rigs")
+    if records is None:
+        legacy = package_data.get("as_rig") or {}
+        records = [legacy] if legacy else []
+    records = [r for r in records if r.get("detected")]
+
+    totals = {"as_fk_shapes": 0, "as_ik_chains": 0}
+    # Two rigs can land in one armature (FBX groups skeletons as it likes),
+    # so manifests merge per armature rather than overwrite.
+    manifests = {}
+    for record in records:
+        counts = _build_one_rig(record, warnings, manifests)
+        totals["as_fk_shapes"] += counts[0]
+        totals["as_ik_chains"] += counts[1]
+    for armature, manifest in manifests.values():
+        armature["ml_as_rig"] = manifest
+    if manifests:
+        _refresh()
+    return totals
+
+
+def _build_one_rig(record, warnings, manifests):
+    """Build one rig's layer; accumulate its manifest. Returns counts."""
+    namespace = record.get("namespace") or ""
     armature = _armature_for(record)
     if armature is None:
         warnings.append(
-            "The package declares an Advanced Skeleton rig but no imported "
-            "armature carries its joints; the control layer was not built."
+            'The package declares an Advanced Skeleton rig ("{0}") but no '
+            "imported armature carries its joints; that control layer was "
+            "not built.".format(namespace.rstrip(":") or "scene")
         )
-        return {"as_fk_shapes": 0, "as_ik_chains": 0}
+        return (0, 0)
 
     shapes = _dress_fk_bones(armature, record.get("fk_controls") or [],
                              warnings)
@@ -70,35 +97,45 @@ def build_as_rig(package_data, warnings):
     chains = 0
     built = []
     for chain, walk in walks.values():
-        if _build_chain(armature, chain, walk, warnings):
+        if _build_chain(armature, chain, walk, warnings, namespace):
             chains += 1
             built.append(chain)
     # The manifest goes onto the armature itself, so the panel and the
     # selection helpers read what was actually built rather than re-deriving
     # it from names -- and so it survives a .blend save.
-    armature["ml_as_rig"] = {
-        "chains": [
-            {
-                "limb": chain.get("limb") or "",
-                "side": chain.get("side") or "",
-                "start": chain.get("start") or "",
-                "middle": chain.get("middle") or "",
-                "end": chain.get("end") or "",
-                "ik": chain.get("ik_control") or "",
-                "pole": chain.get("pole_control") or "",
-                "prop": FKIK_PROPERTY.format(chain.get("limb") or "Limb",
-                                             chain.get("side") or "X"),
-            }
-            for chain in built
-        ],
-        "fk_bones": [
-            pair.get("joint") or ""
-            for pair in record.get("fk_controls") or []
-            if armature.pose.bones.get(pair.get("joint") or "")
-        ],
-    }
-    _refresh()
-    return {"as_fk_shapes": shapes, "as_ik_chains": chains}
+    _, manifest = manifests.setdefault(
+        armature.name, (armature, {"chains": [], "fk_bones": []})
+    )
+    label_prefix = namespace.rstrip(":")
+    for chain in built:
+        limb = chain.get("limb") or ""
+        side = chain.get("side") or ""
+        manifest["chains"].append({
+            "limb": limb,
+            "side": side,
+            "label": " ".join(p for p in (label_prefix, limb, side) if p),
+            "start": chain.get("start") or "",
+            "middle": chain.get("middle") or "",
+            "end": chain.get("end") or "",
+            "ik": chain.get("ik_control") or "",
+            "pole": chain.get("pole_control") or "",
+            "prop": fkik_property(namespace, limb, side),
+        })
+    manifest["fk_bones"].extend(
+        pair.get("joint") or ""
+        for pair in record.get("fk_controls") or []
+        if armature.pose.bones.get(pair.get("joint") or "")
+    )
+    return (shapes, chains)
+
+
+def fkik_property(namespace, limb, side):
+    """Per-limb property name; the namespace keeps two rigs sharing one
+    armature from fighting over FKIK_Arm_L."""
+    return FKIK_PROPERTY.format(
+        (namespace or "").replace(":", "_") + (limb or "Limb"),
+        side or "X",
+    )
 
 
 def as_armatures():
@@ -286,7 +323,7 @@ def _dress_fk_bones(armature, pairs, warnings):
     return dressed
 
 
-def _build_chain(armature, chain, walk, warnings):
+def _build_chain(armature, chain, walk, warnings, namespace=""):
     """One declared limb: IK constraint, live targets, FK/IK property.
 
     ``walk`` is the end-first list of bone names the chains were re-tailed
@@ -339,8 +376,7 @@ def _build_chain(armature, chain, walk, warnings):
     follow.name = "ML_AS_IK_Rotation"
     follow.target = target
 
-    prop = FKIK_PROPERTY.format(chain.get("limb") or "Limb",
-                                chain.get("side") or "X")
+    prop = fkik_property(namespace, chain.get("limb"), chain.get("side"))
     # AS's blend runs 0..10 with 10 as IK; the property is 0..1 of IK.
     # An animated package parks the limb in FK regardless: the baked action
     # is the evaluated truth and the IK targets sit still at bind, so a live

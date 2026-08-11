@@ -1403,6 +1403,18 @@ identical across five production rigs: `DeformSet` names the bind skeleton,
 IK chain in `startJoint`/`middleJoint`/`endJoint` string attributes. Nothing
 is guessed; a rig that breaks the convention simply gets no entry.
 
+**Referenced rigs and multiple rigs are recognised too.** A referenced
+character keeps its manifest inside its namespace (`Chubs:DeformSet`), so
+detection scans every namespace and writes one record per rig. Names travel
+fully qualified on both sides — measured, the FBX importer keeps the
+namespace in Blender bone and object names verbatim, colon included — so a
+referenced rig's bones, control curves and pose-bridge joints all match
+without any translation. Each rig's FK/IK property carries its namespace
+(`FKIK_Chubs_Arm_L`), which keeps two characters sharing one armature from
+fighting over the same slider. Two rigs imported **without** namespaces is
+the one unsupported layout: Maya itself renames their clashing sets and
+joints, and there is nothing left to tell the rigs apart.
+
 On import, a native Blender control layer is built from that manifest:
 
 - Every FK bone wears its imported AS control curve as a **custom shape**, so
@@ -1422,7 +1434,9 @@ depsgraph on their own) with a select button that grabs the limb's three
 bones plus its IK and pole controls in one click, and a **Select FK
 Controls** button for the dressed FK bones. It reads the `ml_as_rig`
 manifest the import writes onto the armature, so it works on a reopened
-.blend too — nothing is re-derived from names.
+.blend too — nothing is re-derived from names. With several rigs in the
+scene each slider is labelled by its rig ("Chubs Arm L"), and every
+manifested armature gets its own block.
 
 Two measured facts shape the build. The FBX importer creates bones as
 disconnected sticks whose tails do not sit on the next joint — no IK effector

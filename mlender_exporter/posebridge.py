@@ -32,7 +32,6 @@ from .mayautils import (
     meters_per_maya_unit,
     node_label,
     unique,
-    without_namespace,
 )
 from .meshes import scene_mesh_shapes
 from .rigging import scene_joints
@@ -43,8 +42,11 @@ def pose_message(selected_only=False):
 
     The same joint discovery the export uses, so the skeleton sampled here is
     the skeleton the FBX carried and the Blender armature mirrors. Short
-    names travel because bone names in Blender are the FBX's short names;
-    the full path rides along for diagnostics only.
+    names travel because bone names in Blender are the FBX's short names --
+    and the namespace stays in, because FBX keeps it in the bone name
+    verbatim, colon included (measured on 5.2: 'NS:probeRoot'). Stripping it
+    left a referenced rig's pose silently unmatched, and made two referenced
+    characters' joints collide. The full path rides along for diagnostics.
     """
     joints = scene_joints(scene_mesh_shapes(selected_only))
     records = []
@@ -55,7 +57,7 @@ def pose_message(selected_only=False):
         except Exception:
             continue
         records.append({
-            "name": without_namespace(node_label(joint)),
+            "name": node_label(joint),
             "path": joint,
             "matrix": [float(value) for value in matrix],
         })

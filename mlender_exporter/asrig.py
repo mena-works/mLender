@@ -36,34 +36,60 @@ from .constants import (
 from .mayautils import attr_exists
 
 
-def is_advanced_skeleton_scene():
-    """True when the scene carries AS's own manifest sets."""
+def rig_namespaces():
+    """Namespace prefixes ('' or 'Chubs:') that carry both AS sets.
+
+    A referenced character keeps its manifest sets inside its namespace, so
+    the bare names never exist and a plain objExists misses the rig entirely
+    -- measured, both on one referenced rig and on two. ls with recursive
+    finds the sets wherever they live; the prefix is everything before the
+    set's own name, which keeps nested namespaces ('a:b:') intact.
+    """
+    prefixes = []
     try:
-        return bool(
-            cmds.objExists(AS_DEFORM_SET) and cmds.objExists(AS_CONTROL_SET)
-        )
+        found = cmds.ls(AS_DEFORM_SET, recursive=True) or []
     except Exception:
-        return False
+        return prefixes
+    for deform in found:
+        prefix = deform[:-len(AS_DEFORM_SET)]
+        if cmds.objExists(prefix + AS_CONTROL_SET):
+            prefixes.append(prefix)
+    return sorted(prefixes)
 
 
-def as_rig_record():
-    """The AS description, or an empty dict for a scene that is not one."""
-    if not is_advanced_skeleton_scene():
-        return {}
-    controls = set(cmds.sets(AS_CONTROL_SET, query=True) or [])
-    deform = list(cmds.sets(AS_DEFORM_SET, query=True) or [])
-    return {
-        "detected": True,
-        "deform_set": deform,
-        "chains": _chains(controls),
-        "fk_controls": _fk_controls(controls),
-    }
+def is_advanced_skeleton_scene():
+    """True when any namespace in the scene carries AS's manifest sets."""
+    return bool(rig_namespaces())
 
 
-def _chains(controls):
+def as_rig_records():
+    """One AS description per rig in the scene, possibly none.
+
+    Every name written is fully namespace-qualified, because FBX carries the
+    namespace into Blender verbatim, colon included -- measured on 5.2: the
+    bone arrives as 'NS:probeRoot'. Qualified names on both sides means no
+    translation table anywhere between them.
+    """
+    records = []
+    for prefix in rig_namespaces():
+        controls = set(
+            cmds.sets(prefix + AS_CONTROL_SET, query=True) or []
+        )
+        deform = list(cmds.sets(prefix + AS_DEFORM_SET, query=True) or [])
+        records.append({
+            "detected": True,
+            "namespace": prefix,
+            "deform_set": deform,
+            "chains": _chains(prefix, controls),
+            "fk_controls": _fk_controls(prefix, controls),
+        })
+    return records
+
+
+def _chains(prefix, controls):
     """One entry per limb switcher that declares a complete, real chain."""
     chains = []
-    for switch in sorted(cmds.ls(AS_FKIK_PREFIX + "*",
+    for switch in sorted(cmds.ls(prefix + AS_FKIK_PREFIX + "*",
                                  type="transform") or []):
         if not attr_exists(switch, AS_FKIK_BLEND_ATTR):
             continue
@@ -79,7 +105,9 @@ def _chains(controls):
                 base = str(cmds.getAttr(switch + "." + attr) or "")
             except Exception:
                 base = ""
-            joint = base + "_" + side if base else ""
+            # The switcher declares base names; the joints live beside it
+            # in the same namespace.
+            joint = prefix + base + "_" + side if base else ""
             if not joint or not cmds.objExists(joint):
                 names = []
                 break
@@ -104,16 +132,16 @@ def _chains(controls):
             entry["blend"] = 10.0
         # The IK and pole controls travel as curves already; naming them here
         # is what lets the importer promote those curves into live targets.
-        for key, prefix in (("ik_control", AS_IK_PREFIX),
-                            ("pole_control", AS_POLE_PREFIX)):
-            name = prefix + limb + "_" + side
+        for key, control_prefix in (("ik_control", AS_IK_PREFIX),
+                                    ("pole_control", AS_POLE_PREFIX)):
+            name = prefix + control_prefix + limb + "_" + side
             if name in controls and cmds.objExists(name):
                 entry[key] = name
         chains.append(entry)
     return chains
 
 
-def _fk_controls(controls):
+def _fk_controls(prefix, controls):
     """Verified FK-control-to-joint pairs, by AS's naming convention.
 
     Verified, not assumed: each pair is only written when both the control
@@ -122,11 +150,12 @@ def _fk_controls(controls):
     """
     pairs = []
     for control in sorted(controls):
-        if not control.startswith(AS_FK_PREFIX):
+        short = _short_name(control)
+        if not short.startswith(AS_FK_PREFIX):
             continue
-        if control.startswith(AS_FKIK_PREFIX):
+        if short.startswith(AS_FKIK_PREFIX):
             continue
-        joint = control[len(AS_FK_PREFIX):]
+        joint = prefix + short[len(AS_FK_PREFIX):]
         try:
             if not cmds.objExists(joint):
                 continue
@@ -138,6 +167,10 @@ def _fk_controls(controls):
     return pairs
 
 
+def _short_name(node):
+    return node.rsplit("|", 1)[-1].rsplit(":", 1)[-1]
+
+
 def _side_of(switch):
     for side in ("L", "R", "M"):
         if switch.endswith("_" + side):
@@ -146,5 +179,5 @@ def _side_of(switch):
 
 
 def _limb_of(switch):
-    stem = switch[len(AS_FKIK_PREFIX):]
+    stem = _short_name(switch)[len(AS_FKIK_PREFIX):]
     return stem.rsplit("_", 1)[0]

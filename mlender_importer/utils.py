@@ -178,6 +178,18 @@ def safe_name(value):
     return value.strip("_") or "Material"
 
 
+def safe_object_name(value):
+    """Like safe_name, but the namespace colon stays.
+
+    Blender object and bone names hold ':' -- the FBX importer brings a
+    referenced Maya node in as 'NS:name' verbatim (measured on 5.2) -- so
+    objects rebuilt from JSON must keep it too, or the two halves of one
+    rig stop matching by name.
+    """
+    value = re.sub(r'[<>"/\\|?*\s]+', "_", str(value or "").strip())
+    return value.strip("_") or "Object"
+
+
 def strip_duplicate_suffix(value):
     """Remove Blender's ".001" style uniquifying suffix."""
     return re.sub(r"\.\d{3}$", "", value)

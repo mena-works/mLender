@@ -114,7 +114,7 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("50 meshes imported", result["mesh_count"] == 50,
+    check("51 meshes imported", result["mesh_count"] == 51,
           result["mesh_count"])
     check("40 materials built", result["material_count"] == 40,
           result["material_count"])
@@ -170,8 +170,8 @@ def main():
           ungrouped is not None
           and scene_collections(ungrouped) == [result["root_collection"]],
           [c.name for c in ungrouped.users_collection] if ungrouped else None)
-    check("seven collections were reported",
-          result["group_collection_count"] == 7,
+    check("nine collections were reported",
+          result["group_collection_count"] == 9,
           result["group_collection_count"])
 
     print("\ninstances")
@@ -216,7 +216,7 @@ def main():
         check("{0} arrived".format(name), obj is not None)
         if obj is not None:
             check("{0} is an empty".format(name), obj.type == "EMPTY", obj.type)
-    check("the import reported them", result["transform_count"] == 5,
+    check("the import reported them", result["transform_count"] == 6,
           result["transform_count"])
     if locator:
         # Maya Y becomes Blender Z, and the scene is in centimetres, so 7
@@ -249,7 +249,9 @@ def main():
     print("\nselection sets and display layers")
     hero = bpy.data.collections.get("heroSet")
     check("the set became a collection", hero is not None)
-    check("the import reported both real sets", result["set_count"] == 2,
+    # heroSet plus both rigs' ControlSets; the DeformSets hold only
+    # joints, which are not exported paths, so they never became sets.
+    check("the import reported the three real sets", result["set_count"] == 3,
           result["set_count"])
     if hero:
         names = {obj.name for obj in hero.objects}
@@ -605,7 +607,7 @@ def main():
     probe_curve = bpy.data.objects.get("probeCurve")
     probe_line = bpy.data.objects.get("probeLine")
     probe_circle = bpy.data.objects.get("probeCircle")
-    check("the import reported 7 curves", result["curve_count"] == 7,
+    check("the import reported 11 curves", result["curve_count"] == 11,
           result["curve_count"])
     for name, obj in (("probeCurve", probe_curve), ("probeLine", probe_line),
                       ("probeCircle", probe_circle)):
@@ -1501,8 +1503,8 @@ def main():
         bridge_warnings = []
         applied = apply_pose(bridge_data["bind"]["pose"],
                              warnings=bridge_warnings)
-        check("the bind pose applies to the whole chain",
-              applied["applied"] == 6 and applied["unmatched"] == 0, applied)
+        check("the bind pose applies to every chain, namespaced ones too",
+              applied["applied"] == 9 and applied["unmatched"] == 0, applied)
         worst = 0.0
         # The FBX puts every skeleton into one armature, so this looks only
         # at the bridge chain: the AS bones beside it are legitimately
@@ -1544,9 +1546,9 @@ def main():
               bridge_warnings)
 
     print("\nadvanced skeleton control layer")
-    check("one declared chain was built", result.get("as_ik_chains") == 1,
-          result.get("as_ik_chains"))
-    check("both FK bones were dressed", result.get("as_fk_shapes") == 2,
+    check("both rigs' declared chains were built",
+          result.get("as_ik_chains") == 2, result.get("as_ik_chains"))
+    check("all four FK bones were dressed", result.get("as_fk_shapes") == 4,
           result.get("as_fk_shapes"))
     as_arm = next(
         (obj for obj in bpy.data.objects
@@ -1577,6 +1579,36 @@ def main():
         check("the FKIK blend arrived as a property",
               as_arm.get("FKIK_Arm_L") is not None,
               sorted(k for k in as_arm.keys()))
+        # The referenced-style rig: FBX keeps the namespace in bone and
+        # object names (measured), and everything it gets is qualified --
+        # bones, controls, and its own FKIK property, so two rigs sharing
+        # one armature cannot fight over FKIK_Arm_L.
+        ns_arm = next(
+            (obj for obj in bpy.data.objects
+             if obj.type == "ARMATURE"
+             and "NSRig:Shoulder_L" in obj.pose.bones), None)
+        check("the namespaced rig's bones kept their namespace",
+              ns_arm is not None)
+        if ns_arm:
+            ns_wrist = ns_arm.pose.bones["NSRig:Wrist_L"]
+            ns_ik = next((c for c in ns_wrist.parent.constraints
+                          if c.type == "IK"), None)
+            check("it got its own IK on the namespaced controls",
+                  ns_ik is not None
+                  and getattr(ns_ik.target, "name", None) == "NSRig:IKArm_L"
+                  and getattr(ns_ik.pole_target, "name", None)
+                  == "NSRig:PoleArm_L",
+                  (getattr(ns_ik, "target", None),
+                   getattr(ns_ik, "pole_target", None)))
+            ns_shape = ns_arm.pose.bones["NSRig:Elbow_L"].custom_shape
+            check("its FK silhouette is the namespaced curve",
+                  ns_shape is not None
+                  and ns_shape.name == "NSRig:FKElbow_L",
+                  getattr(ns_shape, "name", None))
+            check("under a namespace-qualified property, parked like the rest",
+                  ns_arm.get("FKIK_NSRig_Arm_L") is not None
+                  and abs(ns_arm.get("FKIK_NSRig_Arm_L", -1.0)) < 1e-6,
+                  ns_arm.get("FKIK_NSRig_Arm_L"))
         # This package is animated, so the limb must arrive parked in FK:
         # the baked action is the evaluated truth and the IK targets sit
         # still at bind. Measured on a production character, leaving IK on
@@ -1644,44 +1676,66 @@ def main():
         check("the manifest is written onto the armature",
               manifest is not None,
               sorted(k for k in as_arm.keys()))
-        chains = list(manifest.get("chains")) if manifest else []
-        chain = chains[0] if chains else None
-        check("with the one chain and its real names",
+        # Both rigs' chains, wherever their armatures ended up; the property
+        # name is each chain's identity and must be unique across them.
+        all_chains = {}
+        for rig_arm in as_armatures():
+            for entry in rig_arm.get("ml_as_rig").get("chains") or []:
+                all_chains[str(entry.get("prop"))] = (rig_arm, entry)
+        check("both chains are manifested under distinct properties",
+              sorted(all_chains) == ["FKIK_Arm_L", "FKIK_NSRig_Arm_L"],
+              sorted(all_chains))
+        chain = all_chains.get("FKIK_Arm_L", (None, None))[1]
+        check("the root chain carries its real names and label",
               chain is not None
               and chain.get("limb") == "Arm" and chain.get("side") == "L"
+              and chain.get("label") == "Arm L"
               and chain.get("start") == "Shoulder_L"
               and chain.get("end") == "Wrist_L"
               and chain.get("ik") == "IKArm_L"
-              and chain.get("pole") == "PoleArm_L"
-              and chain.get("prop") == "FKIK_Arm_L",
+              and chain.get("pole") == "PoleArm_L",
               dict(chain) if chain else None)
-        check("and both FK bones",
-              manifest is not None
-              and sorted(str(n) for n in manifest.get("fk_bones") or [])
-              == ["Elbow_L", "Shoulder_L"],
-              list(manifest.get("fk_bones")) if manifest else None)
+        ns_entry = all_chains.get("FKIK_NSRig_Arm_L", (None, None))[1]
+        check("the namespaced chain stays qualified, label readable",
+              ns_entry is not None
+              and ns_entry.get("label") == "NSRig Arm L"
+              and ns_entry.get("start") == "NSRig:Shoulder_L"
+              and ns_entry.get("ik") == "NSRig:IKArm_L",
+              dict(ns_entry) if ns_entry else None)
+        all_fk = sorted(
+            str(n)
+            for rig_arm in as_armatures()
+            for n in rig_arm.get("ml_as_rig").get("fk_bones") or []
+        )
+        check("and all four FK bones across the manifests",
+              all_fk == ["Elbow_L", "NSRig:Elbow_L", "NSRig:Shoulder_L",
+                         "Shoulder_L"],
+              all_fk)
         check("the slider range is pinned to 0..1",
               _fkik_ui_range(as_arm) == (0.0, 1.0),
               _fkik_ui_range(as_arm))
-        check("as_armatures finds exactly this rig",
-              as_armatures() == [as_arm],
+        check("as_armatures reports every manifested armature",
+              as_arm in as_armatures(),
               [o.name for o in as_armatures()])
         if chain:
             picked = select_chain(as_arm, chain)
             selected = sorted(b.name for b in as_arm.pose.bones
                               if bone_selected(b))
-            check("select_chain picks the three joints",
+            check("select_chain picks the three joints, no namespaced strays",
                   selected == ["Elbow_L", "Shoulder_L", "Wrist_L"], selected)
             check("and the two promoted controls, five in all",
                   picked == 5
                   and bpy.data.objects["IKArm_L"].select_get()
                   and bpy.data.objects["PoleArm_L"].select_get(),
                   picked)
+        expected_fk = sorted(
+            str(n) for n in as_arm.get("ml_as_rig").get("fk_bones") or []
+        )
         fk_count = select_fk_bones(as_arm)
         selected = sorted(b.name for b in as_arm.pose.bones
                           if bone_selected(b))
-        check("select_fk_bones swaps the selection to the FK pair",
-              fk_count == 2 and selected == ["Elbow_L", "Shoulder_L"],
+        check("select_fk_bones swaps the selection to this armature's FK set",
+              fk_count == len(expected_fk) and selected == expected_fk,
               selected)
         # Registration is the cross-version risk: annotation-style operator
         # properties and a poll that reads ID properties. Register the real
@@ -1695,7 +1749,7 @@ def main():
                   getattr(bpy.types, "ML_PT_as_rig", None) is not None
                   and bpy.types.ML_PT_as_rig.poll(bpy.context) is True)
             result_set = bpy.ops.mlender.as_select_chain(
-                armature_name=as_arm.name, limb="Arm", side="L")
+                armature_name=as_arm.name, prop="FKIK_Arm_L")
             check("the operator route selects the same limb",
                   result_set == {"FINISHED"}
                   and sorted(b.name for b in as_arm.pose.bones
@@ -1706,7 +1760,7 @@ def main():
             # RuntimeError; either shape is the refusal being tested.
             try:
                 missing = bpy.ops.mlender.as_select_chain(
-                    armature_name=as_arm.name, limb="Tail", side="R")
+                    armature_name=as_arm.name, prop="FKIK_Tail_R")
             except RuntimeError as exc:
                 missing = {"CANCELLED"} if "not found" in str(exc) else exc
             check("and refuses a limb the manifest never built",
