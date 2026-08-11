@@ -1415,6 +1415,15 @@ On import, a native Blender control layer is built from that manifest:
   call `armature.update_tag()`; a property assigned from Python does not tag
   the depsgraph by itself.)
 
+The N-panel grows an **AS Rig** section when such a rig is in the scene — the
+functional stand-in for AS's picker. Per limb it shows an FK/IK slider
+(0 = FK, 1 = IK; the same property as above, and edits from the UI tag the
+depsgraph on their own) with a select button that grabs the limb's three
+bones plus its IK and pole controls in one click, and a **Select FK
+Controls** button for the dressed FK bones. It reads the `ml_as_rig`
+manifest the import writes onto the armature, so it works on a reopened
+.blend too — nothing is re-derived from names.
+
 Two measured facts shape the build. The FBX importer creates bones as
 disconnected sticks whose tails do not sit on the next joint — no IK effector
 on such a chain can coincide with the end joint, the best any arrangement

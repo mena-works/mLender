@@ -68,11 +68,113 @@ def build_as_rig(package_data, warnings):
     # skin nothing because the pose is the rest pose while it happens.
     _retail_chains(armature, [walk for _c, walk in walks.values()])
     chains = 0
+    built = []
     for chain, walk in walks.values():
         if _build_chain(armature, chain, walk, warnings):
             chains += 1
+            built.append(chain)
+    # The manifest goes onto the armature itself, so the panel and the
+    # selection helpers read what was actually built rather than re-deriving
+    # it from names -- and so it survives a .blend save.
+    armature["ml_as_rig"] = {
+        "chains": [
+            {
+                "limb": chain.get("limb") or "",
+                "side": chain.get("side") or "",
+                "start": chain.get("start") or "",
+                "middle": chain.get("middle") or "",
+                "end": chain.get("end") or "",
+                "ik": chain.get("ik_control") or "",
+                "pole": chain.get("pole_control") or "",
+                "prop": FKIK_PROPERTY.format(chain.get("limb") or "Limb",
+                                             chain.get("side") or "X"),
+            }
+            for chain in built
+        ],
+        "fk_bones": [
+            pair.get("joint") or ""
+            for pair in record.get("fk_controls") or []
+            if armature.pose.bones.get(pair.get("joint") or "")
+        ],
+    }
     _refresh()
     return {"as_fk_shapes": shapes, "as_ik_chains": chains}
+
+
+def as_armatures():
+    """Every armature carrying a built AS control layer."""
+    return [obj for obj in bpy.data.objects
+            if obj.type == "ARMATURE" and obj.get("ml_as_rig")]
+
+
+def set_bone_selected(pose_bone, state):
+    """Selection lives on Bone through 4.x and moved to PoseBone in 5.x.
+
+    Measured: 4.1 has Bone.select and no PoseBone.select, 5.2 the reverse.
+    """
+    if hasattr(pose_bone, "select"):
+        pose_bone.select = state
+    else:
+        pose_bone.bone.select = state
+
+
+def bone_selected(pose_bone):
+    if hasattr(pose_bone, "select"):
+        return pose_bone.select
+    return pose_bone.bone.select
+
+
+def select_chain(armature, chain, extend=False):
+    """Select one limb: its bones in pose data, its controls as objects.
+
+    Kept free of operator context so it can be tested headless; the panel's
+    operator is a thin wrapper. Accepts a plain dict or the IDPropertyGroup
+    stored on the armature -- both answer .get(). Returns how many things
+    were selected.
+    """
+    manifest_chain = chain
+    count = 0
+    if not extend:
+        for bone in armature.pose.bones:
+            set_bone_selected(bone, False)
+    for key in ("start", "middle", "end"):
+        bone = armature.pose.bones.get(manifest_chain.get(key) or "")
+        if bone is not None:
+            set_bone_selected(bone, True)
+            count += 1
+    for key in ("ik", "pole"):
+        obj = bpy.data.objects.get(manifest_chain.get(key) or "")
+        if obj is not None:
+            try:
+                obj.select_set(True)
+                count += 1
+            except Exception:
+                pass
+    try:
+        bpy.context.view_layer.objects.active = armature
+    except Exception:
+        pass
+    return count
+
+
+def select_fk_bones(armature, extend=False):
+    """Select every FK-dressed bone. Returns how many."""
+    manifest = armature.get("ml_as_rig") or {}
+    names = list(manifest.get("fk_bones") or [])
+    if not extend:
+        for bone in armature.pose.bones:
+            set_bone_selected(bone, False)
+    count = 0
+    for name in names:
+        bone = armature.pose.bones.get(str(name))
+        if bone is not None:
+            set_bone_selected(bone, True)
+            count += 1
+    try:
+        bpy.context.view_layer.objects.active = armature
+    except Exception:
+        pass
+    return count
 
 
 def _chain_walk(armature, chain, warnings):
@@ -249,6 +351,13 @@ def _build_chain(armature, chain, walk, warnings):
     else:
         armature[prop] = min(max(scalar(chain.get("blend"), 10.0) / 10.0,
                                  0.0), 1.0)
+    try:
+        armature.id_properties_ui(prop).update(
+            min=0.0, max=1.0, soft_min=0.0, soft_max=1.0,
+            description="0 = FK, 1 = IK (Advanced Skeleton FKIKBlend / 10)",
+        )
+    except Exception:
+        pass
     for driven in (constraint, follow):
         _drive_influence(armature, driven, prop)
     return True

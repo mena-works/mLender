@@ -459,6 +459,17 @@ mini-AS fixture'ı (iki set + switcher + 4 eğri + skinli kol) her mekanizmayı
 assert ediyor. Kapsam dışı (bilinçli): yüz, spine hybrid IK, Blender→Maya
 geri poz.
 
+**AS Rig paneli (2.33.0):** picker'ın işlevsel karşılığı N-panel'de — limb
+başına FK/IK slider'ı + tek tıkla limb seçimi (3 kemik + IK + pole) ve
+"Select FK Controls". `build_as_rig` manifesti `ml_as_rig` ID property'si
+olarak armature'e yazıyor; panel ve seçim yardımcıları isim türetmek yerine
+onu okuyor, yani kaydedilip yeniden açılan .blend'de de çalışıyor. Slider
+aralığı `id_properties_ui` ile 0..1'e sabitlendi. Ölçülen sürüm farkı: kemik
+seçim bayrağı 4.x'te `Bone.select`, 5.x'te `PoseBone.select` — probe ile
+doğrulandı, `set_bone_selected()` ikisini de karşılıyor. Host testinde
+manifest, aralık, iki seçim yolu (fonksiyon + gerçek operatör), kayıt ve
+panel poll'u assert'li; 4.1/4.3/4.5/5.2 dördü de yeşil.
+
 ---
 
 ## Animasyonlu paket × AS katmanı — çatışma kapandı, bir sınır ölçüldü

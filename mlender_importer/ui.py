@@ -9,6 +9,7 @@ from .constants import (
     LIVELINK_PORT,
     DEFAULT_LIGHT_POWER_SCALE,
 )
+from .asrig import as_armatures, select_chain, select_fk_bones
 from .livelink import get_status, start_listener, stop_listener
 from .merge import count_stale_objects, remove_stale_objects
 
@@ -71,6 +72,103 @@ class ML_OT_remove_stale(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class ML_OT_as_select_chain(bpy.types.Operator):
+    bl_idname = "mlender.as_select_chain"
+    bl_label = "Select Limb"
+    bl_description = "Select this limb's bones and its IK/pole controls"
+    bl_options = {"REGISTER", "UNDO"}
+
+    armature_name: bpy.props.StringProperty()
+    limb: bpy.props.StringProperty()
+    side: bpy.props.StringProperty()
+
+    def execute(self, context):
+        armature = bpy.data.objects.get(self.armature_name)
+        manifest = armature.get("ml_as_rig") if armature else None
+        if not manifest:
+            self.report({"ERROR"}, "No AS rig on that armature.")
+            return {"CANCELLED"}
+        for chain in manifest.get("chains") or []:
+            if chain.get("limb") == self.limb and chain.get("side") == self.side:
+                count = select_chain(armature, chain)
+                self.report(
+                    {"INFO"},
+                    "Selected {0} item(s) for {1} {2}.".format(
+                        count, self.limb, self.side,
+                    ),
+                )
+                return {"FINISHED"}
+        self.report({"ERROR"}, "Chain {0} {1} not found.".format(
+            self.limb, self.side))
+        return {"CANCELLED"}
+
+
+class ML_OT_as_select_fk(bpy.types.Operator):
+    bl_idname = "mlender.as_select_fk"
+    bl_label = "Select FK Controls"
+    bl_description = "Select every FK-dressed bone of this armature"
+    bl_options = {"REGISTER", "UNDO"}
+
+    armature_name: bpy.props.StringProperty()
+
+    def execute(self, context):
+        armature = bpy.data.objects.get(self.armature_name)
+        if not armature or not armature.get("ml_as_rig"):
+            self.report({"ERROR"}, "No AS rig on that armature.")
+            return {"CANCELLED"}
+        count = select_fk_bones(armature)
+        self.report({"INFO"}, "Selected {0} FK bone(s).".format(count))
+        return {"FINISHED"}
+
+
+class ML_PT_as_rig(bpy.types.Panel):
+    """The functional stand-in for the AS picker: per-limb FK/IK sliders
+    (they drive the constraint influences built at import) and one-click
+    limb selection."""
+    bl_label = "AS Rig"
+    bl_idname = "ML_PT_as_rig"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "mLender"
+
+    @classmethod
+    def poll(cls, context):
+        return bool(as_armatures())
+
+    def draw(self, context):
+        layout = self.layout
+        rigs = as_armatures()
+        for armature in rigs:
+            box = layout.box()
+            if len(rigs) > 1:
+                box.label(text=armature.name, icon="ARMATURE_DATA")
+            manifest = armature.get("ml_as_rig") or {}
+            for chain in manifest.get("chains") or []:
+                limb = chain.get("limb") or ""
+                side = chain.get("side") or ""
+                prop = chain.get("prop") or ""
+                row = box.row(align=True)
+                op = row.operator(
+                    ML_OT_as_select_chain.bl_idname,
+                    text="",
+                    icon="RESTRICT_SELECT_OFF",
+                )
+                op.armature_name = armature.name
+                op.limb = limb
+                op.side = side
+                if prop in armature.keys():
+                    row.prop(
+                        armature,
+                        '["{0}"]'.format(prop),
+                        text="{0} {1}".format(limb, side),
+                        slider=True,
+                    )
+                else:
+                    row.label(text="{0} {1}".format(limb, side))
+            op = box.operator(ML_OT_as_select_fk.bl_idname, icon="BONE_DATA")
+            op.armature_name = armature.name
+
+
 class ML_PT_lookdev(bpy.types.Panel):
     bl_label = "mLender Import"
     bl_idname = "ML_PT_lookdev"
@@ -114,7 +212,10 @@ CLASSES = (
     ML_OT_start_listener,
     ML_OT_remove_stale,
     ML_OT_stop_listener,
+    ML_OT_as_select_chain,
+    ML_OT_as_select_fk,
     ML_PT_lookdev,
+    ML_PT_as_rig,
 )
 
 

@@ -1627,6 +1627,93 @@ def main():
         as_arm.update_tag()
         scene.frame_set(scene.frame_current)
 
+    print("\nAS rig panel and selection")
+    if as_arm:
+        from mlender_importer.asrig import (
+            as_armatures, bone_selected, select_chain, select_fk_bones,
+        )
+
+        def _fkik_ui_range(arm):
+            try:
+                ui = arm.id_properties_ui("FKIK_Arm_L").as_dict()
+                return (ui.get("min"), ui.get("max"))
+            except Exception as exc:
+                return exc
+
+        manifest = as_arm.get("ml_as_rig")
+        check("the manifest is written onto the armature",
+              manifest is not None,
+              sorted(k for k in as_arm.keys()))
+        chains = list(manifest.get("chains")) if manifest else []
+        chain = chains[0] if chains else None
+        check("with the one chain and its real names",
+              chain is not None
+              and chain.get("limb") == "Arm" and chain.get("side") == "L"
+              and chain.get("start") == "Shoulder_L"
+              and chain.get("end") == "Wrist_L"
+              and chain.get("ik") == "IKArm_L"
+              and chain.get("pole") == "PoleArm_L"
+              and chain.get("prop") == "FKIK_Arm_L",
+              dict(chain) if chain else None)
+        check("and both FK bones",
+              manifest is not None
+              and sorted(str(n) for n in manifest.get("fk_bones") or [])
+              == ["Elbow_L", "Shoulder_L"],
+              list(manifest.get("fk_bones")) if manifest else None)
+        check("the slider range is pinned to 0..1",
+              _fkik_ui_range(as_arm) == (0.0, 1.0),
+              _fkik_ui_range(as_arm))
+        check("as_armatures finds exactly this rig",
+              as_armatures() == [as_arm],
+              [o.name for o in as_armatures()])
+        if chain:
+            picked = select_chain(as_arm, chain)
+            selected = sorted(b.name for b in as_arm.pose.bones
+                              if bone_selected(b))
+            check("select_chain picks the three joints",
+                  selected == ["Elbow_L", "Shoulder_L", "Wrist_L"], selected)
+            check("and the two promoted controls, five in all",
+                  picked == 5
+                  and bpy.data.objects["IKArm_L"].select_get()
+                  and bpy.data.objects["PoleArm_L"].select_get(),
+                  picked)
+        fk_count = select_fk_bones(as_arm)
+        selected = sorted(b.name for b in as_arm.pose.bones
+                          if bone_selected(b))
+        check("select_fk_bones swaps the selection to the FK pair",
+              fk_count == 2 and selected == ["Elbow_L", "Shoulder_L"],
+              selected)
+        # Registration is the cross-version risk: annotation-style operator
+        # properties and a poll that reads ID properties. Register the real
+        # add-on UI and ask Blender, not the source, whether it took.
+        zi.register()
+        try:
+            check("the AS operators registered",
+                  hasattr(bpy.ops.mlender, "as_select_chain")
+                  and hasattr(bpy.ops.mlender, "as_select_fk"))
+            check("the panel registered and polls open on this scene",
+                  getattr(bpy.types, "ML_PT_as_rig", None) is not None
+                  and bpy.types.ML_PT_as_rig.poll(bpy.context) is True)
+            result_set = bpy.ops.mlender.as_select_chain(
+                armature_name=as_arm.name, limb="Arm", side="L")
+            check("the operator route selects the same limb",
+                  result_set == {"FINISHED"}
+                  and sorted(b.name for b in as_arm.pose.bones
+                             if bone_selected(b))
+                  == ["Elbow_L", "Shoulder_L", "Wrist_L"],
+                  result_set)
+            # An ERROR report raised through bpy.ops surfaces as a
+            # RuntimeError; either shape is the refusal being tested.
+            try:
+                missing = bpy.ops.mlender.as_select_chain(
+                    armature_name=as_arm.name, limb="Tail", side="R")
+            except RuntimeError as exc:
+                missing = {"CANCELLED"} if "not found" in str(exc) else exc
+            check("and refuses a limb the manifest never built",
+                  missing == {"CANCELLED"}, missing)
+        finally:
+            zi.unregister()
+
     print("\nMaya layeredShader")
     # Layer Shaders, Maya's default mode: the upper layer is added to a copy
     # of what is under it scaled by the transparency, so the upper one is not
