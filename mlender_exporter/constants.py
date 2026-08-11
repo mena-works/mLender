@@ -17,12 +17,25 @@ LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
 LIVELINK_PROTOCOL = "mlender_livelink"
 LIVELINK_VERSION = 3
-EXPORT_SCHEMA_VERSION = 41
+EXPORT_SCHEMA_VERSION = 42
 # LiveLink events. Adding an event is backwards compatible: the importer's
 # validator rejects an unknown one with an explicit error rather than acting
 # on it, so an old add-on meeting a pose message says so instead of guessing.
 LIVELINK_PACKAGE_EVENT = "scene_package_ready"
 LIVELINK_POSE_EVENT = "pose_update"
+
+# Advanced Skeleton's own manifest, measured identical across five production
+# rigs. The sets are AS's declaration of what is skeleton and what is control;
+# the FKIK switchers declare each limb's IK chain as base-name strings, with
+# the side coming from the switcher's own suffix.
+AS_DEFORM_SET = "DeformSet"
+AS_CONTROL_SET = "ControlSet"
+AS_FK_PREFIX = "FK"
+AS_FKIK_PREFIX = "FKIK"
+AS_IK_PREFIX = "IK"
+AS_POLE_PREFIX = "Pole"
+AS_FKIK_BLEND_ATTR = "FKIKBlend"
+AS_FKIK_CHAIN_ATTRS = ("startJoint", "middleJoint", "endJoint")
 
 LIGHT_NODE_TYPES = (
     "RedshiftPhysicalLight",

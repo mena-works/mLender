@@ -33,6 +33,7 @@ from .render import apply_render_settings
 from .sets import import_sets
 from .particles import import_particles
 from .instancers import import_instancers
+from .asrig import build_as_rig
 from .standins import import_standins
 from .volumes import import_volumes
 from .materials import (
@@ -327,6 +328,10 @@ def import_scene_package(
     
     rebuild_constraints(package_data.get("constraints") or [])
 
+    # After the meshes, curves and armatures all exist: the AS layer dresses
+    # bones with imported curves and promotes other curves into IK targets.
+    as_result = build_as_rig(package_data, warnings)
+
     # Sets and layers name objects that already exist, so this runs after
     # everything that creates them.
     set_result = import_sets(
@@ -373,6 +378,8 @@ def import_scene_package(
         "volume_count": volume_count,
         "repointed_paths": repointed,
         "standin_count": standin_result["standin_count"],
+        "as_fk_shapes": as_result["as_fk_shapes"],
+        "as_ik_chains": as_result["as_ik_chains"],
         "standin_loaded": standin_result["standin_loaded"],
         "particle_count": particle_count,
         "particle_baked_count": particle_baked_count,

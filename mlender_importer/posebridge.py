@@ -78,12 +78,46 @@ def apply_pose(pose, scene=None, warnings=None):
                 unmatched
             )
         )
+    switched = _park_ik_limbs(touched)
+    if switched:
+        # A streamed pose is an FK dictation: every joint's world matrix is
+        # already the evaluated truth. An IK limb left live would fight it --
+        # measured, the solver re-orients the parents and the child bases
+        # the pose baked in then dangle a bone length off the joint.
+        warnings.append(
+            "{0} Advanced Skeleton limb(s) switched to FK to follow the "
+            "streamed pose; raise their FKIK properties to hand them back "
+            "to the Blender IK controls.".format(switched)
+        )
     _refresh()
     return {
         "applied": applied,
         "unmatched": unmatched,
         "armatures": len(touched),
     }
+
+
+def _park_ik_limbs(armature_names):
+    """Set every AS FKIK property on the touched armatures to FK.
+
+    Returns how many limbs were switched, so the caller can say so.
+    """
+    switched = 0
+    for name in armature_names:
+        armature = bpy.data.objects.get(name)
+        if armature is None:
+            continue
+        for key in list(armature.keys()):
+            if not str(key).startswith("FKIK_"):
+                continue
+            if scalar(armature.get(key), 0.0) > 0.0:
+                switched += 1
+            armature[key] = 0.0
+        try:
+            armature.update_tag()
+        except Exception:
+            pass
+    return switched
 
 
 def _bone_lookup(warnings):

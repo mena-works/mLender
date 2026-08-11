@@ -423,6 +423,44 @@ matematiğinde; FK ve köprü birebir kalır.
 
 ---
 
+## AS kontrol katmanı — yapıldı, ölçüldü, ve iki tuzak dersi
+
+Manifest'ten yerli Blender kontrol katmanı: FK kemiklerine AS eğrileri custom
+shape, beyan edilen zincirlere gerçek Blender IK'sı (IK/Pole eğrileri canlı
+hedefe terfi), limb başına `FKIK_<Limb>_<Side>` property'si. Şema 42.
+
+**Ölçülen iki gerçek kodu şekillendirdi:**
+
+1. FBX kemikleri **kopuk çubuk** getiriyor — kuyruklar bir sonraki eklemde
+   değil. Ölçüldü: hiçbir kısıt düzeni duruşu tutturamadı, en iyisi tam bir
+   kemik boyu (0.041) saptı. Çözüm zincirleri **yeniden kuyruklamak**; poz
+   rest'teyken yapıldığı için skin'e maliyeti sıfır.
+2. `pole_angle` **tarama ile kalibre** ediliyor: rest'te ucu kıpırdatmayan
+   açı ölçülerek bulunuyor. "IK rest'te no-op" böylece kurgu gereği doğru.
+
+**İki yanılgı da kayda** — ikisi de geçersiz ölçümdü, çözücü suçsuz çıktı:
+
+- "Kilitli sahip / ölü çözücü" turlarının tamamı **erişilemez yönde** çekilmişti:
+  T-pose'da kol +X'e dümdüz uzanıyor, hedef +X'e çekilince zaten tam
+  uzanmış zincir haklı olarak yerinde durdu. Eleme sonuçları çöpe gitti.
+- Sonra "yarım takip" (−0.026/−0.05): **Chubs 3 cm'lik karakter**, 5 cm'lik
+  çekiş kolu erişimin dışına çağırıyordu; −0.0263 tam katlanma sınırıydı.
+  Rig ölçeğinde (−8 mm) çekince takip **birebir**: −0.00800.
+
+**Köprü ile IK aynı kemikleri sürüyor** — kavga yerine sıra: akan Maya pozu
+FK diktesidir, `apply_pose` limbleri FK'ya park eder ve **uyarıyla söyler**
+(ölçüldü: canlı IK ebeveynleri yeniden yönlendirip basılı pozu bir kemik boyu
+sarkıtıyordu). Python'dan property değiştiren `update_tag()` çağırmalı —
+ölçüldü, sürücü ancak ondan sonra okuyor.
+
+Chubs'ta uçtan uca: 4 zincir + 32 FK silueti, rest 0.000000, −8 mm çekiş →
+bilek tam −0.00800 + skin bükülüyor, FK dönüşü 0.000000. Kalıcı süitte
+mini-AS fixture'ı (iki set + switcher + 4 eğri + skinli kol) her mekanizmayı
+assert ediyor. Kapsam dışı (bilinçli): yüz, spine hybrid IK, Blender→Maya
+geri poz.
+
+---
+
 ## Sıradakiler — kararlaştırılan sıra
 
 Kullanıcı sırayı verdi: **2 → 7 → 4 → 3 → 6**. Numaralar bu oturumdaki

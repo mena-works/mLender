@@ -13,7 +13,7 @@ shows BUILD_VERSION and it is how a user confirms which build is loaded.
 bl_info = {
     "name": "mLender",
     "author": "mena-works",
-    "version": (2, 31, 0),
+    "version": (2, 32, 0),
     # 4.1 is the oldest build this is actually tested on, and the code
     # relies on APIs that arrived in 4.0. Claiming 3.6 was untrue.
     "blender": (4, 1, 0),
@@ -34,6 +34,7 @@ if "bpy" in locals():
         constants,
         utils,
         attributes,
+        asrig,
         transforms,
         colormanagement,
         animation,
@@ -66,6 +67,7 @@ if "bpy" in locals():
         constants,
         utils,
         attributes,
+        asrig,
         transforms,
         colormanagement,
         animation,

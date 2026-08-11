@@ -1394,6 +1394,49 @@ Two honest limits:
   "Unsupported LiveLink event", never misread: adding an event does not touch
   the protocol version.
 
+### Advanced Skeleton characters
+
+An Advanced Skeleton scene is recognised from AS's own manifest — measured
+identical across five production rigs: `DeformSet` names the bind skeleton,
+`ControlSet` the controls, FK controls map to joints **by name**
+(`FKElbow_L` → `Elbow_L`), and each `FKIK<Limb>_<Side>` switcher declares its
+IK chain in `startJoint`/`middleJoint`/`endJoint` string attributes. Nothing
+is guessed; a rig that breaks the convention simply gets no entry.
+
+On import, a native Blender control layer is built from that manifest:
+
+- Every FK bone wears its imported AS control curve as a **custom shape**, so
+  the animator sees the silhouette they know; the stray curve objects hide.
+- Each declared limb gets a **real Blender IK constraint**. The imported
+  `IK<Limb>` and `Pole<Limb>` curves are promoted into the live target and
+  pole objects — the same controls AS gave the animator, now functional.
+- A `FKIK_<Limb>_<Side>` property on the armature stands in for AS's
+  `FKIKBlend`, driving the constraint influences. (Set it from a script and
+  call `armature.update_tag()`; a property assigned from Python does not tag
+  the depsgraph by itself.)
+
+Two measured facts shape the build. The FBX importer creates bones as
+disconnected sticks whose tails do not sit on the next joint — no IK effector
+on such a chain can coincide with the end joint, the best any arrangement
+managed was a full bone length of rest error — so the declared chains are
+**re-tailed** first, which costs the skin nothing because the pose is the rest
+pose while it happens. And Blender's `pole_angle` is **calibrated, not
+assumed**: the angle that keeps the end joint at rest is found by scanning,
+so IK at rest is a no-op by construction. Verified on a production character:
+rest deviation 0.000000 m, an 8 mm IK-control drag moves the wrist exactly
+8 mm with the skin following, and the FK switch returns it to 0.000000.
+
+The bridge and the IK layer drive the same bones, so they take turns rather
+than fight: a streamed Maya pose is an FK dictation, and applying one parks
+the limbs' FKIK properties at FK — with a warning saying so — because a live
+IK constraint would re-orient the parents and dangle the baked pose a bone
+length off the joint. Raise the properties to hand the limbs back to the
+Blender IK controls.
+
+Out of scope, deliberately: the face (its ~144 joints pose as plain FK), the
+spine's hybrid IK, and round-tripping a Blender pose back onto the Maya
+controls.
+
 ## Scene structure
 
 ### Groups become collections

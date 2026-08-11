@@ -50,6 +50,7 @@ mlender_exporter/     # Maya (import sırası = bağımlılık sırası)
   alembic.py             # deforme mesh + emitter particle için AbcExport
   livelink.py            # TCP istemci
   posebridge.py          # canlı poz köprüsü (Maya değerlendirir, iskelet akar)
+  asrig.py               # Advanced Skeleton manifesti (DeformSet, FKIK zincirleri)
   package.py             # paket klasörü, JSON, atomik temizlik
   ui.py                  # Maya penceresi
   __init__.py            # public API + reload_package()
@@ -80,6 +81,7 @@ mlender_importer/     # Blender multi-file add-on
   alembic.py             # paket cache'ini okuma (eksen/ölçek ölçüldü)
   importer.py            # orkestrasyon + şema doğrulaması
   posebridge.py          # gelen pozu armature'lara uygulama
+  asrig.py               # AS kontrol katmanı: custom shape + IK + FKIK property
   livelink.py            # socket listener + ana thread pompası
   ui.py                  # operator, property, panel
   __init__.py            # bl_info, register/unregister, reload bloğu

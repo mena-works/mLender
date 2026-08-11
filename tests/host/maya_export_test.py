@@ -1030,6 +1030,42 @@ def build_scene():
     cmds.skinCluster("bridgeRoot", "bridgeMid", "bridgeTip", bridge_cyl,
                      toSelectedBones=True)
 
+    # A miniature Advanced Skeleton manifest: the two sets, one declared limb
+    # chain with twist joints deliberately absent (the bridge fixture covers
+    # the plain case), FK/IK/Pole control curves, and a skinned arm. This
+    # emulates the convention the五 production rigs declared identically, so
+    # the mechanism is in the permanent suite even though the rigs are not.
+    cmds.select(clear=True)
+    cmds.joint(name="Shoulder_L", position=(0, 8, 0))
+    cmds.joint(name="Elbow_L", position=(0, 4, 1))
+    cmds.joint(name="Wrist_L", position=(0, 0, 0))
+    as_mesh = cmds.polyCylinder(name="asArmMesh", height=8, radius=0.4,
+                                subdivisionsHeight=8, axis=(0, 1, 0))[0]
+    cmds.setAttr(as_mesh + ".translateY", 4)
+    cmds.skinCluster("Shoulder_L", "Elbow_L", "Wrist_L", as_mesh,
+                     toSelectedBones=True)
+
+    def _as_circle(name, position):
+        circle = cmds.circle(name=name, radius=0.6)[0]
+        cmds.xform(circle, worldSpace=True, translation=position)
+        return circle
+
+    as_controls = [
+        _as_circle("FKShoulder_L", (0, 8, 0)),
+        _as_circle("FKElbow_L", (0, 4, 1)),
+        _as_circle("IKArm_L", (0, 0, 0)),
+        _as_circle("PoleArm_L", (0, 4, 5)),
+    ]
+    as_switch = cmds.createNode("transform", name="FKIKArm_L")
+    cmds.addAttr(as_switch, longName="FKIKBlend", attributeType="double",
+                 minValue=0, maxValue=10, defaultValue=10, keyable=True)
+    for attr, base in (("startJoint", "Shoulder"), ("middleJoint", "Elbow"),
+                       ("endJoint", "Wrist")):
+        cmds.addAttr(as_switch, longName=attr, dataType="string")
+        cmds.setAttr(as_switch + "." + attr, base, type="string")
+    cmds.sets(["Shoulder_L", "Elbow_L", "Wrist_L"], name="DeformSet")
+    cmds.sets(as_controls + [as_switch], name="ControlSet")
+
     # Portals emit nothing and must not become black area lights.
     cmds.createNode("aiLightPortal", name="aiPortalShape")
 
@@ -1110,13 +1146,13 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("49 meshes exported", payload["mesh_count"] == 49,
+    check("50 meshes exported", payload["mesh_count"] == 50,
           payload["mesh_count"])
     # Four: the locator, the empty null, the nested locator, and the group
     # holding only a curve. That last one has no mesh below it either, so
     # the FBX does not carry it any more than it carries the others.
-    check("4 geometry-free transforms exported",
-          payload["transform_count"] == 4, payload["transform_count"])
+    check("5 geometry-free transforms exported",
+          payload["transform_count"] == 5, payload["transform_count"])
 
     print("\ninstances")
     # An instanced shape hangs under several transforms. Reading only the
@@ -1417,7 +1453,8 @@ def main():
     by_curve = {
         item.get("curve"): item for item in (payload.get("curves") or [])
     }
-    check("3 curves exported", payload["curve_count"] == 3,
+    check("7 curves exported: 3 fixtures and 4 AS controls",
+          payload["curve_count"] == 7,
           payload["curve_count"])
     for name in ("probeCurve", "probeLine", "probeCircle"):
         check("{0} was exported".format(name), name in by_curve,
@@ -2268,7 +2305,8 @@ def main():
         entry["name"] for entry in bind_pose["pose"]["joints"]
     )
     check("the pose samples exactly the bound chain",
-          bridge_names == ["bridgeMid", "bridgeRoot", "bridgeTip"],
+          bridge_names == ["Elbow_L", "Shoulder_L", "Wrist_L",
+                           "bridgeMid", "bridgeRoot", "bridgeTip"],
           bridge_names)
     check("the unbound decoy joint does not travel",
           "bridgeDecoy" not in bridge_names, bridge_names)
@@ -2298,6 +2336,31 @@ def main():
             "posed": posed_pose,
             "expected_cm": {"tip_bind": tip_bind, "tip_posed": tip_world},
         }, handle)
+
+    print("\nadvanced skeleton manifest")
+    as_rig = payload.get("as_rig") or {}
+    check("the AS scene was detected from its own sets",
+          as_rig.get("detected") is True, as_rig.get("detected"))
+    as_chains = as_rig.get("chains") or []
+    check("one declared chain travelled", len(as_chains) == 1,
+          [c.get("switch") for c in as_chains])
+    if as_chains:
+        as_chain = as_chains[0]
+        check("with its joints resolved to full names, side included",
+              (as_chain.get("start"), as_chain.get("middle"),
+               as_chain.get("end"))
+              == ("Shoulder_L", "Elbow_L", "Wrist_L"), as_chain)
+        check("its IK and pole controls named",
+              as_chain.get("ik_control") == "IKArm_L"
+              and as_chain.get("pole_control") == "PoleArm_L", as_chain)
+        check("and the blend carried",
+              abs(as_chain.get("blend", 0) - 10.0) < 1e-6,
+              as_chain.get("blend"))
+    fk_pairs = dict((p["control"], p["joint"])
+                    for p in as_rig.get("fk_controls") or [])
+    check("FK pairs verified by convention, switcher excluded",
+          fk_pairs == {"FKShoulder_L": "Shoulder_L",
+                       "FKElbow_L": "Elbow_L"}, fk_pairs)
 
     print("\ninstancers")
     instancers = payload.get("instancers") or []

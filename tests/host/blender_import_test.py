@@ -114,7 +114,7 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("49 meshes imported", result["mesh_count"] == 49,
+    check("50 meshes imported", result["mesh_count"] == 50,
           result["mesh_count"])
     check("40 materials built", result["material_count"] == 40,
           result["material_count"])
@@ -170,8 +170,8 @@ def main():
           ungrouped is not None
           and scene_collections(ungrouped) == [result["root_collection"]],
           [c.name for c in ungrouped.users_collection] if ungrouped else None)
-    check("six collections were reported",
-          result["group_collection_count"] == 6,
+    check("seven collections were reported",
+          result["group_collection_count"] == 7,
           result["group_collection_count"])
 
     print("\ninstances")
@@ -216,7 +216,7 @@ def main():
         check("{0} arrived".format(name), obj is not None)
         if obj is not None:
             check("{0} is an empty".format(name), obj.type == "EMPTY", obj.type)
-    check("the import reported them", result["transform_count"] == 4,
+    check("the import reported them", result["transform_count"] == 5,
           result["transform_count"])
     if locator:
         # Maya Y becomes Blender Z, and the scene is in centimetres, so 7
@@ -249,7 +249,7 @@ def main():
     print("\nselection sets and display layers")
     hero = bpy.data.collections.get("heroSet")
     check("the set became a collection", hero is not None)
-    check("the import reported it", result["set_count"] == 1,
+    check("the import reported both real sets", result["set_count"] == 2,
           result["set_count"])
     if hero:
         names = {obj.name for obj in hero.objects}
@@ -605,7 +605,7 @@ def main():
     probe_curve = bpy.data.objects.get("probeCurve")
     probe_line = bpy.data.objects.get("probeLine")
     probe_circle = bpy.data.objects.get("probeCircle")
-    check("the import reported 3 curves", result["curve_count"] == 3,
+    check("the import reported 7 curves", result["curve_count"] == 7,
           result["curve_count"])
     for name, obj in (("probeCurve", probe_curve), ("probeLine", probe_line),
                       ("probeCircle", probe_circle)):
@@ -1502,9 +1502,13 @@ def main():
         applied = apply_pose(bridge_data["bind"]["pose"],
                              warnings=bridge_warnings)
         check("the bind pose applies to the whole chain",
-              applied["applied"] == 3 and applied["unmatched"] == 0, applied)
+              applied["applied"] == 6 and applied["unmatched"] == 0, applied)
         worst = 0.0
-        for pb in bridge_arm.pose.bones:
+        # The FBX puts every skeleton into one armature, so this looks only
+        # at the bridge chain: the AS bones beside it are legitimately
+        # re-tailed and their bases are not identity at bind.
+        for pb in (bridge_arm.pose.bones[n]
+                   for n in ("bridgeRoot", "bridgeMid", "bridgeTip")):
             basis = pb.matrix_basis
             worst = max(worst, max(
                 abs(basis[i][j] - (1.0 if i == j else 0.0))
@@ -1533,8 +1537,88 @@ def main():
         ev.to_mesh_clear()
         check("and the skin follows the pose",
               span_x > 0.015, span_x)
-        check("with nothing unmatched and nothing warned",
-              not bridge_warnings, bridge_warnings)
+        # The one expected warning: the streamed pose parks the AS limbs
+        # in FK, and says so rather than letting IK fight the pose.
+        check("with nothing unmatched and only the FK-park warning",
+              all("switched to FK" in item for item in bridge_warnings),
+              bridge_warnings)
+
+    print("\nadvanced skeleton control layer")
+    check("one declared chain was built", result.get("as_ik_chains") == 1,
+          result.get("as_ik_chains"))
+    check("both FK bones were dressed", result.get("as_fk_shapes") == 2,
+          result.get("as_fk_shapes"))
+    as_arm = next(
+        (obj for obj in bpy.data.objects
+         if obj.type == "ARMATURE" and "Shoulder_L" in obj.pose.bones), None)
+    check("the AS armature arrived", as_arm is not None)
+    if as_arm:
+        elbow = as_arm.pose.bones["Elbow_L"]
+        shape = elbow.custom_shape
+        check("the FK curve became the bone's silhouette",
+              shape is not None and shape.name == "FKElbow_L"
+              and shape.hide_viewport,
+              getattr(shape, "name", None))
+        wrist = as_arm.pose.bones["Wrist_L"]
+        holder = wrist.parent
+        ik = next((c for c in holder.constraints if c.type == "IK"), None)
+        check("a real IK constraint sits above the end joint",
+              ik is not None and ik.name == "ML_AS_IK",
+              [c.type for c in holder.constraints])
+        if ik:
+            check("targeting the promoted AS controls",
+                  getattr(ik.target, "name", None) == "IKArm_L"
+                  and getattr(ik.pole_target, "name", None) == "PoleArm_L"
+                  and not ik.target.hide_viewport,
+                  (getattr(ik.target, "name", None),
+                   getattr(ik.pole_target, "name", None)))
+            check("over the measured chain length", ik.chain_count == 2,
+                  ik.chain_count)
+        check("the FKIK blend arrived as a property",
+              as_arm.get("FKIK_Arm_L") is not None,
+              sorted(k for k in as_arm.keys()))
+        # A clean slate for the functional checks: the bridge section above
+        # streamed poses, which parks the limbs in FK and bakes bases in.
+        for pb in as_arm.pose.bones:
+            pb.matrix_basis.identity()
+        as_arm["FKIK_Arm_L"] = 1.0
+        as_arm.update_tag()
+        scene.frame_set(scene.frame_current)
+
+        def wrist_world():
+            return (as_arm.matrix_world @ wrist.matrix).translation.copy()
+
+        rest = (as_arm.matrix_world @ wrist.bone.matrix_local).translation
+        bpy.context.view_layer.update()
+        at_rest = wrist_world()
+        # The calibrated pole angle's whole claim: IK at rest is a no-op.
+        check("IK at rest does not move the wrist",
+              max(abs(a - b) for a, b in zip(at_rest, rest)) < 1e-4,
+              (tuple(at_rest), tuple(rest)))
+
+        ik_ctrl = bpy.data.objects["IKArm_L"]
+        original = ik_ctrl.location.copy()
+        ik_ctrl.location.x += 0.02
+        bpy.context.view_layer.update()
+        moved = wrist_world()
+        check("dragging the IK control moves the wrist",
+              abs(moved.x - at_rest.x) > 0.01, (at_rest.x, moved.x))
+
+        # Switching the limb to FK parks the constraint.
+        as_arm["FKIK_Arm_L"] = 0.0
+        # A custom property set from Python does not tag the depsgraph;
+        # measured, the driver reads the new value only after this.
+        as_arm.update_tag()
+        scene.frame_set(scene.frame_current)
+        bpy.context.view_layer.update()
+        parked = wrist_world()
+        check("switching to FK returns the wrist to its bones",
+              max(abs(a - b) for a, b in zip(parked, at_rest)) < 1e-4,
+              (tuple(parked), tuple(at_rest)))
+        ik_ctrl.location = original
+        as_arm["FKIK_Arm_L"] = 1.0
+        as_arm.update_tag()
+        scene.frame_set(scene.frame_current)
 
     print("\nMaya layeredShader")
     # Layer Shaders, Maya's default mode: the upper layer is added to a copy

@@ -42,6 +42,7 @@ from .coverage import coverage_warnings
 from .standins import scene_standin_shapes, standin_records
 from .volumes import scene_volume_shapes, volume_records
 from .aovs import scene_aovs
+from .asrig import as_rig_record
 from .rigging import scene_joints, constraint_records
 from .sets import (
     display_layer_records,
@@ -177,6 +178,7 @@ def export_scene(
             scene_instancers(selected_only)
         )
         aov_list = scene_aovs() if not selected_only else []
+        as_rig = as_rig_record()
         # Sets and layers may only name what this export carries. A scoped
         # export otherwise sent sets whose members were never in it.
         exported_paths = set(mesh_transforms(mesh_shapes))
@@ -340,6 +342,7 @@ def export_scene(
             "display_layers": layer_list,
             "object_sets": set_list,
             "aovs": aov_list,
+            "as_rig": as_rig,
             "constraints": constraint_list,
             "curve_count": len(curve_list),
             "curves": curve_list,
