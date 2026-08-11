@@ -18,6 +18,11 @@ LIVELINK_PORT = 50505
 LIVELINK_PROTOCOL = "mlender_livelink"
 LIVELINK_VERSION = 3
 EXPORT_SCHEMA_VERSION = 41
+# LiveLink events. Adding an event is backwards compatible: the importer's
+# validator rejects an unknown one with an explicit error rather than acting
+# on it, so an old add-on meeting a pose message says so instead of guessing.
+LIVELINK_PACKAGE_EVENT = "scene_package_ready"
+LIVELINK_POSE_EVENT = "pose_update"
 
 LIGHT_NODE_TYPES = (
     "RedshiftPhysicalLight",

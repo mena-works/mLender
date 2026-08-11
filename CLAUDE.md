@@ -49,6 +49,7 @@ mlender_exporter/     # Maya (import sırası = bağımlılık sırası)
   fbx.py                 # MEL FBXExport
   alembic.py             # deforme mesh + emitter particle için AbcExport
   livelink.py            # TCP istemci
+  posebridge.py          # canlı poz köprüsü (Maya değerlendirir, iskelet akar)
   package.py             # paket klasörü, JSON, atomik temizlik
   ui.py                  # Maya penceresi
   __init__.py            # public API + reload_package()
@@ -78,6 +79,7 @@ mlender_importer/     # Blender multi-file add-on
   fbx.py                 # FBX import, paket dosyası çözümleme
   alembic.py             # paket cache'ini okuma (eksen/ölçek ölçüldü)
   importer.py            # orkestrasyon + şema doğrulaması
+  posebridge.py          # gelen pozu armature'lara uygulama
   livelink.py            # socket listener + ana thread pompası
   ui.py                  # operator, property, panel
   __init__.py            # bl_info, register/unregister, reload bloğu
@@ -164,7 +166,9 @@ Kurallar:
 - Mesaj formatı: tek satır UTF-8 JSON + `\n`. Importer `\n`'e kadar okur.
 - Mesaj boyutu üst sınırı importer'da `MAX_MESSAGE_BYTES` (32 MB).
 - `_validate_message()` protocol, protocol_version, event ve `package_json`
-  varlığını kontrol eder. Yeni alan eklemek geriye uyumludur; **alan silmek
+  varlığını kontrol eder. İki event vardır: `scene_package_ready` ve
+  `pose_update`; bilinmeyen event **açık hatayla** reddedilir, bu yüzden yeni
+  event eklemek sürüm artırmadan geriye uyumludur. Yeni alan eklemek geriye uyumludur; **alan silmek
   veya yeniden adlandırmak breaking'dir.**
 - Breaking bir değişiklik yapıyorsan `LIVELINK_VERSION`'ı **her iki dosyada
   birlikte** artır. Tek taraflı artırma sessiz değil, açık hata verir — bu iyi;

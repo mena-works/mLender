@@ -76,6 +76,36 @@ def deformed_shapes(shapes):
     return [shape for shape in shapes if shape_deformers(shape)]
 
 
+def cache_only_shapes(shapes):
+    """The deformed shapes the cache is genuinely the only route for.
+
+    A shape whose deformers are all rig deformers does not belong here: FBX
+    carries a skin as an armature binding and a blendShape as shape keys, so
+    it arrives *posable* -- measured, a production character poses in Blender
+    through exactly that path. Putting it in the cache instead freezes the
+    result and throws the rig away.
+
+    A shape with any other deformer -- cluster, wire, lattice, nonlinear --
+    still needs the cache, and when a rig deformer sits on the same shape the
+    cache wins: it carries the final result, skin included, where FBX would
+    carry the skin and lose the rest.
+    """
+    kept = []
+    for shape in shapes:
+        deformers = shape_deformers(shape)
+        if not deformers:
+            continue
+        kinds = set()
+        for node in deformers:
+            try:
+                kinds.add(cmds.nodeType(node))
+            except Exception:
+                kinds.add("")
+        if kinds - set(RIG_DEFORMER_TYPES):
+            kept.append(shape)
+    return kept
+
+
 def cache_root(shape):
     """The transform an Alembic root should name for a shape."""
     return parent_of(shape)

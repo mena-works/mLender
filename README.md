@@ -1350,6 +1350,50 @@ that it was clipped, rather than sending short silently.
 
 ---
 
+## Rigs and the live pose bridge
+
+A skinned character travels through the FBX as a real armature: the exporter
+adds the influence joints (and their joint ancestors) to the FBX selection, so
+the mesh arrives with vertex groups and an Armature modifier and can be posed
+in Blender. Only the influences travel — measured on a production rig, sending
+every scene joint turned 1,014 joints into **132 armatures**, one of which was
+the skeleton. A mesh whose deformers are all rig deformers (skinCluster,
+blendShape) rides the FBX even when an Alembic cache is on; the cache would
+freeze the result and throw the rig away.
+
+What does **not** travel is the control rig. Measured on the same character:
+the chain between a control and a bind joint runs through 3,010 constraints,
+motion paths, skinned ribbon surfaces, 69 IK handles and pose interpolators.
+No format carries that graph, and the one tool that translates it — Rumba's
+`mtorba` — reimplements eighty-plus Maya node types and still calls itself a
+subset. This tool does not pretend to.
+
+Instead there is the **pose bridge**, the same pattern as Unreal's Live Link
+for Maya: pose the rig *in Maya*, with its own controls, and Maya's DG does
+the evaluating; only the resulting bind-joint world matrices stream over the
+existing LiveLink socket, and the Blender armature mirrors them.
+
+- **Send Pose** samples the bound skeleton at the current frame and sends it.
+- **Sync Timeline Pose** streams a pose on every `timeChanged`, so scrubbing
+  the Maya timeline drives the Blender character. Measured on the production
+  rig: 62 Hz driven by a scrub, 8 Hz for interactive control drags, ~292 KB
+  per message.
+
+Accuracy was measured, not assumed, on a 1,014-joint production character:
+applying Maya's **bind pose** moves the Blender mesh by exactly 0.000000 —
+the independent judge, since the skin has no idea what the bridge intended —
+and a control-driven pose lands each bind joint within a few 10⁻⁷ m of where
+Maya evaluated it, with a 25 cm control move arriving as +0.249999 m of mesh.
+
+Two honest limits:
+
+- The bridge mirrors poses; it does not create keyframes. For final animation,
+  key the rig in Maya and use **Export Animation** — baked keys land on
+  Maya's own frame numbers and match world positions to six decimals.
+- A pose message meeting an add-on older than 2.31 is refused with an explicit
+  "Unsupported LiveLink event", never misread: adding an event does not touch
+  the protocol version.
+
 ## Scene structure
 
 ### Groups become collections

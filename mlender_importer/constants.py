@@ -8,13 +8,17 @@ message shape changes.
 
 import math
 
-BUILD_VERSION = "2.30.0"
+BUILD_VERSION = "2.31.0"
 
 LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
 LIVELINK_PROTOCOL = "mlender_livelink"
 LIVELINK_VERSION = 3
 LIVELINK_EVENT = "scene_package_ready"
+# The pose bridge's event. Kept beside LIVELINK_EVENT rather than replacing
+# it: the name LIVELINK_EVENT is part of the module's surface and the package
+# flow still validates against it.
+LIVELINK_POSE_EVENT = "pose_update"
 
 # Package JSON schema versions this build knows how to read. The import wipes
 # the scene, so an unreadable package must be rejected before anything is lost.

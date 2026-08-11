@@ -33,7 +33,7 @@ from .particles import (
 )
 from .alembic import (
     cache_roots,
-    deformed_shapes,
+    cache_only_shapes,
     export_alembic,
     rig_deformed,
 )
@@ -495,7 +495,7 @@ def _write_alembic(path, mesh_shapes, particle_list, particle_shapes,
     if not animation.get("enabled"):
         return empty
 
-    deformed = deformed_shapes(mesh_shapes)
+    deformed = cache_only_shapes(mesh_shapes)
     varying = [
         shape
         for record, shape in zip(particle_list, particle_shapes)
@@ -514,14 +514,16 @@ def _write_alembic(path, mesh_shapes, particle_list, particle_shapes,
         )
         return empty
 
-    # A cache holds the deformed result and nothing that drives it, so a
-    # rigged character arrives as geometry that cannot be posed. Better said
-    # than discovered in Blender.
+    # A purely rig-deformed mesh rides the FBX as a posable armature
+    # binding and never reaches this list. The ones here that still carry a
+    # rig deformer do so alongside something FBX cannot express, so the
+    # cache wins -- and what that costs is said out loud.
     rigged = rig_deformed(deformed)
     if rigged:
         warnings.append(
-            "{0} cached mesh(es) are rig driven; the cache carries the "
-            "deformed result, not the rig.".format(len(rigged))
+            "{0} cached mesh(es) carry a rig alongside other deformers; "
+            "the cache holds the deformed result, and their rig cannot be "
+            "posed in Blender.".format(len(rigged))
         )
     return {
         "roots": roots,

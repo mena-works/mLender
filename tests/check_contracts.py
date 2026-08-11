@@ -586,6 +586,38 @@ def main():
         == ("redshift", "arnold", "maya"),
     )
 
+    print("\nthe pose bridge speaks the same protocol on both sides")
+    check("package event name matches",
+          exporter.constants.LIVELINK_PACKAGE_EVENT
+          == importer.constants.LIVELINK_EVENT,
+          (exporter.constants.LIVELINK_PACKAGE_EVENT,
+           importer.constants.LIVELINK_EVENT))
+    check("pose event name matches",
+          exporter.constants.LIVELINK_POSE_EVENT
+          == importer.constants.LIVELINK_POSE_EVENT,
+          (exporter.constants.LIVELINK_POSE_EVENT,
+           importer.constants.LIVELINK_POSE_EVENT))
+
+    validate = importer.livelink.validate_message
+    pose_wire = {
+        "protocol": importer.constants.LIVELINK_PROTOCOL,
+        "protocol_version": importer.constants.LIVELINK_VERSION,
+        "event": importer.constants.LIVELINK_POSE_EVENT,
+        "pose": {"joints": []},
+    }
+    validate(pose_wire)
+    check("a pose message passes the validator", True)
+    for broken, label in (
+        (dict(pose_wire, event="no_such_event"), "an unknown event"),
+        (dict(pose_wire, pose=None), "a pose message without its pose"),
+        (dict(pose_wire, pose="not a dict"), "a pose that is not an object"),
+    ):
+        try:
+            validate(broken)
+            check("{0} is refused".format(label), False, "no error raised")
+        except ValueError:
+            check("{0} is refused".format(label), True)
+
     print("\nuv sets travel only when they differ from the default")
     textures = exporter.textures
 

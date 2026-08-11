@@ -15,6 +15,7 @@ from .constants import (
     WINDOW_NAME,
 )
 from .livelink import send_package
+from .posebridge import send_pose, start_timeline_sync, stop_timeline_sync
 from .package import default_export_folder, export_scene
 
 
@@ -153,8 +154,68 @@ def show_ui():
             alembic_field,
         ),
     )
+    cmds.rowLayout(numberOfColumns=2, columnWidth2=(260, 260),
+                   adjustableColumn=1)
+    cmds.button(
+        label="Send Pose",
+        height=28,
+        annotation=(
+            "Sample the bound skeleton at the current frame and mirror it "
+            "onto the imported armatures. Pose the rig in Maya; Maya "
+            "evaluates it, Blender only follows."
+        ),
+        command=lambda *_: pose_from_ui(host_field, port_field),
+    )
+    sync_field = cmds.checkBox(
+        label="Sync Timeline Pose",
+        value=False,
+        annotation=(
+            "Send a pose on every timeChanged, so scrubbing the Maya "
+            "timeline drives the Blender skeleton."
+        ),
+    )
+    cmds.checkBox(
+        sync_field,
+        edit=True,
+        changeCommand=lambda state: toggle_pose_sync(
+            state, host_field, port_field, sync_field
+        ),
+    )
+    cmds.setParent("..")
     # workspaceControl displays automatically
     return window
+
+
+def pose_from_ui(host_field, port_field):
+    host = cmds.textFieldGrp(host_field, query=True, text=True)
+    port = cmds.textFieldGrp(port_field, query=True, text=True)
+    try:
+        count = send_pose(host, port)
+    except Exception as exc:
+        cmds.confirmDialog(title="mLender Pose", message=str(exc),
+                           button=["OK"], icon="warning")
+        return
+    cmds.inViewMessage(
+        statusMessage="mLender: pose sent ({0} joints)".format(count),
+        fade=True, position="topCenter",
+    )
+
+
+def toggle_pose_sync(state, host_field, port_field, sync_field):
+    if not state:
+        stop_timeline_sync()
+        return
+    host = cmds.textFieldGrp(host_field, query=True, text=True)
+    port = cmds.textFieldGrp(port_field, query=True, text=True)
+    try:
+        # Fail loudly now rather than on the first scrub: an unreachable
+        # Blender should untick the box, not litter the script editor.
+        send_pose(host, port)
+        start_timeline_sync(host, port)
+    except Exception as exc:
+        cmds.checkBox(sync_field, edit=True, value=False)
+        cmds.confirmDialog(title="mLender Pose Sync", message=str(exc),
+                           button=["OK"], icon="warning")
 
 
 def parse_frame_range(text):

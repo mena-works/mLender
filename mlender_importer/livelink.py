@@ -20,6 +20,7 @@ import bpy
 
 from .constants import (
     LIVELINK_EVENT,
+    LIVELINK_POSE_EVENT,
     LIVELINK_HOST,
     LIVELINK_PORT,
     LIVELINK_PROTOCOL,
@@ -29,6 +30,7 @@ from .constants import (
     TIMER_INTERVAL_SECONDS,
 )
 from .importer import import_scene_package
+from .posebridge import apply_pose
 
 
 _server = None
@@ -175,6 +177,23 @@ def process_messages():
     try:
         validate_message(payload)
         scene = bpy.context.scene
+        if payload.get("event") == LIVELINK_POSE_EVENT:
+            pose_warnings = []
+            result = apply_pose(
+                payload.get("pose"), scene=scene, warnings=pose_warnings
+            )
+            _status = (
+                "Pose applied: {0} bone(s) on {1} armature(s)"
+                "{2}.".format(
+                    result["applied"],
+                    result["armatures"],
+                    ", {0} unmatched".format(result["unmatched"])
+                    if result["unmatched"] else "",
+                )
+            )
+            for warning in pose_warnings:
+                print("mLender warning: {0}".format(warning))
+            return TIMER_INTERVAL_SECONDS
         result = import_scene_package(
             payload.get("package_folder") or "",
             package_data=payload.get("package_json"),
@@ -220,8 +239,15 @@ def validate_message(message):
         raise ValueError("Unsupported LiveLink protocol.")
     if message.get("protocol_version") != LIVELINK_VERSION:
         raise ValueError("Unsupported LiveLink protocol version.")
-    if message.get("event") != LIVELINK_EVENT:
+    event = message.get("event")
+    if event not in (LIVELINK_EVENT, LIVELINK_POSE_EVENT):
         raise ValueError("Unsupported LiveLink event.")
+    # A pose message carries its skeleton inline and nothing else; the
+    # package fields below belong to the other event.
+    if event == LIVELINK_POSE_EVENT:
+        if not isinstance(message.get("pose"), dict):
+            raise ValueError("LiveLink pose payload is missing.")
+        return
     # Protocol 2 carries the package location rather than a copy of its JSON,
     # which the importer reads from disk. An embedded package_json is still
     # accepted and used when present, so a sender that wants to avoid the disk

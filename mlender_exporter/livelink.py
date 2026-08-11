@@ -12,6 +12,7 @@ import socket
 
 from .constants import (
     LIVELINK_HOST,
+    LIVELINK_PACKAGE_EVENT,
     LIVELINK_PORT,
     LIVELINK_PROTOCOL,
     LIVELINK_VERSION,
@@ -40,10 +41,24 @@ def send_package(result, host=None, port=None):
     message = {
         "protocol": LIVELINK_PROTOCOL,
         "protocol_version": LIVELINK_VERSION,
-        "event": "scene_package_ready",
+        "event": LIVELINK_PACKAGE_EVENT,
         "package_folder": maya_path(result["package_folder"]),
         "package_name": result.get("package_name") or "",
     }
+    send_message(message, host, port)
+
+
+def send_message(message, host=None, port=None):
+    """Write one newline-terminated JSON message to the Blender listener.
+
+    Shared by the package notification and the pose bridge, so the two events
+    cannot drift apart in framing.
+    """
+    host = host or LIVELINK_HOST
+    try:
+        port = int(port if port is not None else LIVELINK_PORT)
+    except Exception:
+        raise ValueError("Blender port must be a number.")
     payload = (json.dumps(message, ensure_ascii=False) + "\n").encode("utf-8")
 
     try:

@@ -1011,6 +1011,25 @@ def build_scene():
     except Exception as exc:
         print("  note: gpuCache unavailable: {0}".format(exc))
 
+    # A three-joint chain skinned to a cylinder, for the pose bridge and the
+    # rig transfer both: the bridge mirrors this skeleton, and the FBX path
+    # must carry it as an armature. The decoy joint is bound to nothing and
+    # must not travel -- sending every scene joint once turned 1014 joints
+    # into 132 Blender armatures on a production rig.
+    cmds.select(clear=True)
+    bridge_root = cmds.joint(name="bridgeRoot", position=(0, 0, 0))
+    cmds.joint(name="bridgeMid", position=(0, 4, 0))
+    cmds.joint(name="bridgeTip", position=(0, 8, 0))
+    cmds.select(clear=True)
+    cmds.joint(name="bridgeDecoy", position=(5, 0, 0))
+    bridge_cyl = cmds.polyCylinder(
+        name="bridgeCylinder", height=8, radius=0.5,
+        subdivisionsHeight=8, axis=(0, 1, 0),
+    )[0]
+    cmds.setAttr(bridge_cyl + ".translateY", 4)
+    cmds.skinCluster("bridgeRoot", "bridgeMid", "bridgeTip", bridge_cyl,
+                     toSelectedBones=True)
+
     # Portals emit nothing and must not become black area lights.
     cmds.createNode("aiLightPortal", name="aiPortalShape")
 
@@ -1091,7 +1110,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("48 meshes exported", payload["mesh_count"] == 48,
+    check("49 meshes exported", payload["mesh_count"] == 49,
           payload["mesh_count"])
     # Four: the locator, the empty null, the nested locator, and the group
     # holding only a curve. That last one has no mesh below it either, so
@@ -2240,6 +2259,45 @@ def main():
                if "aiStandIn" in item or "gpuCache" in item],
           [item for item in (result.get("warnings") or [])
            if "aiStandIn" in item or "gpuCache" in item])
+
+    print("\npose bridge")
+    from mlender_exporter.posebridge import pose_message
+
+    bind_pose = pose_message()
+    bridge_names = sorted(
+        entry["name"] for entry in bind_pose["pose"]["joints"]
+    )
+    check("the pose samples exactly the bound chain",
+          bridge_names == ["bridgeMid", "bridgeRoot", "bridgeTip"],
+          bridge_names)
+    check("the unbound decoy joint does not travel",
+          "bridgeDecoy" not in bridge_names, bridge_names)
+    check("every joint carries a 16 float world matrix",
+          all(len(entry["matrix"]) == 16
+              for entry in bind_pose["pose"]["joints"]))
+    check("and the scene unit rides along",
+          abs(bind_pose["pose"]["meters_per_maya_unit"] - 0.01) < 1e-9,
+          bind_pose["pose"]["meters_per_maya_unit"])
+
+    # A driven pose, evaluated by Maya, recorded with its expected result so
+    # the Blender side can assert parity rather than plausibility.
+    cmds.setAttr("bridgeMid.rotateZ", 35)
+    posed_pose = pose_message()
+    tip_world = cmds.xform("bridgeTip", query=True, worldSpace=True,
+                           translation=True)
+    cmds.setAttr("bridgeMid.rotateZ", 0)
+    tip_bind = cmds.xform("bridgeTip", query=True, worldSpace=True,
+                          translation=True)
+    check("the driven pose moved the tip in Maya",
+          abs(tip_world[0] - tip_bind[0]) > 1.0,
+          (tip_bind, tip_world))
+    with open(os.path.join(result["package_folder"],
+                           "pose_bridge_test.json"), "w") as handle:
+        json.dump({
+            "bind": bind_pose,
+            "posed": posed_pose,
+            "expected_cm": {"tip_bind": tip_bind, "tip_posed": tip_world},
+        }, handle)
 
     print("\ninstancers")
     instancers = payload.get("instancers") or []

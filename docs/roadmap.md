@@ -350,6 +350,52 @@ geçersiz `fullPath` bayrağı + `mesh_path`/`transform_path` anahtar uyumsuzlu�
 
 ---
 
+## Canlı poz köprüsü — yapıldı, ölçüldü
+
+Araştırma turunun kararı uygulandı: DG taklit edilmiyor, **Maya'ya
+değerlendirtiliyor** (UE Live Link deseni). Yeni event `pose_update`;
+bilinmeyen event açık hatayla reddedildiği için protokol sürümü artmadı.
+`posebridge.py` iki tarafta da var; Maya UI'da "Send Pose" + "Sync Timeline
+Pose" (timeChanged scriptJob).
+
+Blender tarafındaki matematik: hedef dünya matrisinden `matrix_basis`,
+ebeveynler önce ve ebeveynin **hedefine** karşı çözülüyor — sahne güncellemesi
+gerekmeden tek geçişte. FBX'in kemik eksen konvansiyonu türetmeden düşüyor;
+bunun sınayıcısı **bind pozu no-op testi**.
+
+O test ilk koşuda gerçek bir hatayı yakaladı: birim ölçeği yalnız
+translation'a uygulamıştım, FBX ise cm dönüşümünü **kemik çerçevelerinin
+kendisinde** taşıyor (her rest-chain world matrisi 0.01 ölçekli) — kökün
+basis'i 100 ölçek geldi ve skin bind'de −0.54 m kaydı. Ölçek artık tüm
+matrise uygulanıyor. Bir itiraf da kayda: ilk "altı hane tuttu" ölçümüm
+**döngüseldi** (kendi yazdığım pb.matrix'i geri okuyordum); gerçek hakem
+skin'dir ve testler ona göre yazıldı.
+
+SpiderSilk'te uçtan uca: bind uygulaması mesh'i **+0.000000** oynatıyor (596
+kemik, en kötü basis sapması 0.0004 cm), 25 cm'lik kontrol hareketi mesh'e
+**+0.249999 m** olarak geliyor, kemik dünyaları ~10⁻⁷ m. Gerçek soket duman
+testi: mayapy → listener thread → pompa → 5 hanede birebir uç.
+
+Yol üstünde iki iş daha kapandı:
+
+- **Cache kapısı düzeltildi:** deformerleri yalnız skinCluster/blendShape olan
+  mesh artık Alembic'e değil FBX'e gidiyor — cache pozlanabilirliği donduruyordu.
+  Karışık deformer (skin + cluster) cache'te kalıyor ve uyarısı bunu söylüyor.
+  Bunu mevcut bir alembic assertion'ı yakaladı; fixture'daki skinli silindir
+  cache'e düşünce sayı 2 oldu.
+- **Fixture'a skinli üç eklemli zincir + bağsız decoy joint** girdi: rig
+  taşıma ilk kez kalıcı süitte (armature + vertex group + poz parity +
+  decoy'un taşınmadığı).
+
+**Advanced Skeleton notu (kullanıcı kararı):** hedef daraldı — "çoğunlukla AS
+kullanıyoruz, AS rig'leri exchangeable olsun yeter." Köprü rig'den bağımsız
+zaten çalışıyor; AS'ye özel katman (Blender'da FK/IK kontrol rig'i üretimi,
+AS'nin düzenli adlandırması sayesinde yapılabilir) **ölçülmeden yazılmayacak**:
+SpiderSilk stok AS değil. Bir AS karakteri `assets/rig/` altına gelince
+envanteri çıkarılıp tasarlanacak.
+
+---
+
 ## Sıradakiler — kararlaştırılan sıra
 
 Kullanıcı sırayı verdi: **2 → 7 → 4 → 3 → 6**. Numaralar bu oturumdaki

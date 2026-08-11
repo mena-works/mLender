@@ -11,6 +11,7 @@ Run maya_export_test.py first; this reads its output from
 <temp>/mlender_test/mLender_01.
 """
 import glob
+import json
 import math
 import os
 import sys
@@ -113,7 +114,7 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("48 meshes imported", result["mesh_count"] == 48,
+    check("49 meshes imported", result["mesh_count"] == 49,
           result["mesh_count"])
     check("40 materials built", result["material_count"] == 40,
           result["material_count"])
@@ -1454,6 +1455,86 @@ def main():
     check("and its file was named in a warning, not swallowed",
           any(".ass" in item for item in result["warnings"]),
           [w for w in result["warnings"] if "standin" in w.lower()])
+
+    print("\npose bridge")
+    from mlender_importer.livelink import validate_message
+    from mlender_importer.posebridge import apply_pose
+
+    bridge_arm = next(
+        (obj for obj in bpy.data.objects
+         if obj.type == "ARMATURE" and "bridgeMid" in obj.pose.bones), None)
+    check("the skinned chain arrived as an armature", bridge_arm is not None,
+          [o.name for o in bpy.data.objects if o.type == "ARMATURE"])
+    bridge_mesh = object_named("bridgeCylinder")
+    check("its mesh is bound, not cached: armature modifier and weights",
+          bridge_mesh is not None
+          and any(m.type == "ARMATURE" for m in bridge_mesh.modifiers)
+          and len(bridge_mesh.vertex_groups) == 3,
+          (bool(bridge_mesh),
+           [m.type for m in bridge_mesh.modifiers] if bridge_mesh else None,
+           len(bridge_mesh.vertex_groups) if bridge_mesh else None))
+    check("and the unbound decoy joint built no armature",
+          not any(obj.type == "ARMATURE" and "bridgeDecoy" in obj.pose.bones
+                  for obj in bpy.data.objects))
+
+    with open(os.path.join(find_package(), "pose_bridge_test.json"), "r",
+              encoding="utf-8") as handle:
+        bridge_data = json.load(handle)
+
+    for label in ("bind", "posed"):
+        validate_message(bridge_data[label])
+    check("the wire messages validate", True)
+    try:
+        validate_message(dict(bridge_data["bind"], event="no_such_event"))
+        check("an unknown event is refused", False, "no error raised")
+    except ValueError:
+        check("an unknown event is refused", True)
+
+    def bridge_tip_world():
+        pb = bridge_arm.pose.bones["bridgeTip"]
+        return (bridge_arm.matrix_world @ pb.matrix).translation
+
+    def maya_cm(point):
+        return (point[0] * 0.01, -point[2] * 0.01, point[1] * 0.01)
+
+    if bridge_arm and bridge_mesh:
+        bridge_warnings = []
+        applied = apply_pose(bridge_data["bind"]["pose"],
+                             warnings=bridge_warnings)
+        check("the bind pose applies to the whole chain",
+              applied["applied"] == 3 and applied["unmatched"] == 0, applied)
+        worst = 0.0
+        for pb in bridge_arm.pose.bones:
+            basis = pb.matrix_basis
+            worst = max(worst, max(
+                abs(basis[i][j] - (1.0 if i == j else 0.0))
+                for i in range(4) for j in range(4)))
+        # The independent judge: rest pose and Maya's bind must agree, or
+        # the space conversion is wrong. This caught a real bug once -- the
+        # unit scale applied to the translation alone came back as a basis
+        # of scale 100 on the root.
+        check("and is a no-op against the FBX rest pose",
+              worst < 1e-3, worst)
+
+        apply_pose(bridge_data["posed"]["pose"], warnings=bridge_warnings)
+        expected = maya_cm(bridge_data["expected_cm"]["tip_posed"])
+        got = bridge_tip_world()
+        delta = max(abs(g - e) for g, e in zip(got, expected))
+        check("the driven tip lands where Maya evaluated it",
+              delta < 1e-5, (tuple(got), expected, delta))
+        scene.frame_set(scene.frame_current)
+        ev = bridge_mesh.evaluated_get(bpy.context.evaluated_depsgraph_get())
+        me = ev.to_mesh()
+        # Signed, not max: a positive Maya rotateZ sends the tip towards
+        # -X, and watching max_x alone read the resting radius and called
+        # a frozen skin a pass.
+        span_x = max(abs((bridge_mesh.matrix_world @ v.co).x)
+                     for v in me.vertices)
+        ev.to_mesh_clear()
+        check("and the skin follows the pose",
+              span_x > 0.015, span_x)
+        check("with nothing unmatched and nothing warned",
+              not bridge_warnings, bridge_warnings)
 
     print("\nMaya layeredShader")
     # Layer Shaders, Maya's default mode: the upper layer is added to a copy
