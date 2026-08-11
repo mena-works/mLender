@@ -306,6 +306,50 @@ USD kütüphanesi gerekmiyor, exporter yalnız yolu kaydediyor).
 
 ---
 
+## Gerçek rig turu — SpiderSilk (assets/rig/, git dışı)
+
+Roadmap'in "gerçek sahne" maddesi ilk kez gerçek bir prodüksiyon karakteriyle
+çalıştırıldı: 50 MB `.ma`, 54 mesh, 1014 joint, 31 skinCluster, 13 blendShape,
+3010 constraint, 597 kontrol eğrisi, cm birim. Export 4-5 sn, import 4-6 sn,
+çökme yok. Coverage yeni bir tip yakaladı: `poseInterpolator` (15) — hiçbir
+listede yoktu, gerçek sahne akla gelmeyeni buldu.
+
+**Rig durumu, ölçüldü:**
+
+- Skinning **çalışıyor**: 18 mesh vertex group + armature modifier ile geliyor,
+  6 mesh shape key taşıyor, kemik döndürünce 6199/6199 vertex deforme oluyor.
+- "0 hareket" iki kez yanlış alarmdı: (1) kaş kemiğiyle göz mesh'i ölçülmüştü,
+  (2) mesh Maya'da gizli geldiği için Blender depsgraph'tan çıkarıyor —
+  **gizli mesh'te modifier hiç değerlendirilmez**, ölçmeden önce aç.
+- `scene_joints` düzeltildi: sahnedeki bütün joint'ler değil, yalnız export
+  edilen meshlerin skinCluster influence'ları + joint ataları. Ölçüm:
+  **132 armature → 2** (`joints_grp` 372 kemik, `rivet_ws_grp` 242).
+- Kontrol katmanı (515 ctrl → constraint/IK/motionPath → bind joint) **gelmiyor
+  ve gelmeyecek** — Maya'nın DG değerlendirmesini taşımak demek. Ters durum
+  not edildi: Maya'da bind joint'ler constraint'li olduğundan elle
+  döndürülemez; Blender'da serbest FK olarak döndürülebilir.
+- Maya'daki sürülmüş hareket **bake ile birebir geliyor**: `main_ctrl`
+  anahtarlanınca armature'a 2930 f-curve düştü, `spineChest_env` iki uçta da
+  Maya'yla altı hane aynı (1.270495 / 1.520495 m).
+
+**Bulunan genel hata — bir karelik kayma, kapatıldı:** Blender FBX
+importer'ının `anim_offset` varsayılanı 1.0 (dördünde de ölçüldü). Maya kare
+N'i N/fps saniyeye yazar → her baked anahtar N+1'e düşüyordu. Mesh hareketi,
+JSON'dan Maya kare numarasıyla anahtarlanan ışık/kamera/görünürlükten **bir
+kare geride** oynuyordu ve aralığın son karesi sondan bir önceki pozu
+gösteriyordu. `anim_offset=0.0` geçiliyor; test artık span'e değil anahtarların
+**nerede durduğuna** da assert ediyor — span kontrolü kaymayı bir sürüm boyunca
+geçirmişti.
+
+**Açık kalanlar:** rig iskelesi gürültüsü (4615 empty: 3582 tamamen boş grup,
+770 locator, 263 yalnız-joint grubu; 586 eğrinin hepsi `|rig` altında —
+"rig internals" anahtarı mı dar kural mı, kullanıcı kararı), Gemini'nin ölü
+constraint kodu (3010 constraint'ten 0'ı kaydediliyor: `listConnections`'a
+geçersiz `fullPath` bayrağı + `mesh_path`/`transform_path` anahtar uyumsuzluğu),
+`setup_gui.py`'ın bildirilmemiş `customtkinter` bağımlılığı.
+
+---
+
 ## Sıradakiler — kararlaştırılan sıra
 
 Kullanıcı sırayı verdi: **2 → 7 → 4 → 3 → 6**. Numaralar bu oturumdaki

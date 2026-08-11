@@ -576,6 +576,11 @@ Kullanıcının elle doğrulaması gereken adımlar:
   dışarıda kalmıştı)
 - ❌ Testi repo kökünden çalıştırıp dağıtım artefaktını doğruladığını sanma;
   host çalışma dizinini `sys.path`'e koyar ve repo kopyası import edilir
+- ❌ Gizli bir mesh'te deformasyon ölçme; Blender gizli objeyi depsgraph'tan
+  çıkarır, modifier hiç çalışmaz ve sağlam rig "0 vertex kıpırdadı" gösterir
+- ❌ Animasyonu yalnız değer farkıyla assert etme; span kontrolü bir karelik
+  kaymayı bir sürüm boyunca geçirdi. Anahtarların **hangi karede** durduğuna
+  da assert et (FBX importer `anim_offset` varsayılanı 1.0'dır, 0 geçilmeli)
 
 ---
 

@@ -941,6 +941,29 @@ def main():
             # 8 Maya centimetres is 0.08 Blender metres.
             check("mesh moved 8 Maya units, so 0.08 in Blender",
                   abs(span - 0.08) < 1e-3, span)
+            # WHERE the keys sit, not just how far apart their values are.
+            # The span check above passed for a whole release while every
+            # baked key was one frame late: the FBX importer's anim_offset
+            # defaults to 1.0, so Maya's frames 1..25 arrived at 2..26 --
+            # one frame behind the lights, cameras and visibility keys this
+            # tool writes from the JSON at Maya's own frame numbers.
+            first_key = loc_x.keyframe_points[0].co[0]
+            last_key = loc_x.keyframe_points[-1].co[0]
+            check("baked keys sit on Maya's own frames, 1 and 25",
+                  abs(first_key - 1.0) < 1e-3 and abs(last_key - 25.0) < 1e-3,
+                  (first_key, last_key))
+            # And the pose at the final frame is Maya's final pose, not the
+            # one-frame-early value a shifted curve evaluates to.
+            original_frame = scene.frame_current
+            scene.frame_set(25)
+            end_x = animated_mesh.matrix_world.translation.x
+            scene.frame_set(1)
+            start_x = animated_mesh.matrix_world.translation.x
+            scene.frame_set(original_frame)
+            check("frame 25 shows the full 0.08, frame 1 shows none of it",
+                  abs(end_x - start_x - 0.08) < 1e-4
+                  and abs(end_x - 0.08) < 1e-3,
+                  (start_x, end_x))
 
     turntable = object_named("turntableCam")
     check("turntable camera imported", turntable is not None)

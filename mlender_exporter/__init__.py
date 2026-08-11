@@ -26,7 +26,7 @@ from .package import export_scene
 from .ui import show_ui
 
 
-BUILD_VERSION = "2.29.1"
+BUILD_VERSION = "2.30.0"
 
 # Dependency order; reloading follows this list so each module re-imports
 # already refreshed dependencies.
@@ -39,6 +39,7 @@ SUBMODULES = (
     "bake",
     "shaders",
     "meshes",
+    "rigging",
     "transforms",
     "curves",
     "volumes",
@@ -47,6 +48,7 @@ SUBMODULES = (
     "instancers",
     "coverage",
     "render",
+    "aovs",
     "sets",
     "lights",
     "cameras",
@@ -54,6 +56,7 @@ SUBMODULES = (
     "alembic",
     "livelink",
     "package",
+    "shelf",
     "ui",
 )
 

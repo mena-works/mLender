@@ -20,12 +20,23 @@ def import_fbx(path, scale):
         # Textures are wired from the Maya paths in the JSON, so Blender's own
         # texture search would only produce duplicates.
         "use_image_search": False,
+        # Measured on 4.1 through 5.2: the importer's default is 1.0, which
+        # places FBX time zero at frame 1. Maya's frame N is written at time
+        # N/fps, so every baked key landed on frame N+1 -- a spine joint keyed
+        # 1..10 arrived keyed 2..11, one frame behind the lights, cameras and
+        # visibility this tool keys from the JSON at Maya's own frame numbers.
+        # Zero puts Maya's frame N on Blender's frame N.
+        "anim_offset": 0.0,
     }
     try:
         bpy.ops.import_scene.fbx(**kwargs)
     except TypeError:
         kwargs.pop("use_image_search", None)
-        bpy.ops.import_scene.fbx(**kwargs)
+        try:
+            bpy.ops.import_scene.fbx(**kwargs)
+        except TypeError:
+            kwargs.pop("anim_offset", None)
+            bpy.ops.import_scene.fbx(**kwargs)
 
 
 def resolve_fbx_path(package_folder, package_data):

@@ -1328,7 +1328,7 @@ FPS is read from Maya (`currentTimeUnitToFPS`) and NTSC fractions are
 reconstructed exactly with Blender's `fps` / `fps_base` pair (23.976 → 24 /
 1.001).
 
-Two traps, either of which would ruin a turntable:
+Three traps, any of which would ruin a turntable:
 
 - **Euler flips.** Solving each frame's matrix independently lets angles jump a
   full turn between frames, so a camera orbiting 360° appears to snap back.
@@ -1336,6 +1336,14 @@ Two traps, either of which would ruin a turntable:
 - **Interpolation.** Baked samples are linear. Blender's default Bezier eases
   in and out of every key and makes a constant rotation stutter, so keys are
   set to `LINEAR`.
+- **The FBX importer's frame offset.** Its `anim_offset` defaults to `1.0` —
+  FBX time zero lands on frame 1 — but Maya writes frame N at time N/fps, so
+  every baked key arrived on frame N+1. Measured on a production rig: a spine
+  joint keyed 1..10 arrived keyed 2..11, one frame behind the lights, cameras
+  and visibility this tool keys from the JSON at Maya's own frame numbers, and
+  the final frame of the range showed the second-to-last pose. The import now
+  passes `anim_offset=0.0`; the same joint matches Maya's world position at
+  both ends of the range to six decimals.
 
 The frame count is capped at **2000**. Exceeding it clips the range and records
 that it was clipped, rather than sending short silently.
