@@ -461,6 +461,31 @@ geri poz.
 
 ---
 
+## Animasyonlu paket × AS katmanı — çatışma kapandı, bir sınır ölçüldü
+
+Kullanıcının sorusu ("animasyon rig'le beraber taşınır mı") iki ölçüm çıkardı:
+
+**Kapandı:** animasyonlu pakette FKIK varsayılanı IK kalınca statik hedef
+baked animasyonla kavga ediyordu — 3 cm'lik karakterde daha ilk karede 1.3 cm
+hata. `build_as_rig` artık armature'de action varsa limbleri **FK'ya parklı**
+kuruyor; host testinde dişi var ("an animated package arrives parked").
+
+**Ölçülen sınır (açık):** iskeletin **üstündeki grup katmanında** yaşayan
+hareket (AS `Main` üstüne anahtar) bake'e binmiyor — export seçimi mesh +
+joint. Chubs'ta `Main.translateZ` 1.5 → bilek kare 10'da 1.5 cm eksik; buna
+karşılık minimal joint-anahtarlı sahne (Y ve Z ayrı ayrı) **birebir** geldi,
+yani boru hattında eksen hatası yok, eksik olan yalnız grup hareketi.
+Chubs'ta kalan tuhaf görüntü (kök blender-z'de oynarken bileğin y'de eksik
+kalması) bu kısmi bake'in bileşimi. Çözüm yönü belli ve mevcut desenin
+aynısı: joint köklerinin üstündeki grubun dünya matrisini kare kare JSON'a
+örnekle, importer armature objesine anahtarlasın (ışık/kamera gibi). Ayrı iş.
+
+Ders (yasak listesinde zaten var, bir örneği daha): flatCube animasyon testi
+yalnız **X** ekseninde assert ediyordu; X→X iki konvansiyonda aynı olduğundan
+eksen sorunları o testte tanım gereği görünmez. Minimal repro Y+Z ile kuruldu.
+
+---
+
 ## Sıradakiler — kararlaştırılan sıra
 
 Kullanıcı sırayı verdi: **2 → 7 → 4 → 3 → 6**. Numaralar bu oturumdaki

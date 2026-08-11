@@ -1577,6 +1577,13 @@ def main():
         check("the FKIK blend arrived as a property",
               as_arm.get("FKIK_Arm_L") is not None,
               sorted(k for k in as_arm.keys()))
+        # This package is animated, so the limb must arrive parked in FK:
+        # the baked action is the evaluated truth and the IK targets sit
+        # still at bind. Measured on a production character, leaving IK on
+        # put 1.3 cm of error on the first frame before anything moved.
+        check("an animated package arrives with the limb parked in FK",
+              abs(as_arm.get("FKIK_Arm_L", -1.0)) < 1e-6,
+              as_arm.get("FKIK_Arm_L"))
         # A clean slate for the functional checks: the bridge section above
         # streamed poses, which parks the limbs in FK and bakes bases in.
         for pb in as_arm.pose.bones:

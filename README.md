@@ -1426,6 +1426,20 @@ so IK at rest is a no-op by construction. Verified on a production character:
 rest deviation 0.000000 m, an 8 mm IK-control drag moves the wrist exactly
 8 mm with the skin following, and the FK switch returns it to 0.000000.
 
+**An animated package arrives with its limbs parked in FK.** The baked action
+is the evaluated truth and the IK targets sit still at bind, so a live
+constraint corrupts the animation — measured, 1.3 cm of error on the first
+frame of a 3 cm character before anything even moved. Raise the FKIK
+properties to puppet on top; scrub back to see the animation again.
+
+One measured limitation stands: motion that lives on **groups above the
+skeleton** — a world offset on AS's `Main`, say — does not bake into the
+joints and does not travel. Measured on a production character: root motion
+keyed on `Main` left the wrist 1.5 cm off while a minimal joint-keyed scene
+transferred exactly. Key world motion on a control that drives joints, or
+carry it on the joints themselves, until group motion is sampled into the
+JSON the way lights and cameras already are.
+
 The bridge and the IK layer drive the same bones, so they take turns rather
 than fight: a streamed Maya pose is an FK dictation, and applying one parks
 the limbs' FKIK properties at FK — with a warning saying so — because a live

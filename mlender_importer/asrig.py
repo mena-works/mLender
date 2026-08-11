@@ -240,8 +240,15 @@ def _build_chain(armature, chain, walk, warnings):
     prop = FKIK_PROPERTY.format(chain.get("limb") or "Limb",
                                 chain.get("side") or "X")
     # AS's blend runs 0..10 with 10 as IK; the property is 0..1 of IK.
-    armature[prop] = min(max(scalar(chain.get("blend"), 10.0) / 10.0,
-                             0.0), 1.0)
+    # An animated package parks the limb in FK regardless: the baked action
+    # is the evaluated truth and the IK targets sit still at bind, so a live
+    # constraint corrupts the animation -- measured, 1.3 cm of error on the
+    # first frame of a 3 cm character before anything even moved.
+    if armature.animation_data and armature.animation_data.action:
+        armature[prop] = 0.0
+    else:
+        armature[prop] = min(max(scalar(chain.get("blend"), 10.0) / 10.0,
+                                 0.0), 1.0)
     for driven in (constraint, follow):
         _drive_influence(armature, driven, prop)
     return True
