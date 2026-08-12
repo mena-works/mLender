@@ -1790,6 +1790,12 @@ def main():
             check("the panel registered and polls open on this scene",
                   getattr(bpy.types, "ML_PT_as_rig", None) is not None
                   and bpy.types.ML_PT_as_rig.poll(bpy.context) is True)
+            check("the outliner panel and its operators registered",
+                  getattr(bpy.types, "ML_PT_outliner", None) is not None
+                  and all(hasattr(bpy.ops.mlender, name) for name in (
+                      "outliner_toggle", "outliner_select", "outliner_move",
+                      "outliner_parent", "outliner_unparent"))
+                  and hasattr(bpy.context.scene, "ml_outliner_search"))
             result_set = bpy.ops.mlender.as_select_chain(
                 armature_name=as_arm.name, prop="FKIK_Arm_L")
             check("the operator route selects the same limb",
@@ -1809,6 +1815,83 @@ def main():
                   missing == {"CANCELLED"}, missing)
         finally:
             zi.unregister()
+
+    print("\nmaya-style outliner")
+    from mlender_importer.outliner import (
+        ORDER_PROP,
+        is_open as outliner_is_open,
+        move_object,
+        object_icon,
+        outliner_rows,
+        parent_objects,
+        set_open as outliner_set_open,
+        unparent_objects,
+    )
+
+    rows = outliner_rows(scene)
+    roots = [obj for obj in scene.objects if obj.parent is None]
+    check("collapsed by default, the tree shows exactly the roots",
+          [entry[0] for entry in rows] and len(rows) == len(roots)
+          and all(entry[1] == 0 for entry in rows),
+          (len(rows), len(roots)))
+    branch = next((entry[0] for entry in rows if entry[2]), None)
+    check("some root has children to unfold", branch is not None)
+    if branch is not None:
+        outliner_set_open(branch, True)
+        rows = outliner_rows(scene)
+        at = next(i for i, entry in enumerate(rows)
+                  if entry[0] is branch)
+        check("unfolding shows its children right below it, one level in",
+              outliner_is_open(branch)
+              and at + 1 < len(rows) and rows[at + 1][1] == 1
+              and rows[at + 1][0].parent is branch,
+              (at, [(e[0].name, e[1]) for e in rows[at:at + 3]]))
+        outliner_set_open(branch, False)
+
+    found = outliner_rows(scene, "flatcube")
+    check("the search finds a match flat, case aside",
+          [entry[0].name for entry in found] == ["flatCube"],
+          [entry[0].name for entry in found])
+    check("and the row icon is the outliner mesh icon",
+          object_icon(bpy.data.objects["flatCube"]) == "OUTLINER_OB_MESH")
+
+    # Taken from the sorted rows, not scene order: the move steps one place
+    # among *sorted* siblings, so only sorted-adjacent picks can assert
+    # exact adjacency afterwards.
+    ordered_roots = [entry[0] for entry in outliner_rows(scene)]
+    first, second = ordered_roots[0], ordered_roots[1]
+    moved = move_object(scene, second, -1)
+    reordered = [entry[0] for entry in outliner_rows(scene)]
+    check("a sibling steps up and the order sticks as a property",
+          moved and reordered.index(second) == reordered.index(first) - 1
+          and second.get(ORDER_PROP) is not None,
+          (first.name, second.name))
+    move_object(scene, second, 1)
+
+    # Parenting keeps the world transform: the whole point of the click
+    # standing in for Maya's middle-drag.
+    child = bpy.data.objects["phongCube"]
+    target = bpy.data.objects["phongECube"]
+    before = child.matrix_world.copy()
+    count = parent_objects(target, [child, target])
+    bpy.context.view_layer.update()
+    drift = max(abs(a - b) for row_a, row_b in zip(child.matrix_world,
+                                                   before)
+                for a, b in zip(row_a, row_b))
+    check("parent-here takes the child, skips the target itself",
+          count == 1 and child.parent is target, count)
+    check("and the child does not move in the world",
+          drift < 1e-6, drift)
+    check("a cycle is refused: the new parent cannot go under its child",
+          parent_objects(child, [target]) == 0
+          and target.parent is None)
+    freed = unparent_objects([child])
+    bpy.context.view_layer.update()
+    drift = max(abs(a - b) for row_a, row_b in zip(child.matrix_world,
+                                                   before)
+                for a, b in zip(row_a, row_b))
+    check("unparent frees it, again without moving it",
+          freed == 1 and child.parent is None and drift < 1e-6, drift)
 
     print("\nMaya layeredShader")
     # Layer Shaders, Maya's default mode: the upper layer is added to a copy

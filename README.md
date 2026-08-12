@@ -1394,6 +1394,29 @@ Two honest limits:
   "Unsupported LiveLink event", never misread: adding an event does not touch
   the protocol version.
 
+### Maya-style outliner
+
+The N-panel carries an **Outliner (Maya)** section: the scene's transform
+hierarchy as a single tree, the way Maya shows it, independent of Blender's
+collection-based outliner.
+
+- **Manual order.** Blender sorts siblings alphabetically; here the ▲/▼
+  buttons move the active object among its siblings and the order is saved
+  with the file. Untouched objects stay alphabetical after the ordered ones.
+- **Click to select, Shift-click to add.** Rows highlight the selection;
+  each row also carries the viewport and render visibility toggles.
+- **One-click parenting.** With something selected, every other row shows a
+  parent-here button — Maya's middle-drag as a click. World positions are
+  kept both ways, and unparenting (the ✕ button) keeps them too. A cycle is
+  refused rather than allowed to knot the hierarchy.
+- **Search.** The filter shows every match flat, wherever it hides in a
+  collapsed branch, like Maya's outliner filter.
+
+A Python add-on cannot add a real editor type or drag-and-drop, so this is
+a panel and moving things is buttons — that is the honest ceiling of the
+API. Long scenes are capped at 400 drawn rows for the UI's sake; the search
+reaches everything regardless.
+
 ### Advanced Skeleton characters
 
 An Advanced Skeleton scene is recognised from AS's own manifest — measured

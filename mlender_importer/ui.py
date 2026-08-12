@@ -12,6 +12,16 @@ from .constants import (
 from .asrig import as_armatures, select_chain, select_fk_bones
 from .livelink import get_status, start_listener, stop_listener
 from .merge import count_stale_objects, remove_stale_objects
+from .outliner import (
+    MAX_ROWS,
+    is_open,
+    move_object,
+    object_icon,
+    outliner_rows,
+    parent_objects,
+    set_open,
+    unparent_objects,
+)
 
 
 SCENE_PROPERTIES = (
@@ -19,6 +29,7 @@ SCENE_PROPERTIES = (
     "ml_light_power_scale",
     "ml_livelink_host",
     "ml_livelink_port",
+    "ml_outliner_search",
 )
 
 
@@ -177,6 +188,181 @@ class ML_PT_as_rig(bpy.types.Panel):
             op.armature_name = armature.name
 
 
+class ML_OT_outliner_toggle(bpy.types.Operator):
+    bl_idname = "mlender.outliner_toggle"
+    bl_label = "Expand or Collapse"
+    bl_description = "Fold or unfold this branch of the outliner"
+
+    name: bpy.props.StringProperty()
+
+    def execute(self, context):
+        obj = bpy.data.objects.get(self.name)
+        if obj is None:
+            return {"CANCELLED"}
+        set_open(obj, not is_open(obj))
+        return {"FINISHED"}
+
+
+class ML_OT_outliner_select(bpy.types.Operator):
+    bl_idname = "mlender.outliner_select"
+    bl_label = "Select"
+    bl_description = "Select this object; hold Shift to add to the selection"
+    bl_options = {"REGISTER", "UNDO"}
+
+    name: bpy.props.StringProperty()
+
+    def invoke(self, context, event):
+        # The one place a panel button can read modifiers: Maya's
+        # click / shift-click selection, without a keymap of its own.
+        self.extend = event.shift
+        return self.execute(context)
+
+    def execute(self, context):
+        obj = bpy.data.objects.get(self.name)
+        if obj is None:
+            return {"CANCELLED"}
+        extend = getattr(self, "extend", False)
+        if not extend:
+            for other in context.selected_objects:
+                other.select_set(False)
+        try:
+            obj.select_set(True)
+            context.view_layer.objects.active = obj
+        except RuntimeError:
+            # An object hidden from the view layer cannot be selected;
+            # saying so beats a button that silently does nothing.
+            self.report({"WARNING"},
+                        "{0} is not selectable here.".format(self.name))
+            return {"CANCELLED"}
+        return {"FINISHED"}
+
+
+class ML_OT_outliner_move(bpy.types.Operator):
+    bl_idname = "mlender.outliner_move"
+    bl_label = "Move in Outliner"
+    bl_description = (
+        "Move the active object one step among its siblings; the order is "
+        "saved with the file"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    direction: bpy.props.IntProperty(default=1)
+
+    def execute(self, context):
+        obj = context.view_layer.objects.active
+        if obj is None:
+            self.report({"WARNING"}, "No active object to move.")
+            return {"CANCELLED"}
+        if not move_object(context.scene, obj, self.direction):
+            return {"CANCELLED"}
+        return {"FINISHED"}
+
+
+class ML_OT_outliner_parent(bpy.types.Operator):
+    bl_idname = "mlender.outliner_parent"
+    bl_label = "Parent Selected Here"
+    bl_description = (
+        "Parent the selected objects under this one, keeping their world "
+        "positions -- Maya's middle-drag, as a click"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    name: bpy.props.StringProperty()
+
+    def execute(self, context):
+        target = bpy.data.objects.get(self.name)
+        if target is None:
+            return {"CANCELLED"}
+        moved = parent_objects(target, list(context.selected_objects))
+        if not moved:
+            self.report({"WARNING"}, "Nothing could be parented there.")
+            return {"CANCELLED"}
+        set_open(target, True)
+        self.report({"INFO"}, "Parented {0} object(s) under {1}.".format(
+            moved, target.name))
+        return {"FINISHED"}
+
+
+class ML_OT_outliner_unparent(bpy.types.Operator):
+    bl_idname = "mlender.outliner_unparent"
+    bl_label = "Unparent"
+    bl_description = (
+        "Clear the selected objects' parents, keeping their world positions"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        freed = unparent_objects(list(context.selected_objects))
+        if not freed:
+            self.report({"WARNING"}, "Nothing selected has a parent.")
+            return {"CANCELLED"}
+        self.report({"INFO"}, "Unparented {0} object(s).".format(freed))
+        return {"FINISHED"}
+
+
+class ML_PT_outliner(bpy.types.Panel):
+    """The Maya outliner, as far as a panel can be one: a single transform
+    tree in manual order, click / shift-click selection, one-click
+    parenting, per-row visibility. No editor types or drag-and-drop exist
+    for Python add-ons, so moving things is buttons."""
+    bl_label = "Outliner (Maya)"
+    bl_idname = "ML_PT_outliner"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "mLender"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+
+        header = layout.row(align=True)
+        header.prop(scene, "ml_outliner_search", text="", icon="VIEWZOOM")
+        header.operator(ML_OT_outliner_move.bl_idname, text="",
+                        icon="TRIA_UP").direction = -1
+        header.operator(ML_OT_outliner_move.bl_idname, text="",
+                        icon="TRIA_DOWN").direction = 1
+        header.operator(ML_OT_outliner_unparent.bl_idname, text="",
+                        icon="X")
+
+        rows = outliner_rows(scene, scene.ml_outliner_search)
+        selected = context.selected_objects
+        column = layout.column(align=True)
+        for obj, depth, has_children, opened in rows[:MAX_ROWS]:
+            row = column.row(align=True)
+            if depth:
+                row.separator(factor=1.4 * depth)
+            if has_children:
+                row.operator(
+                    ML_OT_outliner_toggle.bl_idname,
+                    text="",
+                    icon="TRIA_DOWN" if opened else "TRIA_RIGHT",
+                    emboss=False,
+                ).name = obj.name
+            else:
+                row.label(text="", icon="BLANK1")
+            row.operator(
+                ML_OT_outliner_select.bl_idname,
+                text=obj.name,
+                icon=object_icon(obj),
+                depress=obj.select_get(),
+            ).name = obj.name
+            if selected and (len(selected) > 1 or selected[0] is not obj):
+                row.operator(
+                    ML_OT_outliner_parent.bl_idname,
+                    text="",
+                    icon="FILE_PARENT",
+                ).name = obj.name
+            row.prop(obj, "hide_viewport", text="", emboss=False)
+            row.prop(obj, "hide_render", text="", emboss=False)
+        if len(rows) > MAX_ROWS:
+            column.label(
+                text="{0} more row(s) -- narrow it with the search.".format(
+                    len(rows) - MAX_ROWS),
+                icon="INFO",
+            )
+
+
 class ML_PT_lookdev(bpy.types.Panel):
     bl_label = "mLender Import"
     bl_idname = "ML_PT_lookdev"
@@ -222,8 +408,14 @@ CLASSES = (
     ML_OT_stop_listener,
     ML_OT_as_select_chain,
     ML_OT_as_select_fk,
+    ML_OT_outliner_toggle,
+    ML_OT_outliner_select,
+    ML_OT_outliner_move,
+    ML_OT_outliner_parent,
+    ML_OT_outliner_unparent,
     ML_PT_lookdev,
     ML_PT_as_rig,
+    ML_PT_outliner,
 )
 
 
@@ -271,6 +463,15 @@ def register_ui():
         default=LIVELINK_PORT,
         min=1,
         max=65535,
+    )
+    bpy.types.Scene.ml_outliner_search = bpy.props.StringProperty(
+        name="Outliner Search",
+        description=(
+            "Filter the Maya-style outliner by name; matches are shown "
+            "flat, wherever they hide in the tree"
+        ),
+        default="",
+        options={"TEXTEDIT_UPDATE"},
     )
 
 

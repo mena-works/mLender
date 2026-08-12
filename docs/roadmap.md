@@ -557,6 +557,28 @@ eksen sorunları o testte tanım gereği görünmez. Minimal repro Y+Z ile kurul
 
 ---
 
+## Maya tarzı outliner paneli (2.36.0)
+
+Kullanıcının isteği transfer değil, Blender'a **özellik**: Maya outliner'ının
+davranışı. Dördü de istendi ve panel API'sinin dürüst tavanı içinde kuruldu
+(Python add-on'u editör tipi ekleyemez, gerçek drag-drop yok — taşıma buton):
+
+- Manuel kardeş sıralaması: `ml_outliner_index` ID property, ▲/▼ ile;
+  sırasızlar sıralıların arkasında alfabetik kalır, dosyayla kaydedilir.
+- Tek ağaç: transform hiyerarşisi, kapalı başlar, `ml_outliner_open` ile
+  açılır; arama eşleşmeleri düz listeler (kapalı dalın içi de bulunur).
+- Tık = seç, Shift-tık = ekle (operatör `invoke`'unda `event.shift` — panel
+  butonunun modifier okuyabildiği tek yer); satırda göz + render toggle.
+- Parent-here: seçiliyken her satırda tek tık parent, dünya konumu korunur
+  (`matrix_parent_inverse`), döngü reddedilir; ✕ unparent yine konum koruyarak.
+
+Mantık `outliner.py`'da UI'sız fonksiyonlar (AS panelindeki ayrımın aynısı),
+host testte başsız assert'li: kök satırlar, açma/kapama, arama, sıralamanın
+kalıcılığı, parent/unparent'ta < 1e-6 dünya sapması, döngü reddi. Çizim 400
+satırla sınırlı (UI thread'i onbinlerce satırda durur; arama hepsine ulaşır).
+4 Blender sürümü yeşil. Kalan bilinen sınır: gerçek sürükle-bırak ve shape
+satırları — ikisi de API tavanının ötesinde.
+
 ## Sıradakiler — kararlaştırılan sıra
 
 Kullanıcı sırayı verdi: **2 → 7 → 4 → 3 → 6**. Numaralar bu oturumdaki
