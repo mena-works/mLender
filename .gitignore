@@ -4,6 +4,8 @@ __pycache__/
 
 # Build output
 dist/
+build/
+*.spec
 
 # Test scenes. Real production assets, hundreds of megabytes of scene and
 # textures, and this repository is public. They are what the tool is aimed
