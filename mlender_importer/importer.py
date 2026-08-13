@@ -34,6 +34,7 @@ from .sets import import_sets
 from .particles import import_particles
 from .instancers import import_instancers
 from .asrig import build_as_rig
+from .grouping import finish_imported_groups
 from .posebridge import apply_root_motion
 from .standins import import_standins
 from .volumes import import_volumes
@@ -343,6 +344,12 @@ def import_scene_package(
     )
     rooted = apply_root_motion(package_data, root_scale, warnings)
 
+    # After every object exists: the FBX parents a group's meshes to the
+    # empty it made for the group, but everything rebuilt from the JSON
+    # beside them only lands in the collection. This finishes the job, so
+    # moving a group moves what the Maya scene says it holds.
+    grouped_objects = finish_imported_groups(warnings)
+
     # Sets and layers name objects that already exist, so this runs after
     # everything that creates them.
     set_result = import_sets(
@@ -392,6 +399,7 @@ def import_scene_package(
         "as_fk_shapes": as_result["as_fk_shapes"],
         "as_ik_chains": as_result["as_ik_chains"],
         "root_motion_bones": rooted,
+        "grouped_objects": grouped_objects,
         "standin_loaded": standin_result["standin_loaded"],
         "particle_count": particle_count,
         "particle_baked_count": particle_baked_count,

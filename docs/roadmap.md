@@ -644,6 +644,41 @@ korunuyor; `gpu`/`blf` import'unun background'da da çalıştığı 4 sürümde
 ölçüldü (contract stub'ları ayrıca eklendi). Fork yolu bilinçli reddedildi:
 özel build dağıtmak add-on taşınabilirliğini öldürür, kayıt roadmap'te.
 
+## Maya grubu, Blender özelliği olarak (2.40.0)
+
+Soru "koleksiyonlar Maya grubu gibi davranabilir mi" idi ve kapsam mLender
+import'u değil, **Blender'a Maya özelliği eklemek**. Üç ölçüm cevabı verdi:
+
+1. Koleksiyonun transform'u **yok** — `location`/`matrix_world` alanı bile
+   yok, yalnız `instance_offset` var. Yani hiçbir add-on koleksiyonu
+   hareket ettiremez; bu Blender'ın veri modeli.
+2. Grup gibi davranan şey grup **empty**'si: `props` empty'si
+   `stdSurfCube`'u taşıyor, `setDressing` `props`'u taşıyor, empty'yi 5
+   birim taşıyınca çocuk tam 5 birim gitti.
+3. Ama grup yarım doluydu: FBX'ten gelen mesh'ler empty'ye parent'lı,
+   **JSON'dan kurulanlar değil** — `curveGroup`'u taşıyınca eğri yerinde
+   kalıyordu.
+
+Çözüm `grouping.py`: koleksiyona eksik olan transform'u veren tek bir
+mantık, hem kullanıcı komutu hem import tamamlayıcısı olarak. `Group
+Selected` (Maya Ctrl+G karşılığı; empty + aynı adlı koleksiyon, işaretli
+çift, transform Maya gibi orijinde), `Ungroup`, ve Blender'ın **kendi**
+outliner'ının koleksiyon sağ-tık menüsüne eklenen `Make Group (Movable)` +
+`Select Group Transform`. Menü sınıf adları (`OUTLINER_MT_collection`,
+`VIEW3D_MT_object`) tahmin değil, 4.1 ve 5.2'de probe edildi.
+
+Korumalar: aracın kendi koleksiyonları (light link, set, layer) gruplanmaz
+— üyelik onların çalışma şekli. Aynı koleksiyona ikinci kez sorulunca
+mevcut transform devralınır, üst üste grup kurulmaz. **Animasyonlu grup
+elle sürülmez**: ışık/kamera dünya uzayında örnekleniyor, anahtarlar grubun
+hareketini zaten taşıyor; parent'lamak hareketi iki kez uygulardı, o yüzden
+atlanıp uyarı yazılıyor.
+
+Yolda iki gerçek hata: `Collection.users_collection` diye bir alan yok (o
+Object'in alanı), ebeveyn koleksiyonlar taranarak bulunuyor; ve zaten
+bağlı objeyi yeniden saymak "iki kez sorunca üst üste kuruyor" gibi
+görünüyordu — `attach_to_empty` artık gerçekten taşınanı sayıyor.
+
 ## Sıradakiler — kararlaştırılan sıra
 
 Kullanıcı sırayı verdi: **2 → 7 → 4 → 3 → 6**. Numaralar bu oturumdaki

@@ -26,6 +26,13 @@ from .outliner import (
     set_open,
     unparent_objects,
 )
+from .grouping import (
+    CLASSES as GROUPING_CLASSES,
+    ML_OT_group_selected,
+    ML_OT_ungroup,
+    register_menus,
+    unregister_menus,
+)
 from .overlay import (
     CLASSES as OVERLAY_CLASSES,
     ML_OT_overlay_outliner,
@@ -418,6 +425,10 @@ class ML_PT_outliner(bpy.types.Panel):
         header.operator(ML_OT_overlay_outliner.bl_idname, text="",
                         icon="WINDOW", depress=overlay_running())
 
+        groups = layout.row(align=True)
+        groups.operator(ML_OT_group_selected.bl_idname, icon="OUTLINER_OB_EMPTY")
+        groups.operator(ML_OT_ungroup.bl_idname, text="", icon="X")
+
         actions = layout.row(align=True)
         actions.operator(ML_OT_outliner_reveal.bl_idname, text="",
                          icon="ZOOM_SELECTED")
@@ -525,12 +536,16 @@ CLASSES = (
     ML_PT_lookdev,
     ML_PT_as_rig,
     ML_PT_outliner,
-) + OVERLAY_CLASSES
+) + OVERLAY_CLASSES + GROUPING_CLASSES
 
 
 def register_ui():
     for cls in CLASSES:
         _safe_register(cls)
+    # After the classes: the menu entries name operators that have to
+    # exist by the time a menu is drawn.
+    unregister_menus()
+    register_menus()
     unregister_properties()
     bpy.types.Scene.ml_import_mode = bpy.props.EnumProperty(
         name="Import Mode",
@@ -585,6 +600,7 @@ def register_ui():
 
 
 def unregister_ui():
+    unregister_menus()
     unregister_properties()
     for cls in reversed(CLASSES):
         _safe_unregister(cls)

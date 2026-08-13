@@ -1394,6 +1394,40 @@ Two honest limits:
   "Unsupported LiveLink event", never misread: adding an event does not touch
   the protocol version.
 
+### Maya-style groups
+
+A Maya group is a transform that owns its contents, so moving it moves
+everything under it. A Blender collection is only a container — measured,
+it has no transform at all, so no add-on can make a collection itself
+movable. What this adds is the transform a collection lacks:
+
+- **Group Selected** (`Object > Group Selected`, or the panel button) is
+  Maya's Ctrl+G: the selection goes under a new group that is both an
+  empty (the thing you grab) and a collection of the same name (the folder
+  Blender's outliner shows), marked as a pair. The new group's transform
+  sits at the origin, as Maya's does; tick *Pivot at Centre* for the other
+  habit. **Ungroup** dissolves it and leaves the contents where they are.
+- **Make Group (Movable)** appears in Blender's own outliner when you
+  right-click a collection — any collection, imported or hand-made. It
+  gives that collection a transform and parents its top-level objects to
+  it, so from then on it behaves like a Maya group. Asking twice reuses
+  the transform rather than stacking a second one. **Select Group
+  Transform** is beside it, for grabbing the group from the collection
+  row.
+
+Collections mLender keeps for itself — light linking, Maya sets and
+display layers — are refused, because their membership is what makes those
+features work.
+
+Imported groups are finished the same way: the FBX already parents a
+group's meshes to the empty it made for it, and the import now attaches
+what it rebuilt from the JSON beside them (curves, locators, volumes,
+standins) to the same empty. Measured before the fix: moving `curveGroup`
+moved the meshes and left the curve behind. An **animated** group is left
+alone and reported instead — lights and cameras are sampled in world
+space, so their keys already carry the group's motion and parenting them
+to it would apply that motion twice.
+
 ### Maya-style outliner
 
 The N-panel carries an **Outliner (Maya)** section: the scene's transform

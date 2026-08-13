@@ -1896,6 +1896,105 @@ def main():
     check("unparent frees it, again without moving it",
           freed == 1 and child.parent is None and drift < 1e-6, drift)
 
+    print("\nmaya-style groups")
+    from mlender_importer.grouping import (
+        GROUP_PROP,
+        collection_for,
+        group_empty_for,
+        group_objects,
+        is_auxiliary,
+        make_collection_group,
+        ungroup,
+    )
+
+    # The measured gap this closes: the FBX parents a group's meshes to
+    # its empty, but a curve rebuilt from the JSON only landed in the
+    # collection, so moving the group left it behind.
+    curve_group = bpy.data.objects.get("curveGroup")
+    circle = bpy.data.objects.get("probeCircle")
+    check("a JSON-built curve is now under its group's transform",
+          circle is not None and curve_group is not None
+          and circle.parent is curve_group,
+          getattr(getattr(circle, "parent", None), "name", None))
+    check("the import counted what it attached",
+          result.get("grouped_objects", 0) >= 1,
+          result.get("grouped_objects"))
+    if circle is not None and curve_group is not None:
+        before = circle.matrix_world.translation.copy()
+        curve_group.location.x += 3.0
+        bpy.context.view_layer.update()
+        moved = circle.matrix_world.translation.x - before.x
+        curve_group.location.x -= 3.0
+        bpy.context.view_layer.update()
+        check("so moving the group moves the curve with it, exactly",
+              abs(moved - 3.0) < 1e-6, moved)
+    # An animated group is left alone: its members' keys are sampled in
+    # world space and already carry the group's motion.
+    check("an animated group is reported rather than double-driven",
+          not [obj for obj in bpy.data.objects
+               if obj.parent is not None
+               and obj.parent.name == "rootMotionGrp"
+               and obj.type in ("LIGHT", "CAMERA")],
+          [o.name for o in bpy.data.objects
+           if o.parent and o.parent.name == "rootMotionGrp"])
+    check("the tool's own collections are never grouped",
+          all(is_auxiliary(c) for c in bpy.data.collections
+              if c.name.startswith("ML_Link_")),
+          [c.name for c in bpy.data.collections
+           if c.name.startswith("ML_Link_")])
+
+    # Grouping a fresh selection: Maya's Ctrl+G, as a Blender feature.
+    loose = [bpy.data.objects["phongCube"], bpy.data.objects["phongECube"]]
+    for obj in loose:
+        obj.parent = None
+    world_before = [obj.matrix_world.translation.copy() for obj in loose]
+    empty, collection, attached = group_objects(loose, "testGroup")
+    bpy.context.view_layer.update()
+    drift = max(abs(a - b.matrix_world.translation[i])
+                for a_vec, b in zip(world_before, loose)
+                for i, a in enumerate(a_vec))
+    check("grouping takes both objects and leaves them where they were",
+          attached == 2 and all(o.parent is empty for o in loose)
+          and drift < 1e-6, (attached, drift))
+    check("the group is a collection and an empty, marked as a pair",
+          collection is not None and empty.get(GROUP_PROP)
+          == collection.get(GROUP_PROP)
+          and collection_for(empty) is collection
+          and group_empty_for(collection) is empty,
+          (empty.get(GROUP_PROP), collection.get(GROUP_PROP)))
+    check("and Maya's rule for a new group: its transform is at the origin",
+          empty.matrix_world.translation.length < 1e-6,
+          tuple(empty.matrix_world.translation))
+    empty.location = (0.0, 0.0, 2.0)
+    bpy.context.view_layer.update()
+    lifted = loose[0].matrix_world.translation.z - world_before[0].z
+    check("moving that group moves its contents",
+          abs(lifted - 2.0) < 1e-6, lifted)
+
+    freed = ungroup(empty)
+    bpy.context.view_layer.update()
+    check("ungrouping frees them and leaves them where the group left them",
+          freed == 2 and loose[0].parent is None
+          and abs(loose[0].matrix_world.translation.z
+                  - (world_before[0].z + 2.0)) < 1e-6,
+          freed)
+    check("and takes the collection with it",
+          bpy.data.collections.get("testGroup") is None)
+
+    # Any collection can be given a transform, imported or hand-made.
+    plain = bpy.data.collections.new("handMade")
+    scene.collection.children.link(plain)
+    guest = bpy.data.objects.new("guest", None)
+    plain.objects.link(guest)
+    made, count = make_collection_group(plain)
+    check("a plain collection can be made movable",
+          made is not None and count == 1 and guest.parent is made
+          and made.name in plain.objects, (getattr(made, "name", None),
+                                           count))
+    again, count_again = make_collection_group(plain)
+    check("and asking twice reuses the transform instead of stacking one",
+          again is made and count_again == 0, count_again)
+
     print("\noverlay outliner geometry")
     # The drawn tree and the mouse must agree about where a row is; these
     # are the shared numbers both sides use, checked headless because the
