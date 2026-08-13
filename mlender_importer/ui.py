@@ -22,6 +22,11 @@ from .outliner import (
     set_open,
     unparent_objects,
 )
+from .overlay import (
+    CLASSES as OVERLAY_CLASSES,
+    ML_OT_overlay_outliner,
+    overlay_running,
+)
 
 
 SCENE_PROPERTIES = (
@@ -324,6 +329,10 @@ class ML_PT_outliner(bpy.types.Panel):
                         icon="TRIA_DOWN").direction = 1
         header.operator(ML_OT_outliner_unparent.bl_idname, text="",
                         icon="X")
+        # The overlay carries the gestures a panel cannot: real drag to
+        # parent and double-click rename, drawn over this viewport.
+        header.operator(ML_OT_overlay_outliner.bl_idname, text="",
+                        icon="WINDOW", depress=overlay_running())
 
         rows = outliner_rows(scene, scene.ml_outliner_search)
         selected = context.selected_objects
@@ -416,7 +425,7 @@ CLASSES = (
     ML_PT_lookdev,
     ML_PT_as_rig,
     ML_PT_outliner,
-)
+) + OVERLAY_CLASSES
 
 
 def register_ui():

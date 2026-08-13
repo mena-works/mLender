@@ -133,6 +133,18 @@ def install_stubs():
     mathutils.Vector = Vector
     mathutils.Matrix = Matrix
 
+    # The overlay outliner draws with the GPU modules; none of that runs
+    # here, but the package must import.
+    gpu = _module("gpu")
+    gpu.shader = _Any()
+    gpu.state = _Any()
+    gpu_extras = _module("gpu_extras")
+    gpu_extras.batch = _module("gpu_extras.batch")
+    gpu_extras.batch.batch_for_shader = _Any()
+    blf = _module("blf")
+    for name in ("position", "size", "draw", "color", "dimensions"):
+        setattr(blf, name, _Any())
+
 
 # ------------------------------------------------------------------- checks
 def main():

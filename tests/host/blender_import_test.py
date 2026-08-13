@@ -1796,6 +1796,9 @@ def main():
                       "outliner_toggle", "outliner_select", "outliner_move",
                       "outliner_parent", "outliner_unparent"))
                   and hasattr(bpy.context.scene, "ml_outliner_search"))
+            check("the overlay outliner operators registered",
+                  hasattr(bpy.ops.mlender, "overlay_outliner")
+                  and hasattr(bpy.ops.mlender, "overlay_rename"))
             result_set = bpy.ops.mlender.as_select_chain(
                 armature_name=as_arm.name, prop="FKIK_Arm_L")
             check("the operator route selects the same limb",
@@ -1892,6 +1895,50 @@ def main():
                 for a, b in zip(row_a, row_b))
     check("unparent frees it, again without moving it",
           freed == 1 and child.parent is None and drift < 1e-6, drift)
+
+    print("\noverlay outliner geometry")
+    # The drawn tree and the mouse must agree about where a row is; these
+    # are the shared numbers both sides use, checked headless because the
+    # drawing itself needs a real window and a human eye.
+    from mlender_importer.overlay import (
+        HEADER_HEIGHT,
+        ROW_HEIGHT,
+        card_rect,
+        clamp_scroll,
+        hit_test,
+        in_arrow_zone,
+        row_rect,
+        visible_row_count,
+    )
+
+    rect = card_rect(1000.0, 800.0)
+    fits = visible_row_count(rect)
+    check("the card leaves room for header, footer and whole rows",
+          rect[0] < rect[2] and rect[1] < rect[3] and fits > 10, (rect, fits))
+    check("a point above the rows is the header",
+          hit_test(rect, 0, 50, rect[0] + 5,
+                   rect[3] - HEADER_HEIGHT / 2.0) == ("header", None))
+    top = row_rect(rect, 0)
+    check("the topmost slot sits flush under the header",
+          abs(top[3] - (rect[3] - HEADER_HEIGHT)) < 1e-6
+          and abs((top[3] - top[1]) - ROW_HEIGHT) < 1e-6, top)
+    middle = (top[1] + top[3]) / 2.0
+    check("a click in the first row hits row zero, scrolled hits its slot",
+          hit_test(rect, 0, 50, rect[0] + 5, middle) == ("row", 0)
+          and hit_test(rect, 7, 50, rect[0] + 5, middle) == ("row", 7))
+    check("a click past the end of a short list hits nothing",
+          hit_test(rect, 0, 2, rect[0] + 5,
+                   row_rect(rect, 5)[1] + 2.0) is None)
+    check("a click outside the card is not the overlay's",
+          hit_test(rect, 0, 50, rect[2] + 10.0, middle) is None)
+    check("scroll clamps to what does not fit",
+          clamp_scroll(999, 50, rect) == max(0, 50 - fits)
+          and clamp_scroll(-5, 50, rect) == 0,
+          clamp_scroll(999, 50, rect))
+    arrow_x = rect[0] + 6.0 + 2 * 15.0 + 3.0
+    check("the fold arrow zone tracks the row's depth",
+          in_arrow_zone(rect, 2, arrow_x)
+          and not in_arrow_zone(rect, 0, arrow_x))
 
     print("\nMaya layeredShader")
     # Layer Shaders, Maya's default mode: the upper layer is added to a copy

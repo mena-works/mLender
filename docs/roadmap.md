@@ -577,7 +577,25 @@ host testte başsız assert'li: kök satırlar, açma/kapama, arama, sıralaman�
 kalıcılığı, parent/unparent'ta < 1e-6 dünya sapması, döngü reddi. Çizim 400
 satırla sınırlı (UI thread'i onbinlerce satırda durur; arama hepsine ulaşır).
 4 Blender sürümü yeşil. Kalan bilinen sınır: gerçek sürükle-bırak ve shape
-satırları — ikisi de API tavanının ötesinde.
+satırları — ikisi de *panel* API'sinin tavanının ötesinde.
+
+**GPU overlay outliner (2.37.0):** o tavanın üstüne kullanıcının "açık
+kaynak Blender, niye olmasın" itirazıyla çıkıldı — fork değil, `gpu`+`blf`
+ile add-on içinde kendi çizimimiz + modal operatörle ham fare olayları.
+Panelin veremediği jestler artık var: satırı satıra sürükle = parent
+(dünya konumu korunarak, seçili satırı sürüklemek seçimin tamamını taşır),
+header'a bırak = unparent, çift tık = rename (dialog), Shift-tık toggle,
+tekerlek kaydırma, katla/aç. Ağaç/sıra/katlama durumu panel outliner'la
+ortak (`outliner.py`), yani iki görünüm hiç ayrışmaz. Overlay açıldığı tek
+viewport'ta yaşar; Esc veya buton kapatır.
+
+Mimari not: çizim ve hit-test aynı saf geometri fonksiyonlarını kullanır
+(`card_rect`, `hit_test`, `row_rect`...) ve süit bunları başsız assert
+eder — çizimin kendisi pencere ister, onu göz doğrular. `blf.size` imzası
+sürümler arasında değişti (dpi argümanı kalktı), `TypeError` merdiveniyle
+korunuyor; `gpu`/`blf` import'unun background'da da çalıştığı 4 sürümde
+ölçüldü (contract stub'ları ayrıca eklendi). Fork yolu bilinçli reddedildi:
+özel build dağıtmak add-on taşınabilirliğini öldürür, kayıt roadmap'te.
 
 ## Sıradakiler — kararlaştırılan sıra
 

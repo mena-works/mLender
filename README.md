@@ -1412,10 +1412,27 @@ collection-based outliner.
 - **Search.** The filter shows every match flat, wherever it hides in a
   collapsed branch, like Maya's outliner filter.
 
-A Python add-on cannot add a real editor type or drag-and-drop, so this is
-a panel and moving things is buttons — that is the honest ceiling of the
-API. Long scenes are capped at 400 drawn rows for the UI's sake; the search
-reaches everything regardless.
+A Python add-on cannot add a real editor type, and panel widgets get no
+drag-and-drop or double-click — so the panel's moves are buttons, and long
+scenes are capped at 400 drawn rows for the UI's sake (the search reaches
+everything regardless).
+
+**The overlay carries the gestures the panel cannot.** The window button in
+the panel header opens a GPU-drawn outliner over the viewport — its own
+tree, drawn and hit-tested by the add-on, so raw mouse events are on the
+table:
+
+- **drag a row onto another row to parent it there** (world position kept;
+  dragging a selected row moves the whole selection, Maya's rule), and drop
+  it on the header bar to unparent;
+- **double-click renames**;
+- click selects, Shift-click toggles, the fold triangles collapse and
+  expand, the wheel scrolls.
+
+It shares its tree, order and fold state with the panel, lives in the one
+viewport it was opened over, and closes with Esc or the same button. The
+tree and the mouse agree by construction — the drawing and the hit-testing
+use the same geometry, and that geometry is what the test suite checks.
 
 ### Advanced Skeleton characters
 
