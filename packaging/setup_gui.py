@@ -23,8 +23,26 @@ def find_zips():
     dist_dir = get_resource_path("dist")
     maya_zip = glob.glob(os.path.join(dist_dir, "mLender-*-maya-module.zip"))
     blender_zip = glob.glob(os.path.join(dist_dir, "mLender-*-blender-addon.zip"))
-    return (maya_zip[0] if maya_zip else None, 
+    return (maya_zip[0] if maya_zip else None,
             blender_zip[0] if blender_zip else None)
+
+def bundled_version(path):
+    """The version out of a bundled archive's name, so the window says what
+    it is about to install rather than leaving the user to guess."""
+    name = os.path.basename(path or "")
+    parts = name.split("-")
+    return parts[1] if len(parts) > 2 else "?"
+
+def replace_folder(path):
+    """Delete a previous install before writing the new one.
+
+    Extracting over the old folder overwrites what both versions have and
+    leaves behind what only the old one had. A module the new version
+    dropped would keep being imported, and the user would be running a
+    mixture of two builds without a way to tell.
+    """
+    if os.path.isdir(path):
+        shutil.rmtree(path, ignore_errors=True)
 
 class InstallerApp(ctk.CTk):
     def __init__(self):
@@ -148,7 +166,13 @@ class InstallerApp(ctk.CTk):
         
         title = ctk.CTkLabel(header, text="mLender", font=ctk.CTkFont(size=32, weight="bold"))
         title.pack(anchor="w")
-        subtitle = ctk.CTkLabel(header, text="Maya to Blender Exporter Installation", font=ctk.CTkFont(size=14), text_color="gray")
+        subtitle = ctk.CTkLabel(
+            header,
+            text="Maya to Blender  -  installing build {0}".format(
+                bundled_version(self.blender_z)),
+            font=ctk.CTkFont(size=14),
+            text_color="gray",
+        )
         subtitle.pack(anchor="w")
         
         # Main Frame
@@ -237,8 +261,9 @@ class InstallerApp(ctk.CTk):
             mlender_dir = os.path.join(modules_dir, "mLender")
             scripts_dir = os.path.join(mlender_dir, "scripts")
             exporter_dir = os.path.join(scripts_dir, "mlender_exporter")
+            replace_folder(exporter_dir)
             os.makedirs(exporter_dir, exist_ok=True)
-            
+
             with zipfile.ZipFile(self.maya_z, 'r') as zf:
                 # The maya zip has structure:
                 # mLender.mod
@@ -267,7 +292,10 @@ class InstallerApp(ctk.CTk):
             addons_dir = os.path.join(bf, sel, "scripts", "addons")
             os.makedirs(addons_dir, exist_ok=True)
             self.after(0, lambda d=addons_dir: self.status_lbl.configure(text=f"Installing to {d}..."))
-            
+
+            # The folder name is the add-on's module name, so this is the
+            # one Blender will import; a previous build goes first.
+            replace_folder(os.path.join(addons_dir, "mlender_importer"))
             with zipfile.ZipFile(self.blender_z, 'r') as zf:
                 zf.extractall(addons_dir)
 
