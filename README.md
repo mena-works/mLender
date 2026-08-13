@@ -1402,9 +1402,14 @@ collection-based outliner.
 
 - **Manual order.** Blender sorts siblings alphabetically; here the ▲/▼
   buttons move the active object among its siblings and the order is saved
-  with the file. Untouched objects stay alphabetical after the ordered ones.
-- **Click to select, Shift-click to add.** Rows highlight the selection;
-  each row also carries the viewport and render visibility toggles.
+  with the file. Untouched objects stay alphabetical after the ordered ones,
+  and **Reset Order** puts everything back to alphabetical.
+- **Click to select, Ctrl-click to toggle, Shift-click for the range** —
+  Maya's rules. Rows highlight the selection; each row also carries the
+  viewport and render visibility toggles.
+- **Reveal, rename and delete** as buttons: reveal unfolds the branches
+  above the active object, delete takes the selection and everything under
+  it.
 - **One-click parenting.** With something selected, every other row shows a
   parent-here button — Maya's middle-drag as a click. World positions are
   kept both ways, and unparenting (the ✕ button) keeps them too. A cycle is
@@ -1429,11 +1434,22 @@ table:
   and bottom edges insert at that place in the order, with a line showing
   where the drop lands. Dropping between rows at another level takes that
   level's parent, so one drag both re-nests and places;
-- **double-click renames**;
-- click selects, Shift-click toggles, the fold triangles collapse and
-  expand, the wheel scrolls;
-- **drag the header to move the window** — it stays where you put it, and
-  an offset that would push it off-screen is clamped rather than losing it.
+- **double-click renames in the row**, with a caret, Enter to commit and
+  Esc to cancel;
+- click selects, **Ctrl-click toggles, Shift-click takes the range**;
+- each row's two squares hide it in the **viewport** and in **renders**;
+- **right-click opens the menu** (rename, reveal, unparent, reset order,
+  delete), `F` reveals the active object and scrolls to it, `X` deletes
+  the selection, the wheel and the scrollbar scroll;
+- **drag the header to move the window, the corner to resize it** — both
+  are remembered in the .blend, and an offset that would push the card
+  off-screen is clamped rather than losing it.
+
+**Every change is undoable.** Parenting, reordering, renaming and the
+visibility toggles each push an undo step, so Ctrl+Z steps back through a
+drag the way it does through anything else — measured, not assumed. The
+card and its rows also follow Blender's interface scale, so it is the same
+physical size as the rest of the UI on a scaled display.
 
 It shares its tree, order and fold state with the panel, lives in the one
 viewport it was opened over, and closes with Esc or the same button. The

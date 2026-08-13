@@ -14,17 +14,22 @@ from .livelink import get_status, start_listener, stop_listener
 from .merge import count_stale_objects, remove_stale_objects
 from .outliner import (
     MAX_ROWS,
+    delete_objects,
     is_open,
     move_object,
     object_icon,
     outliner_rows,
     parent_objects,
+    reset_order,
+    reveal_object,
+    select_range,
     set_open,
     unparent_objects,
 )
 from .overlay import (
     CLASSES as OVERLAY_CLASSES,
     ML_OT_overlay_outliner,
+    ML_OT_overlay_rename,
     overlay_running,
 )
 
@@ -211,27 +216,41 @@ class ML_OT_outliner_toggle(bpy.types.Operator):
 class ML_OT_outliner_select(bpy.types.Operator):
     bl_idname = "mlender.outliner_select"
     bl_label = "Select"
-    bl_description = "Select this object; hold Shift to add to the selection"
+    bl_description = (
+        "Select this object. Ctrl adds or removes it, Shift takes the "
+        "range from the last one clicked"
+    )
     bl_options = {"REGISTER", "UNDO"}
 
     name: bpy.props.StringProperty()
 
     def invoke(self, context, event):
         # The one place a panel button can read modifiers: Maya's
-        # click / shift-click selection, without a keymap of its own.
-        self.extend = event.shift
+        # click / Ctrl-click / Shift-click selection, with no keymap.
+        self.mode = ("toggle" if event.ctrl
+                     else "range" if event.shift else "replace")
         return self.execute(context)
 
     def execute(self, context):
         obj = bpy.data.objects.get(self.name)
         if obj is None:
             return {"CANCELLED"}
-        extend = getattr(self, "extend", False)
-        if not extend:
-            for other in context.selected_objects:
-                other.select_set(False)
+        mode = getattr(self, "mode", "replace")
+        search = getattr(context.scene, "ml_outliner_search", "")
+        active = context.view_layer.objects.active
         try:
-            obj.select_set(True)
+            if mode == "toggle":
+                obj.select_set(not obj.select_get())
+            elif mode == "range" and active is not None:
+                for other in context.selected_objects:
+                    other.select_set(False)
+                for member in select_range(context.scene, active, obj,
+                                           search):
+                    member.select_set(True)
+            else:
+                for other in context.selected_objects:
+                    other.select_set(False)
+                obj.select_set(True)
             context.view_layer.objects.active = obj
         except RuntimeError:
             # An object hidden from the view layer cannot be selected;
@@ -240,6 +259,73 @@ class ML_OT_outliner_select(bpy.types.Operator):
                         "{0} is not selectable here.".format(self.name))
             return {"CANCELLED"}
         return {"FINISHED"}
+
+
+class ML_OT_outliner_reveal(bpy.types.Operator):
+    bl_idname = "mlender.outliner_reveal"
+    bl_label = "Reveal Active"
+    bl_description = (
+        "Unfold the branches above the active object so the tree shows it"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        active = context.view_layer.objects.active
+        if active is None:
+            self.report({"WARNING"}, "No active object.")
+            return {"CANCELLED"}
+        reveal_object(active)
+        self.report({"INFO"}, "Showing {0}.".format(active.name))
+        return {"FINISHED"}
+
+
+class ML_OT_outliner_delete(bpy.types.Operator):
+    bl_idname = "mlender.outliner_delete"
+    bl_label = "Delete Selected"
+    bl_description = "Delete the selected objects and everything under them"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        removed = delete_objects(list(context.selected_objects))
+        if not removed:
+            self.report({"WARNING"}, "Nothing selected to delete.")
+            return {"CANCELLED"}
+        self.report({"INFO"}, "Deleted {0} object(s).".format(removed))
+        return {"FINISHED"}
+
+
+class ML_OT_outliner_reset_order(bpy.types.Operator):
+    bl_idname = "mlender.outliner_reset_order"
+    bl_label = "Reset Order"
+    bl_description = (
+        "Drop the manual order and go back to sorting by name. Acts on the "
+        "selection, or on everything when nothing is selected"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        targets = list(context.selected_objects) or list(
+            context.scene.objects)
+        cleared = reset_order(targets)
+        self.report({"INFO"}, "Reset {0} object(s).".format(cleared))
+        return {"FINISHED"}
+
+
+class ML_MT_outliner(bpy.types.Menu):
+    """The overlay's right-click menu."""
+    bl_idname = "ML_MT_outliner"
+    bl_label = "Outliner"
+
+    def draw(self, context):
+        layout = self.layout
+        layout.operator(ML_OT_overlay_rename.bl_idname, icon="OUTLINER_DATA_FONT")
+        layout.operator(ML_OT_outliner_reveal.bl_idname, icon="VIEWZOOM")
+        layout.separator()
+        layout.operator(ML_OT_outliner_unparent.bl_idname, icon="X")
+        layout.operator(ML_OT_outliner_reset_order.bl_idname,
+                        icon="SORTALPHA")
+        layout.separator()
+        layout.operator(ML_OT_outliner_delete.bl_idname, icon="TRASH")
 
 
 class ML_OT_outliner_move(bpy.types.Operator):
@@ -327,12 +413,22 @@ class ML_PT_outliner(bpy.types.Panel):
                         icon="TRIA_UP").direction = -1
         header.operator(ML_OT_outliner_move.bl_idname, text="",
                         icon="TRIA_DOWN").direction = 1
-        header.operator(ML_OT_outliner_unparent.bl_idname, text="",
-                        icon="X")
         # The overlay carries the gestures a panel cannot: real drag to
-        # parent and double-click rename, drawn over this viewport.
+        # parent or reorder, double-click rename, drawn over this viewport.
         header.operator(ML_OT_overlay_outliner.bl_idname, text="",
                         icon="WINDOW", depress=overlay_running())
+
+        actions = layout.row(align=True)
+        actions.operator(ML_OT_outliner_reveal.bl_idname, text="",
+                         icon="ZOOM_SELECTED")
+        actions.operator(ML_OT_overlay_rename.bl_idname, text="",
+                         icon="OUTLINER_DATA_FONT")
+        actions.operator(ML_OT_outliner_unparent.bl_idname, text="",
+                         icon="X")
+        actions.operator(ML_OT_outliner_reset_order.bl_idname, text="",
+                         icon="SORTALPHA")
+        actions.operator(ML_OT_outliner_delete.bl_idname, text="",
+                         icon="TRASH")
 
         rows = outliner_rows(scene, scene.ml_outliner_search)
         selected = context.selected_objects
@@ -422,6 +518,10 @@ CLASSES = (
     ML_OT_outliner_move,
     ML_OT_outliner_parent,
     ML_OT_outliner_unparent,
+    ML_OT_outliner_reveal,
+    ML_OT_outliner_delete,
+    ML_OT_outliner_reset_order,
+    ML_MT_outliner,
     ML_PT_lookdev,
     ML_PT_as_rig,
     ML_PT_outliner,

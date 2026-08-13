@@ -609,6 +609,33 @@ sıralama gerçekten değişiyor mu (ilk sıraya taşıma, bir satırın altına
 bırakma), kendine bırakma reddi, seviye değiştiren bırakmada dünya konumu
 < 1e-6, ve ata-torun döngü reddi.
 
+**Eksik envanteri kapatıldı (2.39.0).** Kullanıcı "ne eksik?" diye sordu,
+liste çıkarıldı ve hepsi yapıldı:
+
+- **Undo** — en ciddisiydi: sürükleyip parent'ladığında Ctrl+Z geri
+  almıyordu (kodda tek `undo_push` yoktu). Önce headless ölçüldü:
+  `undo_push` + `undo` bir parent değişikliğini gerçekten geri alıyor.
+  Artık parent, reorder, unparent, rename ve görünürlük ayrı ayrı adım
+  basıyor. Testte de assert'li — ama testin sonunda, çünkü undo bütün
+  datablock'ları yeniden kuruyor ve süitin daha önce tuttuğu Python
+  referansları geçersizleşiyor (ölçüldü: `Material has been removed`).
+- **Görünürlük** overlay satırlarında (dolu üçgen = açık, boş kare =
+  kapalı; GPU modülünde ikon atlası yok, iki şekil dolu/boş ayrımıyla
+  okunuyor).
+- **Seçileni göster**: `F` ve panel butonu; üstteki bütün dalları açıp
+  satırı görünür kılacak kadar kaydırıyor (zaten görünüyorsa liste
+  kıpırdamıyor — zıplayan liste yoktan kötüdür).
+- **Silme** (`X` / buton / menü) çocuklarıyla birlikte, isimle yeniden
+  bakarak: bir objeyi silmek diğerlerinin referansını geçersizleştiriyor.
+- **Aralık seçimi**: Ctrl toggle, Shift aralık — aralık *görünen* satırlar
+  üzerinden, kapalı dalın içi habersiz süpürülmesin diye.
+- **UI ölçeği**: bütün geometri fonksiyonları `scale` alıyor; %150 ekranda
+  kart Blender'ın panelleriyle aynı fiziksel boyda ve tıklama isabetleri
+  ölçekte de doğru (assert'li).
+- **Satır içi rename** (çift tık, caret, Enter/Esc), **sağ tık menü**,
+  **scrollbar** (çiziliyor + sürüklenebiliyor), **köşeden boyutlandırma**,
+  ve konum/boyutun `.blend` içinde saklanması.
+
 Mimari not: çizim ve hit-test aynı saf geometri fonksiyonlarını kullanır
 (`card_rect`, `hit_test`, `row_rect`...) ve süit bunları başsız assert
 eder — çizimin kendisi pencere ister, onu göz doğrular. `blf.size` imzası

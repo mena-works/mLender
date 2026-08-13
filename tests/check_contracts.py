@@ -99,6 +99,7 @@ def install_stubs():
     bpy.types = _module("bpy.types")
     bpy.types.Operator = type("Operator", (object,), {})
     bpy.types.Panel = type("Panel", (object,), {})
+    bpy.types.Menu = type("Menu", (object,), {})
     bpy.types.Scene = _Any()
     for name in ("props", "data", "context", "ops", "utils", "app", "path"):
         setattr(bpy, name, _Any())

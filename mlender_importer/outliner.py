@@ -17,6 +17,8 @@ reordered sorts by name after every object that was, which keeps fresh
 imports stable and user intent sticky.
 """
 
+import bpy
+
 ORDER_PROP = "ml_outliner_index"
 OPEN_PROP = "ml_outliner_open"
 # A row budget, not a truncation of the scene: a panel drawing tens of
@@ -191,6 +193,87 @@ def object_icon(obj):
     if obj.type in KNOWN_ICON_TYPES:
         return "OUTLINER_OB_" + obj.type
     return "OBJECT_DATA"
+
+
+def reveal_object(obj):
+    """Unfold everything above an object so the tree can show it.
+
+    Maya's reveal-selection: an object picked in the viewport is no use in
+    an outliner that has it hidden inside a collapsed branch. Returns how
+    many branches were opened.
+    """
+    opened = 0
+    node = getattr(obj, "parent", None)
+    while node is not None:
+        if not is_open(node):
+            set_open(node, True)
+            opened += 1
+        node = node.parent
+    return opened
+
+
+def row_objects(scene, search=""):
+    return [entry[0] for entry in outliner_rows(scene, search)]
+
+
+def select_range(scene, anchor, target, search=""):
+    """Every object between two rows, as the tree currently reads.
+
+    Maya's Shift-click. The range is taken over the *visible* rows, so
+    what gets selected is what the user can see between the two clicks --
+    a collapsed branch's contents are not swept up unseen.
+    """
+    objects = row_objects(scene, search)
+    if anchor not in objects or target not in objects:
+        return [target] if target in objects else []
+    first = objects.index(anchor)
+    last = objects.index(target)
+    if first > last:
+        first, last = last, first
+    return objects[first:last + 1]
+
+
+def reset_order(objects):
+    """Drop the manual order, returning those objects to alphabetical."""
+    cleared = 0
+    for obj in objects:
+        if ORDER_PROP in obj.keys():
+            del obj[ORDER_PROP]
+            cleared += 1
+    return cleared
+
+
+def delete_objects(objects):
+    """Remove objects from the file, children included.
+
+    Children first, so a parent's removal never leaves a dangling
+    reference behind it, and each object is looked up again by name --
+    removing one can invalidate the others' Python references.
+    """
+    names = []
+    for obj in objects:
+        names.append(obj.name)
+        for child in _descendants(obj):
+            if child.name not in names:
+                names.append(child.name)
+    removed = 0
+    for name in reversed(names):
+        found = bpy.data.objects.get(name)
+        if found is None:
+            continue
+        bpy.data.objects.remove(found, do_unlink=True)
+        removed += 1
+    return removed
+
+
+def _descendants(obj):
+    found = []
+    stack = list(obj.children)
+    while stack:
+        node = stack.pop()
+        found.append(node)
+        stack.extend(node.children)
+    return found
 
 
 def _is_descendant(candidate, ancestor):

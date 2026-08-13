@@ -1903,13 +1903,20 @@ def main():
     from mlender_importer.overlay import (
         EDGE_BAND,
         HEADER_HEIGHT,
+        MIN_WIDTH,
         ROW_HEIGHT,
         card_rect,
         clamp_scroll,
         drop_zone,
         hit_test,
         in_arrow_zone,
+        in_rect,
+        resize_grip_rect,
+        row_control,
         row_rect,
+        scroll_from_thumb,
+        scroll_to_index,
+        scrollbar_thumb,
         visible_row_count,
     )
 
@@ -1969,6 +1976,67 @@ def main():
           off_screen[2] <= 1000.0 + 1e-6 and off_screen[0] >= -1e-6
           and off_screen[1] >= -1e-6 and off_screen[3] <= 800.0 + 1e-6,
           off_screen)
+    sized = card_rect(1000.0, 800.0, (0.0, 0.0), (450.0, 300.0))
+    check("a resized card takes the size it was dragged to",
+          abs((sized[2] - sized[0]) - 450.0) < 1e-6
+          and abs((sized[3] - sized[1]) - 300.0) < 1e-6, sized)
+    tiny = card_rect(1000.0, 800.0, (0.0, 0.0), (10.0, 10.0))
+    check("and a size below the minimum is refused, not obeyed",
+          (tiny[2] - tiny[0]) >= MIN_WIDTH - 1e-6
+          and (tiny[3] - tiny[1]) >= ROW_HEIGHT, tiny)
+
+    # The interface scale has to reach the geometry, or the overlay is the
+    # wrong size next to Blender's own panels on a scaled display.
+    scaled = card_rect(1000.0, 800.0, (0.0, 0.0), None, 2.0)
+    check("the interface scale reaches rows and the card alike",
+          abs((row_rect(scaled, 0, 2.0)[3] - row_rect(scaled, 0, 2.0)[1])
+              - ROW_HEIGHT * 2.0) < 1e-6
+          and visible_row_count(scaled, 2.0)
+          < visible_row_count(card_rect(1000.0, 800.0), 1.0),
+          (visible_row_count(scaled, 2.0),
+           visible_row_count(card_rect(1000.0, 800.0), 1.0)))
+    check("and a click lands on the same row it is drawn on, scaled too",
+          hit_test(scaled, 0, 50, scaled[0] + 5.0,
+                   (row_rect(scaled, 2, 2.0)[1]
+                    + row_rect(scaled, 2, 2.0)[3]) / 2.0, 2.0) == ("row", 2))
+
+    # Per-row visibility toggles: their zones must not eat the name.
+    check("the row's right edge carries the two visibility toggles",
+          row_control(rect, rect[2] - 12.0) == "render"
+          and row_control(rect, rect[2] - 30.0) == "viewport"
+          and row_control(rect, rect[0] + 40.0) is None,
+          (row_control(rect, rect[2] - 12.0),
+           row_control(rect, rect[2] - 30.0)))
+    check("and the scrollbar strip is not one of them",
+          row_control(rect, rect[2] - 2.0) is None)
+
+    # The scrollbar says where you are, and dragging it moves you there.
+    check("no thumb while everything fits, one when it does not",
+          scrollbar_thumb(rect, 0, 3) is None
+          and scrollbar_thumb(rect, 0, 500) is not None)
+    thumb = scrollbar_thumb(rect, 0, 500)
+    bottom = scrollbar_thumb(rect, clamp_scroll(999, 500, rect), 500)
+    check("the thumb sits at the top at rest and lower once scrolled",
+          thumb[3] > bottom[3] and thumb[0] > rect[0], (thumb, bottom))
+    check("dragging the thumb to the bottom scrolls to the end",
+          scroll_from_thumb(rect, rect[1], 500)
+          == clamp_scroll(999, 500, rect),
+          scroll_from_thumb(rect, rect[1], 500))
+    check("the resize grip is the bottom-right corner",
+          in_rect(resize_grip_rect(rect), rect[2] - 4.0, rect[1] + 4.0)
+          and not in_rect(resize_grip_rect(rect), rect[0] + 4.0,
+                          rect[3] - 4.0))
+
+    # Reveal has to scroll the row into view, and leave it alone when it
+    # is already there -- a jumping list is worse than none.
+    fits = visible_row_count(rect)
+    check("revealing a row below the fold scrolls just far enough",
+          scroll_to_index(fits + 4, 0, rect, 500) == 5,
+          scroll_to_index(fits + 4, 0, rect, 500))
+    check("a row already in view does not move the list",
+          scroll_to_index(2, 0, rect, 500) == 0)
+    check("and a row above the top scrolls back up to it",
+          scroll_to_index(1, 10, rect, 500) == 1)
 
     print("\noutliner reordering by drag")
     from mlender_importer.outliner import reorder_objects
@@ -2002,6 +2070,72 @@ def main():
           nested.parent is None and drift < 1e-6, drift)
     check("an ancestor cannot be reordered under its own descendant",
           reorder_objects(scene, [anchor], anchor, before=True) == 0)
+
+    print("\noutliner actions")
+    from mlender_importer.outliner import (
+        ORDER_PROP as ORDER_KEY,
+        delete_objects,
+        is_open as row_is_open,
+        reset_order,
+        reveal_object,
+        select_range,
+        set_open as row_set_open,
+    )
+
+    # Reveal: an object inside a collapsed branch is invisible to the tree
+    # until its ancestors are open, which is the whole point.
+    deep = bpy.data.objects["Chubs:Wrist_L"] if bpy.data.objects.get(
+        "Chubs:Wrist_L") else None
+    if deep is None:
+        # The fixture's own nesting: a mesh inside a group empty.
+        holder = bpy.data.objects["rootMotionGrp"]
+        deep = next(iter(holder.children), None)
+    check("a fixture object with ancestors exists to reveal", deep is not None)
+    if deep is not None:
+        node = deep.parent
+        while node is not None:
+            row_set_open(node, False)
+            node = node.parent
+        names_before = [entry[0].name for entry in outliner_rows(scene)]
+        opened = reveal_object(deep)
+        names_after = [entry[0].name for entry in outliner_rows(scene)]
+        check("revealing opens every branch above it and nothing less",
+              opened >= 1 and deep.name not in names_before
+              and deep.name in names_after,
+              (opened, deep.name in names_after))
+
+    # Range selection over the visible rows, Maya's Shift-click.
+    visible = [entry[0] for entry in outliner_rows(scene)]
+    picked = select_range(scene, visible[1], visible[4])
+    check("a range takes everything between the two rows, inclusive",
+          picked == visible[1:5], [o.name for o in picked])
+    check("and reads the same either way round",
+          select_range(scene, visible[4], visible[1]) == picked)
+
+    # Reset order: back to alphabetical, and only where asked.
+    marked = [obj for obj in scene.objects if ORDER_KEY in obj.keys()]
+    check("the earlier drags left a manual order to reset", bool(marked))
+    cleared = reset_order(marked)
+    check("resetting drops the stored index from those objects",
+          cleared == len(marked)
+          and not [o for o in scene.objects if ORDER_KEY in o.keys()],
+          cleared)
+
+    # Delete, children included -- a parent removed alone would orphan them.
+    victim = bpy.data.objects.new("deleteMe", None)
+    kid = bpy.data.objects.new("deleteMyChild", None)
+    scene.collection.objects.link(victim)
+    scene.collection.objects.link(kid)
+    kid.parent = victim
+    removed = delete_objects([victim])
+    check("deleting takes the object and everything under it",
+          removed == 2 and bpy.data.objects.get("deleteMe") is None
+          and bpy.data.objects.get("deleteMyChild") is None, removed)
+
+    # The undo check runs last, at the end of this file: an undo rebuilds
+    # every datablock, which invalidates the Python references the rest of
+    # the suite is still holding.
+    undo_candidates = (visible[0].name, visible[1].name)
 
     print("\nMaya layeredShader")
     # Layer Shaders, Maya's default mode: the upper layer is added to a copy
@@ -2663,6 +2797,28 @@ def main():
         check("a Ball projection is refused with a warning",
               any("Ball" in item for item in unbaked_result["warnings"]),
               [w for w in unbaked_result["warnings"] if "projection" in w])
+
+    print("\nundo reaches an outliner drag")
+    # Last on purpose: an undo rebuilds every datablock, so anything above
+    # that still holds a Python reference would raise after this runs.
+    # Names are carried across the undo for the same reason.
+    child_name, parent_name = undo_candidates
+    child = bpy.data.objects.get(child_name)
+    was_parented_to = (child.parent.name
+                       if child and child.parent else None)
+    bpy.ops.ed.undo_push(message="before parent")
+    parent_objects(bpy.data.objects[parent_name], [child])
+    bpy.ops.ed.undo_push(message="Parent Objects")
+    check("the drag's parenting took",
+          bpy.data.objects[child_name].parent.name == parent_name,
+          bpy.data.objects[child_name].parent)
+    bpy.ops.ed.undo()
+    reloaded = bpy.data.objects.get(child_name)
+    check("and one undo steps back through it",
+          reloaded is not None
+          and (reloaded.parent.name if reloaded.parent else None)
+          == was_parented_to,
+          (reloaded.parent.name if reloaded and reloaded.parent else None))
 
     print()
     if failures:
