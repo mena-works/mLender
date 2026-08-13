@@ -1901,10 +1901,12 @@ def main():
     # are the shared numbers both sides use, checked headless because the
     # drawing itself needs a real window and a human eye.
     from mlender_importer.overlay import (
+        EDGE_BAND,
         HEADER_HEIGHT,
         ROW_HEIGHT,
         card_rect,
         clamp_scroll,
+        drop_zone,
         hit_test,
         in_arrow_zone,
         row_rect,
@@ -1939,6 +1941,67 @@ def main():
     check("the fold arrow zone tracks the row's depth",
           in_arrow_zone(rect, 2, arrow_x)
           and not in_arrow_zone(rect, 0, arrow_x))
+
+    # One drag has to do two jobs, so the row's middle and its edges must
+    # answer differently -- this is what makes reordering reachable at all.
+    band = row_rect(rect, 3)
+    x_in = rect[0] + 40.0
+    check("the middle of a row is a parenting drop",
+          drop_zone(rect, 0, 50, x_in, (band[1] + band[3]) / 2.0)
+          == ("row", 3))
+    check("its top edge inserts before it, its bottom edge after",
+          drop_zone(rect, 0, 50, x_in, band[3] - EDGE_BAND / 2.0)
+          == ("before", 3)
+          and drop_zone(rect, 0, 50, x_in, band[1] + EDGE_BAND / 2.0)
+          == ("after", 3))
+    check("and the bands follow the scroll like the rows do",
+          drop_zone(rect, 6, 50, x_in, band[3] - EDGE_BAND / 2.0)
+          == ("before", 9))
+
+    # The card is draggable by its header, and must stay reachable.
+    moved_rect = card_rect(1000.0, 800.0, (120.0, 40.0))
+    check("dragging the header offsets the whole card",
+          abs(moved_rect[0] - (rect[0] + 120.0)) < 1e-6
+          and abs(moved_rect[1] - (rect[1] + 40.0)) < 1e-6,
+          moved_rect)
+    off_screen = card_rect(1000.0, 800.0, (9000.0, -9000.0))
+    check("an offset past the edge is clamped, never lost off-screen",
+          off_screen[2] <= 1000.0 + 1e-6 and off_screen[0] >= -1e-6
+          and off_screen[1] >= -1e-6 and off_screen[3] <= 800.0 + 1e-6,
+          off_screen)
+
+    print("\noutliner reordering by drag")
+    from mlender_importer.outliner import reorder_objects
+
+    order = [entry[0] for entry in outliner_rows(scene)]
+    mover, anchor = order[-1], order[0]
+    count = reorder_objects(scene, [mover], anchor, before=True)
+    order = [entry[0] for entry in outliner_rows(scene)]
+    check("dropping above the first row makes it the first row",
+          count == 1 and order[0] is mover, [o.name for o in order[:3]])
+    reorder_objects(scene, [mover], order[2], before=False)
+    order = [entry[0] for entry in outliner_rows(scene)]
+    check("and dropping below a row puts it right after that row",
+          order.index(mover) == order.index(order[1]) + 1,
+          [o.name for o in order[:4]])
+    check("a row cannot be dropped next to itself",
+          reorder_objects(scene, [mover], mover, before=True) == 0)
+
+    # Reordering across levels takes the anchor's parent, so one drag can
+    # both re-nest and place -- and a cycle must still be refused.
+    nested = bpy.data.objects["phongCube"]
+    parent_objects(bpy.data.objects["phongECube"], [nested])
+    bpy.context.view_layer.update()
+    before_world = nested.matrix_world.copy()
+    reorder_objects(scene, [nested], anchor, before=True)
+    bpy.context.view_layer.update()
+    drift = max(abs(a - b) for row_a, row_b in zip(nested.matrix_world,
+                                                   before_world)
+                for a, b in zip(row_a, row_b))
+    check("dropping between roots unnests it and keeps it in place",
+          nested.parent is None and drift < 1e-6, drift)
+    check("an ancestor cannot be reordered under its own descendant",
+          reorder_objects(scene, [anchor], anchor, before=True) == 0)
 
     print("\nMaya layeredShader")
     # Layer Shaders, Maya's default mode: the upper layer is added to a copy

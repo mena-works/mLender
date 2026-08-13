@@ -589,6 +589,26 @@ tekerlek kaydırma, katla/aç. Ağaç/sıra/katlama durumu panel outliner'la
 ortak (`outliner.py`), yani iki görünüm hiç ayrışmaz. Overlay açıldığı tek
 viewport'ta yaşar; Esc veya buton kapatır.
 
+**Kullanıcı denemesinden çıkan iki eksik (2.38.0):** "objelerin sırasını
+kaydırarak değiştiremiyorum" ve "outliner penceresini taşıyamıyorum".
+İkisi de gerçek eksikti — ilk sürümde her sürükleme parent'lamaya gidiyordu
+ve kart sabit köşedeydi.
+
+- Sürükleme artık iki iş yapıyor: satırın **ortası** parent, **üst/alt
+  kenarı** (6 px bant) araya ekler; bırakılacak yer turuncu çizgiyle
+  gösterilir. Başka seviyedeki iki satır arasına bırakmak çapanın
+  ebeveynini alır — tek sürüklemede hem yuva değiştirme hem sıralama
+  (Blender'ın kendi outliner'ının da kuralı budur).
+- Header artık tutamak: sürükleyince kart taşınır, konum oturum boyunca
+  kalır. Offset **kıskaçlı**: viewport küçülünce ekran dışında kalıp
+  geri getirilemeyen bir pencere olmasın diye.
+
+Assert'ler: orta bant vs kenar bantları farklı cevap veriyor mu, bantlar
+scroll'la kayıyor mu, kart offset'i uygulanıyor ve kıskaçlanıyor mu,
+sıralama gerçekten değişiyor mu (ilk sıraya taşıma, bir satırın altına
+bırakma), kendine bırakma reddi, seviye değiştiren bırakmada dünya konumu
+< 1e-6, ve ata-torun döngü reddi.
+
 Mimari not: çizim ve hit-test aynı saf geometri fonksiyonlarını kullanır
 (`card_rect`, `hit_test`, `row_rect`...) ve süit bunları başsız assert
 eder — çizimin kendisi pencere ister, onu göz doğrular. `blf.size` imzası

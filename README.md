@@ -1425,9 +1425,15 @@ table:
 - **drag a row onto another row to parent it there** (world position kept;
   dragging a selected row moves the whole selection, Maya's rule), and drop
   it on the header bar to unparent;
+- **drag between two rows to reorder** — the row's middle parents, its top
+  and bottom edges insert at that place in the order, with a line showing
+  where the drop lands. Dropping between rows at another level takes that
+  level's parent, so one drag both re-nests and places;
 - **double-click renames**;
 - click selects, Shift-click toggles, the fold triangles collapse and
-  expand, the wheel scrolls.
+  expand, the wheel scrolls;
+- **drag the header to move the window** — it stays where you put it, and
+  an offset that would push it off-screen is clamped rather than losing it.
 
 It shares its tree, order and fold state with the panel, lives in the one
 viewport it was opened over, and closes with Esc or the same button. The

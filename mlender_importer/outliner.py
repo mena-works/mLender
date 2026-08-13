@@ -106,6 +106,45 @@ def move_object(scene, obj, direction):
     return True
 
 
+def reorder_objects(scene, objects, anchor, before=True):
+    """Drop objects between siblings: Maya's other outliner drag.
+
+    Dropping *on* a row parents; dropping *between* rows puts things at
+    that spot in the order, taking the anchor's parent if they came from
+    somewhere else -- the same rule Blender's own outliner uses, and what
+    makes a drag able to both re-nest and re-order.
+
+    Returns how many objects moved.
+    """
+    parent = anchor.parent
+    moving = [
+        obj for obj in objects
+        if obj is not anchor
+        and not _is_descendant(anchor, obj)
+        and not (parent is not None and _is_descendant(parent, obj))
+    ]
+    if not moving:
+        return 0
+
+    for obj in moving:
+        if obj.parent is not parent:
+            if parent is None:
+                unparent_objects([obj])
+            else:
+                parent_objects(parent, [obj])
+
+    ordered = [obj for obj in children_by_parent(scene).get(parent, [])
+               if obj not in moving]
+    if anchor in ordered:
+        at = ordered.index(anchor) + (0 if before else 1)
+    else:
+        at = len(ordered)
+    ordered[at:at] = moving
+    for position, sibling in enumerate(ordered):
+        sibling[ORDER_PROP] = position
+    return len(moving)
+
+
 def parent_objects(target, objects):
     """Parent objects under target, world transforms kept. Returns count.
 

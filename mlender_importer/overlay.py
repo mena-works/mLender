@@ -33,6 +33,7 @@ from .outliner import (
     is_open,
     outliner_rows,
     parent_objects,
+    reorder_objects,
     set_open,
     unparent_objects,
 )
@@ -46,6 +47,10 @@ ROW_HEIGHT = 21.0
 INDENT = 15.0
 ARROW_ZONE = 16.0
 DRAG_THRESHOLD = 5.0
+# How close to a row's edge counts as "between the rows" rather than "on
+# this row". Wide enough to hit without aiming, narrow enough that the
+# middle of a row is still comfortably a parenting drop.
+EDGE_BAND = 6.0
 FONT_ID = 0
 
 COLOR_CARD = (0.09, 0.09, 0.10, 0.92)
@@ -53,6 +58,7 @@ COLOR_HEADER = (0.16, 0.16, 0.18, 1.0)
 COLOR_ROW_SELECTED = (0.21, 0.35, 0.55, 0.9)
 COLOR_ROW_HOVER = (1.0, 1.0, 1.0, 0.07)
 COLOR_DROP_TARGET = (0.95, 0.65, 0.15, 0.85)
+COLOR_DROP_LINE = (1.0, 0.78, 0.30, 1.0)
 COLOR_TEXT = (0.90, 0.90, 0.90, 1.0)
 COLOR_TEXT_DIM = (0.55, 0.55, 0.55, 1.0)
 COLOR_ARROW = (0.65, 0.65, 0.65, 1.0)
@@ -78,19 +84,30 @@ _state = {
     "hover": None,
     "press": None,
     "press_pos": None,
+    "press_offset": (0.0, 0.0),
     "dragging": False,
+    "offset": (0.0, 0.0),
     "rows": [],
 }
 
 
 # ------------------------------------------------------------ pure geometry
-def card_rect(region_width, region_height):
-    """The overlay card in region pixels: (x0, y0, x1, y1), y up."""
-    x0 = PANEL_X
-    x1 = min(x0 + PANEL_WIDTH, region_width - PANEL_X)
-    y1 = region_height - PANEL_TOP
-    y0 = PANEL_X
-    return (x0, y0, x1, y1)
+def card_rect(region_width, region_height, offset=(0.0, 0.0)):
+    """The overlay card in region pixels: (x0, y0, x1, y1), y up.
+
+    ``offset`` is where the user has dragged the card by its header. It is
+    clamped rather than trusted: a card dragged past the edge of a viewport
+    that is later resized would otherwise be unreachable, with no way to
+    drag it back.
+    """
+    width = min(PANEL_WIDTH, max(120.0, region_width - 2 * PANEL_X))
+    height = max(HEADER_HEIGHT + FOOTER_HEIGHT + ROW_HEIGHT,
+                 region_height - PANEL_TOP - PANEL_X)
+    x0 = PANEL_X + offset[0]
+    y0 = PANEL_X + offset[1]
+    x0 = max(0.0, min(x0, region_width - width))
+    y0 = max(0.0, min(y0, region_height - height))
+    return (x0, y0, x0 + width, y0 + height)
 
 
 def visible_row_count(rect):
@@ -131,6 +148,26 @@ def in_arrow_zone(rect, depth, x):
     return start <= x <= start + ARROW_ZONE
 
 
+def drop_zone(rect, scroll, total_rows, x, y):
+    """Where a drag would land: on a row, or between two of them.
+
+    Returns ("row", i) to parent under it, ("before", i) / ("after", i) to
+    insert at that place in the order, ("header", None), or None. The
+    edges of a row are the insertion bands, which is how one drag does
+    both jobs -- the same split Maya's outliner uses.
+    """
+    hit = hit_test(rect, scroll, total_rows, x, y)
+    if hit is None or hit[0] != "row":
+        return hit
+    index = hit[1]
+    bounds = row_rect(rect, index - int(scroll))
+    if y >= bounds[3] - EDGE_BAND:
+        return ("before", index)
+    if y <= bounds[1] + EDGE_BAND:
+        return ("after", index)
+    return ("row", index)
+
+
 # ----------------------------------------------------------------- drawing
 def _set_font_size(size):
     # blf.size lost its dpi argument along the way; try the modern
@@ -166,7 +203,7 @@ def _draw():
     _state["rows"] = rows
 
     region = context.region
-    rect = card_rect(region.width, region.height)
+    rect = card_rect(region.width, region.height, _state["offset"])
     _state["scroll"] = clamp_scroll(_state["scroll"], len(rows), rect)
     scroll = _state["scroll"]
 
@@ -214,13 +251,29 @@ def _draw():
         blf.position(FONT_ID, swatch + 14, y0 + 6.0, 0)
         blf.draw(FONT_ID, obj.name)
 
+        # The insertion line: where dropping would put things in the order.
+        if _state["dragging"]:
+            hover = _state["hover"]
+            if hover == ("before", index):
+                _quad(shader, x0, y1 - 1.0, x1, y1 + 1.0, COLOR_DROP_LINE)
+            elif hover == ("after", index):
+                _quad(shader, x0, y0 - 1.0, x1, y0 + 1.0, COLOR_DROP_LINE)
+
     _set_font_size(11)
     blf.color(FONT_ID, *COLOR_TEXT)
     blf.position(FONT_ID, rect[0] + 8, rect[3] - HEADER_HEIGHT + 8, 0)
     title = "mLender Outliner"
     if _state["dragging"]:
-        title = "Drop on a row to parent, here to unparent"
+        title = ("Moving the window"
+                 if _state["press"] == ("header", None)
+                 else "On a row parents - between rows reorders")
     blf.draw(FONT_ID, title)
+    # The grip: says the header is the handle without spending a row on it.
+    grip_x = rect[2] - 26.0
+    grip_y = rect[3] - HEADER_HEIGHT / 2.0
+    for step in (-4.0, 0.0, 4.0):
+        _quad(shader, grip_x, grip_y + step - 0.5,
+              grip_x + 16.0, grip_y + step + 0.5, COLOR_TEXT_DIM)
 
     blf.color(FONT_ID, *COLOR_TEXT_DIM)
     blf.position(FONT_ID, rect[0] + 8, rect[1] + 5, 0)
@@ -228,7 +281,7 @@ def _draw():
         footer = "{0}/{1} rows - wheel scrolls - Esc closes".format(
             min(count + scroll, len(rows)), len(rows))
     else:
-        footer = "drag: parent - double-click: rename - Esc closes"
+        footer = "drag rows to parent or reorder - header moves this"
     blf.draw(FONT_ID, footer)
     gpu.state.blend_set("NONE")
 
@@ -312,8 +365,11 @@ class ML_OT_overlay_outliner(bpy.types.Operator):
         region = _window_region(area)
         if region is None:
             return {"CANCELLED"}
+        # The card keeps where it was dragged to between openings; only the
+        # transient press state is cleared.
         _state.update(area=area, region=region, running=True, scroll=0,
-                      hover=None, press=None, press_pos=None, dragging=False)
+                      hover=None, press=None, press_pos=None,
+                      dragging=False)
         _state["handle"] = bpy.types.SpaceView3D.draw_handler_add(
             _draw, (), "WINDOW", "POST_PIXEL")
         context.window_manager.modal_handler_add(self)
@@ -332,9 +388,9 @@ class ML_OT_overlay_outliner(bpy.types.Operator):
         except Exception:
             _stop()
             return {"FINISHED"}
-        rect = card_rect(region.width, region.height)
+        rect = card_rect(region.width, region.height, _state["offset"])
         rows = _state["rows"]
-        hit = hit_test(rect, _state["scroll"], len(rows), x, y)
+        hit = drop_zone(rect, _state["scroll"], len(rows), x, y)
 
         if event.type == "ESC" and event.value == "PRESS":
             _stop()
@@ -348,6 +404,14 @@ class ML_OT_overlay_outliner(bpy.types.Operator):
                 px, py = _state["press_pos"]
                 if abs(x - px) > DRAG_THRESHOLD or abs(y - py) > DRAG_THRESHOLD:
                     _state["dragging"] = True
+            # Dragging the header moves the card, the way a floating
+            # window moves. Grabbing anywhere else drags objects.
+            if _state["dragging"] and _state["press"] == ("header", None):
+                px, py = _state["press_pos"]
+                base = _state["press_offset"]
+                _state["offset"] = (base[0] + (x - px), base[1] + (y - py))
+                area.tag_redraw()
+                return {"RUNNING_MODAL"}
             area.tag_redraw()
             return {"PASS_THROUGH"}
 
@@ -369,13 +433,21 @@ class ML_OT_overlay_outliner(bpy.types.Operator):
         if event.type == "LEFTMOUSE" and event.value == "PRESS":
             if not inside:
                 return {"PASS_THROUGH"}
-            if hit[0] == "row" and hit[1] < len(rows):
+            if hit[0] == "header":
+                _state["press"] = hit
+                _state["press_pos"] = (x, y)
+                _state["press_offset"] = _state["offset"]
+                return {"RUNNING_MODAL"}
+            if hit[0] in ("row", "before", "after") and hit[1] < len(rows):
                 obj, depth, has_children, _opened = rows[hit[1]]
-                if has_children and in_arrow_zone(rect, depth, x):
+                if (hit[0] == "row" and has_children
+                        and in_arrow_zone(rect, depth, x)):
                     set_open(obj, not is_open(obj))
                     area.tag_redraw()
                     return {"RUNNING_MODAL"}
-                _state["press"] = hit
+                # A press in an edge band still grabs that row; where it
+                # is dropped is what decides parent or reorder.
+                _state["press"] = ("row", hit[1])
                 _state["press_pos"] = (x, y)
             return {"RUNNING_MODAL"}
 
@@ -387,6 +459,10 @@ class ML_OT_overlay_outliner(bpy.types.Operator):
             _state["dragging"] = False
             if press is None:
                 return {"PASS_THROUGH"}
+            if press == ("header", None):
+                # Either the card was moved, or the header was clicked.
+                area.tag_redraw()
+                return {"RUNNING_MODAL"}
             source = (rows[press[1]][0]
                       if press[0] == "row" and press[1] < len(rows) else None)
             if source is None:
@@ -402,11 +478,14 @@ class ML_OT_overlay_outliner(bpy.types.Operator):
                 moved = [source]
             if hit is not None and hit[0] == "header":
                 unparent_objects(moved)
-            elif (hit is not None and hit[0] == "row"
-                    and hit[1] < len(rows)):
-                target = rows[hit[1]][0]
-                if parent_objects(target, moved):
-                    set_open(target, True)
+            elif hit is not None and hit[1] is not None and hit[1] < len(rows):
+                anchor = rows[hit[1]][0]
+                if hit[0] == "row":
+                    if parent_objects(anchor, moved):
+                        set_open(anchor, True)
+                else:
+                    reorder_objects(context.scene, moved, anchor,
+                                    before=hit[0] == "before")
             area.tag_redraw()
             return {"RUNNING_MODAL"}
 
