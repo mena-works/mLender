@@ -58,6 +58,26 @@ LAYER_CHANNEL_PINS = {
 
 COLOUR_PINS = ("BaseColor", "EmissiveColor", "SubsurfaceColor", "Normal")
 
+# layeredTexture modes, as expression names. Measured for the Blender
+# receiver by baking every mode -- 0.2 over 0.6, because an earlier sweep used
+# 0.8 over 0.4 where |a-b|, min(a,b) and "did nothing" are all the same number.
+# Every one of them computes lerp(lower, f(lower, upper), alpha).
+LAYER_BLEND_EXPRESSIONS = {
+    "over": None,                                   # the lerp on its own
+    "multiply": "MaterialExpressionMultiply",
+    "add": "MaterialExpressionAdd",
+    "subtract": "MaterialExpressionSubtract",
+    "difference": "MaterialExpressionAbs",          # of a subtract
+    "lighten": "MaterialExpressionMax",
+    "darken": "MaterialExpressionMin",
+}
+# Measured: "none" ignores its alpha and replaces everything under it.
+LAYER_REPLACE_MODE = "none"
+# HSV and alpha-compositing modes, which are not a per-channel blend. Named
+# rather than approximated, exactly as the Blender receiver names them.
+LAYER_UNSUPPORTED_MODES = ("in", "out", "saturate", "desaturate",
+                           "illuminate", "cpv_modulate")
+
 # Maya layeredShader compositing modes.
 MAYA_LAYER_TEXTURE_MODE = "layer_texture"
 
@@ -125,6 +145,10 @@ def _channel_node(material, channel, record, package_folder, x, y, warnings,
     pin = LAYER_CHANNEL_PINS.get(channel)
     if pin is None:
         return None, None
+    layered = ((record or {}).get("texture") or {}).get("layered") or {}
+    if layered.get("layers"):
+        # Handled by the caller, which has the package folder and the label.
+        return None, pin
     if channel_texture_path(record):
         texture = load_texture(
             record, package_folder, channel,
@@ -145,8 +169,135 @@ def _channel_node(material, channel, record, package_folder, x, y, warnings,
                            x, y, name), pin)
 
 
+def _stack_node(material, layered, package_folder, x, y, warnings, label,
+                channel):
+    """A layeredTexture stack, bottom layer first.
+
+    Maya hands the layers top first, which is how the Attribute Editor reads,
+    so this walks them in reverse. Each step is
+    ``lerp(lower, f(lower, upper), alpha)`` -- the shape every supported mode
+    was measured to have -- and a mode that is not a per-channel blend stops
+    the walk instead of being turned into one that looks close.
+    """
+    library = unreal.MaterialEditingLibrary
+    layers = [layer for layer in (layered.get("layers") or []) if layer]
+    if not layers:
+        return None
+
+    head = None
+    row = 0
+    for layer in reversed(layers):
+        colour_record = (layer.get("color") or {})
+        node = _channel_node(
+            material, channel, colour_record, package_folder,
+            x - 350, y + row * 160, warnings,
+            "{0}_Layer{1}".format(channel, layer.get("index", row)),
+        )[0]
+        row += 1
+        if node is None:
+            continue
+        if head is None:
+            # The bottom layer composites against black, so it starts the
+            # chain on its own.
+            head = node
+            continue
+
+        mode = str(layer.get("blend_mode") or "over").lower()
+        if mode in LAYER_UNSUPPORTED_MODES:
+            warnings.append(
+                'Material "{0}" has a layeredTexture layer in "{1}" mode on '
+                '"{2}", which is not a per-channel blend. The layers under it '
+                "were used and this one was left out.".format(
+                    label, mode, channel
+                )
+            )
+            continue
+        if mode == LAYER_REPLACE_MODE:
+            # Measured: "none" ignores its alpha and replaces what is under it.
+            head = node
+            continue
+
+        combined = node
+        expression = LAYER_BLEND_EXPRESSIONS.get(mode)
+        if expression is not None:
+            if mode == "difference":
+                subtract = _expression(
+                    material, "MaterialExpressionSubtract", x + 60,
+                    y + row * 160
+                )
+                absolute = _expression(
+                    material, "MaterialExpressionAbs", x + 160, y + row * 160
+                )
+                if subtract is None or absolute is None:
+                    continue
+                library.connect_material_expressions(head, "", subtract, "A")
+                library.connect_material_expressions(node, "", subtract, "B")
+                library.connect_material_expressions(
+                    subtract, "", absolute, "Input"
+                )
+                combined = absolute
+            else:
+                operator = _expression(
+                    material, expression, x + 60, y + row * 160
+                )
+                if operator is None:
+                    continue
+                library.connect_material_expressions(head, "", operator, "A")
+                library.connect_material_expressions(node, "", operator, "B")
+                combined = operator
+        elif mode != "over":
+            warnings.append(
+                'Material "{0}" has a layeredTexture layer in "{1}" mode on '
+                '"{2}", which this build does not know.'.format(
+                    label, mode, channel
+                )
+            )
+            continue
+
+        alpha = _expression(
+            material, "MaterialExpressionScalarParameter", x - 350,
+            y + row * 160 + 80
+        )
+        if alpha is not None:
+            try:
+                alpha.set_editor_property(
+                    "parameter_name",
+                    "{0}_Layer{1}_Alpha".format(
+                        channel, layer.get("index", row)
+                    ),
+                )
+                alpha.set_editor_property(
+                    "default_value",
+                    float(scalar((layer.get("alpha") or {}).get("value"), 1.0)),
+                )
+            except Exception:
+                pass
+        mixer = _expression(
+            material, "MaterialExpressionLinearInterpolate", x + 260,
+            y + row * 160
+        )
+        if mixer is None:
+            head = combined
+            continue
+        library.connect_material_expressions(head, "", mixer, "A")
+        library.connect_material_expressions(combined, "", mixer, "B")
+        if alpha is not None:
+            library.connect_material_expressions(alpha, "", mixer, "Alpha")
+        head = mixer
+    return head
+
+
+def has_layered_channel(record):
+    """Whether any channel of a material is driven by a layeredTexture."""
+    for channel_record in (record.get("channels") or {}).values():
+        texture = (channel_record or {}).get("texture") or {}
+        if (texture.get("layered") or {}).get("layers"):
+            return True
+    return False
+
+
 def _layer_attributes(material, layer, package_folder, x, y, warnings,
-                      index):
+                      index, label=None):
     """A MakeMaterialAttributes carrying one layer's surface."""
     attributes = _expression(
         material, "MaterialExpressionMakeMaterialAttributes", x, y
@@ -157,6 +308,17 @@ def _layer_attributes(material, layer, package_folder, x, y, warnings,
     for channel, record in sorted((layer.get("channels") or {}).items()):
         if channel not in LAYER_CHANNEL_PINS:
             continue
+        layered = ((record or {}).get("texture") or {}).get("layered") or {}
+        if layered.get("layers"):
+            stack = _stack_node(
+                material, layered, package_folder,
+                x - 350, y - 300 + row * 90, warnings,
+                label or "Material", channel,
+            )
+            if stack is not None:
+                _connect(stack, attributes, LAYER_CHANNEL_PINS[channel])
+                row += 1
+                continue
         node, pin = _channel_node(
             material, channel, record, package_folder,
             x - 350, y - 300 + row * 90, warnings,
@@ -227,7 +389,11 @@ def build_blend_material(record, package_folder, warnings):
     """A Maya blend shader as its own Material, or None if it is not one."""
     layers = [layer for layer in (record.get("layers") or []) if layer]
     if len(layers) < 2:
-        return None
+        # Not a blend shader -- but a layeredTexture stack needs a graph of
+        # its own too, and the material itself is then the only "layer".
+        if not has_layered_channel(record):
+            return None
+        layers = [record]
 
     label = safe_asset_name(
         record.get("material") or "Material", "Material"
@@ -277,7 +443,7 @@ def build_blend_material(record, package_folder, warnings):
             pass
 
     head = _layer_attributes(
-        material, layers[0], package_folder, -900, 0, warnings, 0
+        material, layers[0], package_folder, -900, 0, warnings, 0, label
     )
     if head is None:
         warnings.append(
@@ -288,7 +454,8 @@ def build_blend_material(record, package_folder, warnings):
     built = 1
     for index, layer in enumerate(layers[1:], start=1):
         upper = _layer_attributes(
-            material, layer, package_folder, -900, 700 * index, warnings, index
+            material, layer, package_folder, -900, 700 * index, warnings,
+            index, label
         )
         if upper is None:
             continue

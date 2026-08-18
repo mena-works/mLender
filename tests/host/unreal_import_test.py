@@ -1335,6 +1335,87 @@ def main():
             )
         break
 
+    # --- a second package, exported with baking off.
+    #
+    # Baking resolves a layeredTexture into one file before any receiver sees
+    # it, so the stack only exists in a package sent with it off -- which is
+    # why this reads the second package the Maya test writes. It imports over
+    # the level, so it runs last, after every assertion above has been made.
+    unbaked = os.path.join(os.path.dirname(PACKAGE), "unbaked", "mLender_01")
+    unbaked_json = os.path.join(unbaked, "mLender_01_scene.json")
+    if os.path.isfile(unbaked_json):
+        print("\nunbaked package: layeredTexture stacks")
+        with open(unbaked_json) as handle:
+            unbaked_data = json.load(handle)
+        stacks = []
+        for mesh_record in unbaked_data.get("meshes") or []:
+            for material_record in mesh_record.get("materials") or []:
+                for channel, channel_record in (
+                        material_record.get("channels") or {}).items():
+                    layered = ((channel_record or {}).get("texture")
+                               or {}).get("layered") or {}
+                    if layered.get("layers"):
+                        stacks.append((material_record, channel, layered))
+        check("the unbaked package carries a layeredTexture stack",
+              bool(stacks),
+              [s[0].get("material") for s in stacks])
+        if stacks:
+            unbaked_result = mlender_unreal.import_scene_package(unbaked)
+            material_record, channel, layered = stacks[0]
+            asset = unreal.EditorAssetLibrary.load_asset(
+                "/Game/mLender/Materials/ML_{0}".format(
+                    material_record.get("material"))
+            )
+            check("a material with a layered channel became a graph",
+                  isinstance(asset, unreal.Material),
+                  type(asset).__name__ if asset else None)
+            if isinstance(asset, unreal.Material):
+                library = unreal.MaterialEditingLibrary
+                # Only the layers that actually blend carry an alpha: the
+                # bottom one starts the chain and an unsupported mode is left
+                # out, so those two have no parameter to read.
+                blended = [
+                    layer for layer in layered["layers"]
+                    if str(layer.get("blend_mode") or "").lower()
+                    not in ("saturate", "desaturate", "illuminate", "in",
+                            "out", "cpv_modulate")
+                ]
+                checked = 0
+                for layer in blended[:-1]:
+                    name = "{0}_Layer{1}_Alpha".format(
+                        channel, layer.get("index"))
+                    want = float((layer.get("alpha") or {}).get("value") or 1.0)
+                    try:
+                        got = (library
+                               .get_material_default_scalar_parameter_value(
+                                   asset, name))
+                    except Exception:
+                        got = None
+                    if got is not None and abs(got - want) < 0.001:
+                        checked += 1
+                check("each blending layer kept the alpha Maya gave it",
+                      checked == max(0, len(blended) - 1),
+                      (checked, len(blended) - 1))
+            # A mode that is not a per-channel blend has to be named, not
+            # quietly folded in as if it were a fade.
+            unsupported = [
+                layer for layer in layered["layers"]
+                if str(layer.get("blend_mode") or "").lower()
+                in ("saturate", "desaturate", "illuminate", "in", "out",
+                    "cpv_modulate")
+            ]
+            if unsupported:
+                check("an unblendable layer mode is reported by name",
+                      any("is not a per-channel blend" in w
+                          for w in unbaked_result.get("warnings") or []),
+                      [w for w in unbaked_result.get("warnings") or []
+                       if "layeredTexture" in w][:1])
+            check("and the stack is no longer called a flat value",
+                  not [w for w in unbaked_result.get("warnings") or []
+                       if "layeredTexture" in w and "flat value" in w],
+                  [w for w in unbaked_result.get("warnings") or []
+                   if "flat value" in w][:1])
+
     # All of them, not the first few: the interesting warning is rarely in the
     # first twenty-five, and a truncated list sent a diagnosis down the wrong
     # path once already.

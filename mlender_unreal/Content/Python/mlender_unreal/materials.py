@@ -47,7 +47,7 @@ from .constants import (
     SPECULAR_WEIGHT_TO_LEVEL,
     UNREAL_METADATA_CHANNELS,
 )
-from .graphs import build_blend_material
+from .graphs import build_blend_material, has_layered_channel
 from .images import load_texture, ramp_lut_texture
 from .utils import (
     channel_texture_path,
@@ -596,7 +596,7 @@ def build_material(record, package_folder, warnings):
     # A blend shader is a stack of surfaces, which a Material Instance cannot
     # express: an instance shares one master and can only change its numbers.
     # That case gets a graph of its own -- the other half of the hybrid.
-    if len(record.get("layers") or []) > 1:
+    if len(record.get("layers") or []) > 1 or has_layered_channel(record):
         graph = build_blend_material(record, package_folder, warnings)
         if graph is not None:
             _report_unsupported(record, safe_asset_name(
@@ -896,7 +896,12 @@ def _report_unsupported(record, name, warnings, surface_class=None,
         )
     for channel, channel_record in sorted(channels.items()):
         texture = (channel_record or {}).get("texture") or {}
-        if texture.get("unsupported_network") and not texture.get("path"):
+        # A layeredTexture reports itself as an unsupported network because
+        # it hands over no single file. It is rebuilt now, so saying it fell
+        # back to a flat value would be the opposite of what happened.
+        if (texture.get("unsupported_network") and not texture.get("path")
+                and not (carried_layers
+                         and (texture.get("layered") or {}).get("layers"))):
             warnings.append(
                 'Material "{0}" channel "{1}" is driven by a "{2}" network '
                 "Maya could not hand over; it fell back to its flat value. "
@@ -921,7 +926,7 @@ def _report_unsupported(record, name, warnings, surface_class=None,
             "describe, so the texture arrived uncorrected. Use Bake "
             "Procedurals to carry them.".format(name)
         )
-    if record.get("layered_texture"):
+    if record.get("layered_texture") and not carried_layers:
         warnings.append(
             'Material "{0}" reads an unbaked layeredTexture stack, which this '
             "build does not rebuild in Unreal; the base layer's texture was "

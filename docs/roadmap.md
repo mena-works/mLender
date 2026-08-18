@@ -1539,3 +1539,29 @@ olmamıştı. Bayat asset siliniyor.
 Doğrulama Maya'nın kendi kaydına karşı: karışım ağırlığı 0.25 → 0.25, iki
 katmanın taban renkleri birebir (tek katmanı iki kez bağlayan bir graph tek
 katman kontrolünden geçerdi), ve level'daki mesh gerçekten graph'ı giyiyor.
+
+
+## layeredTexture yığını (2.60.0) — graph yolunun ikinci hasadı
+
+Blend shader'lar için kurulan graph yolu, `layeredTexture`'ı da taşıyor: katman
+başına bir texture sample ya da renk parametresi, ve alttan üste
+`lerp(alt, f(alt, üst), alpha)` — desteklenen her modun ölçülmüş şekli bu.
+Maya katmanları üstten veriyor (Attribute Editor sırası), o yüzden yürüyüş ters.
+
+Yedi mod kuruluyor (`over`, `multiply`, `add`, `subtract`, `difference`,
+`lighten`, `darken`), `none` ise alfasını yok sayıp altındakini değiştiriyor —
+ölçüldü. HSV ve alfa-kompozit modları (`saturate`, `desaturate`, `illuminate`,
+`in`, `out`, `cpv_modulate`) kanal başına karışım değil; adıyla bildirilip
+dışarıda bırakılıyorlar.
+
+**Bake genelde önce varıyor.** Bake Procedurals açıkken — varsayılan — yığın
+alıcıya ulaşmadan tek dokuya iniyor, yani bu yol yalnız bake kapalı gönderilen
+paketlerde çalışıyor. Host testi bu yüzden sonda **ikinci** bir paket
+(bake'siz) import ediyor: yığın birincisinde yok.
+
+Fixture yine boşluk taşıyordu: katman dokuları `.tx` taslağıydı, yani Unreal
+hepsini reddedip her katmanı düz değere düşürecekti ve yığın "kuruldu" görünüp
+hiçbir şey taşımayacaktı. Gerçek PNG'lere çevrildi.
+
+Ve iki uyarı artık yanlış olduğu için susturuldu: yığın kurulduğunda
+"flat value'ya düştü" ve "taban katman kullanıldı" cümleleri doğru değil.

@@ -433,6 +433,28 @@ name, and `create_asset` will not take a name that is in use. The stale one is
 replaced. Measured — leaving it made the graph path return nothing and the
 material silently fell back to the instance it was meant to replace.
 
+### Layered textures
+
+A `layeredTexture` stack takes the same route, for the same reason: a stack of
+images with per-layer blend modes is structure, not numbers. Each layer becomes
+a texture sample or a colour parameter, and the layers are combined bottom-up as
+`lerp(lower, f(lower, upper), alpha)` — the shape every supported mode was
+measured to have. Maya hands the layers top first, which is how the Attribute
+Editor reads them, so the walk runs in reverse.
+
+Seven modes are built (`over`, `multiply`, `add`, `subtract`, `difference`,
+`lighten`, `darken`) and `none` replaces what is under it, ignoring its own
+alpha — measured. The HSV and alpha-compositing modes (`saturate`,
+`desaturate`, `illuminate`, `in`, `out`, `cpv_modulate`) are not per-channel
+blends; each is named in a warning and left out rather than folded in as a fade
+that would look close.
+
+**Baking usually gets there first.** With Bake Procedurals on — the default —
+the stack is resolved into one texture before any receiver sees it, so this
+path only runs for packages sent with baking off. That is also why the host
+test imports a second, unbaked package at the end: the stack does not exist in
+the first one.
+
 ### AOVs, as a render config
 
 Render passes are not level contents in Unreal — they are Movie Render Queue

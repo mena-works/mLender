@@ -1191,9 +1191,12 @@ def build_scene():
                                name="layerStack")
 
     def _layer_texture(name):
-        path = os.path.join(OUT, name + ".tx").replace("\\", "/")
-        with open(path, "w") as handle:
-            handle.write("layer fixture")
+        # Real images, because a receiver that rebuilds the stack has to load
+        # them: a .tx stub travels as a path and Unreal refuses it, so the
+        # stack would arrive with every layer falling back to a flat value and
+        # the rebuild would look right while carrying nothing.
+        path = os.path.join(OUT, name + ".png").replace("\\", "/")
+        _write_png(path)
         node = cmds.shadingNode("file", asTexture=True, name=name)
         cmds.setAttr(node + ".fileTextureName", path, type="string")
         return node
