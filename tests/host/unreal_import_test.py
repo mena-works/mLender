@@ -256,6 +256,61 @@ def main():
               [w for w in result.get("warnings") or []
                if "carries coat," in w][:1])
 
+    # A UDIM set. Measured: handed the first tile with its siblings beside it,
+    # Unreal finds the rest itself and switches virtual texture streaming on,
+    # which is how the engine says "this is a set". The exporter writes a
+    # <UDIM> token, so the only work is handing over a concrete tile.
+    udim_material = None
+    udim_channel = None
+    for mesh_record in package_data.get("meshes") or []:
+        for material_record in mesh_record.get("materials") or []:
+            for channel, channel_record in (
+                    material_record.get("channels") or {}).items():
+                texture = (channel_record or {}).get("texture") or {}
+                if texture.get("udim"):
+                    udim_material = material_record
+                    udim_channel = channel
+                    break
+            if udim_material:
+                break
+        if udim_material:
+            break
+    check("the package carries a UDIM set", udim_material is not None,
+          udim_material and udim_material.get("material"))
+    if udim_material is not None:
+        instance = unreal.EditorAssetLibrary.load_asset(
+            "/Game/mLender/Materials/ML_{0}".format(
+                udim_material.get("material"))
+        )
+        check("its material instance was built", instance is not None,
+              udim_material.get("material"))
+        if instance is not None:
+            parameter = {
+                "base_color": "BaseColorMap", "roughness": "RoughnessMap",
+                "metallic": "MetallicMap", "specular": "SpecularMap",
+                "opacity": "OpacityMap", "normal": "NormalMap",
+                "emission": "EmissiveMap",
+            }.get(udim_channel)
+            texture_asset = None
+            if parameter:
+                texture_asset = unreal.MaterialEditingLibrary.\
+                    get_material_instance_texture_parameter_value(
+                        instance, parameter)
+            check("the UDIM texture reached the material",
+                  texture_asset is not None,
+                  (udim_channel, parameter))
+            if texture_asset is not None:
+                check("and Unreal recognised it as a set, not one tile",
+                      bool(texture_asset.get_editor_property(
+                          "virtual_texture_streaming")),
+                      texture_asset.get_editor_property(
+                          "virtual_texture_streaming"))
+        check("nothing reported the set as untiled",
+              not [w for w in result.get("warnings") or []
+                   if "without tiling" in w],
+              [w for w in result.get("warnings") or []
+               if "without tiling" in w][:1])
+
     # The dome HDR as the sky light cubemap. Measured: Unreal reads a
     # Radiance .hdr straight into a TextureCube, so a lat-long environment
     # needs no conversion step -- but the import decides that, so the result

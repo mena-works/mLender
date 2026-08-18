@@ -423,6 +423,16 @@ Translucent and unlit surfaces do not take a coat: translucent clear coat is a
 different lighting argument in Unreal, and an unlit surface answers no light at
 all. Both are reported rather than approximated.
 
+### UDIM sets
+
+The exporter writes a `<UDIM>` token in the path and keeps the concrete tile it
+came from. Unreal wants the concrete one — and then finds the rest itself:
+measured, importing `tile.1001.png` with its siblings beside it produced a
+single texture with **virtual texture streaming** switched on, which is how the
+engine says it recognised a set. That flag is checked afterwards, so a set
+whose other tiles are missing is reported rather than arriving silently as one
+tile.
+
 ### The dome HDR
 
 An Arnold sky dome drives Unreal's sky light, and its HDR now comes with it.

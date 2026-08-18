@@ -1357,3 +1357,24 @@ imkânsız testlerle kapsanıyordu. Bu, animasyonlu ışıkta çıkan hatanın a
 fixture bir alanı taşıdığını söylüyor ama o alan hep boş. Dome'a elle yazılan
 gerçek bir `.hdr` kondu (32×16, düz RGBE; ikili dosya depoya konmuyor çünkü
 kimse review edemez) ve Blender ile Unreal'e assertion eklendi.
+
+
+## UDIM (2.53.0) — ve fixture'ın üçüncü boşluğu
+
+Unreal'e somut ilk kareyi vermek yetiyor: ölçüldü, `tile.1001.png` kardeşleri
+yanındayken import edildiğinde motor kalanını kendisi buluyor ve **virtual
+texture streaming**'i açıyor — "bunu set olarak tanıdım" demenin yolu bu.
+Bayrak sonradan kontrol ediliyor, yani diğer kareleri eksik olan bir set
+sessizce tek kare olarak gelmiyor, bildiriliyor.
+
+**Fixture üçüncü kez boşluk taşıyordu.** Buradaki texture fixture'ları `.tx`
+uzantılı, içi "only the path is exported, never the pixels" yazan dosyalar.
+Blender için doğru bir kısayoldu — orada yalnız yol taşınıyor. Ama Unreal
+texture'ı **asset olarak import ediyor** ve piksel içermeyen dosyayı
+reddediyor: yani Unreal tarafında texture yolu hiç doğrulanmamıştı, bütün
+materyaller texture'sız geliyordu ve kimse fark etmiyordu.
+
+Bütün fixture'ları çevirmek yerine yalnız UDIM seti gerçek PNG yapıldı — çünkü
+alıcının dosyanın **kendisiyle** bir şey yapmak zorunda olduğu tek yer orası.
+Kalan `.tx`'ler taşıdıkları şeyi (yol tesisatını) taşımaya devam ediyor ve
+"import edilemedi" diye dürüstçe bildiriliyorlar.

@@ -59,18 +59,16 @@ def load_texture(record, package_folder, channel, colour_data, warnings):
     if not raw_path:
         return None
     path, _repointed = resolve_recorded_path(raw_path, package_folder)
+
+    if "<UDIM>" in path or "<udim>" in path:
+        path = _first_udim_tile(record, path, channel, warnings)
+        if path is None:
+            return None
+
     if not os.path.isfile(path):
         warnings.append(
             'Texture "{0}" was not found on disk, so the channel "{1}" kept '
             "its flat value.".format(raw_path, channel)
-        )
-        return None
-
-    if "<UDIM>" in path or "<udim>" in path:
-        warnings.append(
-            'Texture "{0}" is a UDIM set; this build imports Unreal textures '
-            "one file at a time, so the channel \"{1}\" arrived without "
-            "tiling.".format(raw_path, channel)
         )
         return None
 
@@ -81,8 +79,49 @@ def load_texture(record, package_folder, channel, colour_data, warnings):
     asset = _import_texture_asset(path, warnings)
     if asset is not None:
         _configure_texture(asset, channel, colour_data)
+        if "<UDIM>" in str(raw_path) or "<udim>" in str(raw_path):
+            _check_udim(asset, path, channel, warnings)
     _cache[key] = asset
     return asset
+
+
+def _first_udim_tile(record, path, channel, warnings):
+    """A concrete tile to hand Unreal, or None if there is not one.
+
+    Unreal finds the rest by itself: measured, importing tile.1001.png with
+    its siblings beside it produced one texture with virtual texture streaming
+    switched on, which is how the engine says "this is a UDIM set". So the only
+    work here is undoing the token the exporter writes, and the exporter
+    already kept the concrete path it came from.
+    """
+    concrete = str((record or {}).get("original_path") or "").strip()
+    if concrete and os.path.isfile(concrete):
+        return concrete
+    for tile in ("1001", "1011"):
+        candidate = path.replace("<UDIM>", tile).replace("<udim>", tile)
+        if os.path.isfile(candidate):
+            return candidate
+    warnings.append(
+        'Texture "{0}" is a UDIM set but no tile of it is on disk, so the '
+        'channel "{1}" kept its flat value.'.format(path, channel)
+    )
+    return None
+
+
+def _check_udim(asset, path, channel, warnings):
+    """Say so if Unreal did not recognise the set it was handed."""
+    if asset is None:
+        return
+    try:
+        streaming = asset.get_editor_property("virtual_texture_streaming")
+    except Exception:
+        return
+    if not streaming:
+        warnings.append(
+            'Texture "{0}" is a UDIM set, but Unreal imported it as a single '
+            'tile, so the channel "{1}" is not tiled. The other tiles have to '
+            "sit beside the first one.".format(os.path.basename(path), channel)
+        )
 
 
 def _configure_texture(asset, channel, colour_data):

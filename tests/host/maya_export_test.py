@@ -215,13 +215,19 @@ def build_scene():
 
     # A UDIM set, driven through Maya's own tiling mode rather than a token in
     # the path, which is the case a naive path scan gets wrong.
+    #
+    # Real PNGs, not the nonsense the other texture fixtures hold. Those were
+    # written when only the path travelled, and they still prove what they were
+    # meant to -- but Unreal *imports* a texture as an asset, and it refuses a
+    # file with no pixels in it. So the UDIM set, which is the one place a
+    # receiver has to do something clever with the file itself, carries images
+    # a host can actually open.
     for tile in (1001, 1002, 1011):
-        with open(os.path.join(OUT, "tile.{0}.tx".format(tile)), "w") as handle:
-            handle.write("tile {0}".format(tile))
+        _write_png(os.path.join(OUT, "tile.{0}.png".format(tile)))
     udim_node = cmds.shadingNode("file", asTexture=True, name="udimTex")
     cmds.setAttr(
         udim_node + ".fileTextureName",
-        os.path.join(OUT, "tile.1001.tx").replace("\\", "/"),
+        os.path.join(OUT, "tile.1001.png").replace("\\", "/"),
         type="string",
     )
     try:
@@ -2984,7 +2990,7 @@ def main():
     check("path carries the <UDIM> token, not tile 1001",
           "<UDIM>" in udim.get("path", ""), udim.get("path"))
     check("the concrete tile path is kept alongside",
-          udim.get("original_path", "").endswith("tile.1001.tx"),
+          udim.get("original_path", "").endswith("tile.1001.png"),
           udim.get("original_path"))
     check("detection credited to Maya, not to path guessing",
           udim.get("udim_mode") == "maya_uv_tiling_mode", udim.get("udim_mode"))
