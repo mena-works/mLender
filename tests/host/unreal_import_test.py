@@ -87,11 +87,18 @@ def main():
           os.path.normcase(os.path.abspath(where))
           == os.path.normcase(os.path.abspath(PACKAGE_PYTHON)),
           (where, PACKAGE_PYTHON))
-    if SHADOWED_BY and os.path.normcase(os.path.abspath(
-            os.path.dirname(SHADOWED_BY))) != os.path.normcase(
-                os.path.abspath(PACKAGE_PYTHON)):
-        print("  note: an installed plugin was loaded first and dropped: "
-              "{0}".format(SHADOWED_BY))
+    # Only worth saying when it was a *different* copy. A development install
+    # is a junction to this checkout, so the path differs while the files are
+    # the same, and a note every run about a copy that is not a copy is noise.
+    if SHADOWED_BY:
+        try:
+            same = os.path.samefile(os.path.dirname(SHADOWED_BY),
+                                    PACKAGE_PYTHON)
+        except Exception:
+            same = False
+        if not same:
+            print("  note: a different installed plugin was loaded first and "
+                  "dropped: {0}".format(SHADOWED_BY))
     from mlender_unreal import lights, transforms
 
     print("mLender build:", mlender_unreal.BUILD_VERSION)

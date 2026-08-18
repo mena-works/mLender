@@ -900,6 +900,11 @@ Kullanıcının elle doğrulaması gereken adımlar:
   `sys.path.insert` hiçbir şey yapmaz. Dakikalar önce yazılan fonksiyon
   "modülde yok" dedi. Gölgeleyeni düşür, yeniden import et, ve hangi kopyayı
   sınadığını **assert et**
+- ❌ Geliştirme kurulumunu **kopya** yapma; `<proje>/Plugins/mLender` repo'ya
+  bir junction olmalı. Kopya olduğunda editör bugünün kodunu değil kopyalandığı
+  günün kodunu yüklüyor ve bu iki kez gerçek hataya yol açtı. PowerShell:
+  `New-Item -ItemType Junction -Path <proje>\Plugins\mLender -Target <repo>\mlender_unreal`
+  (Git Bash üzerinden `cmd //c mklink` kaçış yüzünden çalışmıyor)
 - ❌ Unreal kamerasına Maya'nın ham film back'ini yazma; Unreal'de film fit
   yok, çerçeveyi filmback oranından kurar. Fit'i render aspect'ine karşı
   çözüp pişir (`tests/docs/film_fit.md`). Maya'nın FOV sorgusu bu soruya
