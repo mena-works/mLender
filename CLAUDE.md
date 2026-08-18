@@ -881,6 +881,15 @@ Kullanıcının elle doğrulaması gereken adımlar:
   dışarıda kalmıştı)
 - ❌ Testi repo kökünden çalıştırıp dağıtım artefaktını doğruladığını sanma;
   host çalışma dizinini `sys.path`'e koyar ve repo kopyası import edilir
+- ❌ Unreal host testinin repo'yu sınadığını varsayma; projede kurulu bir
+  mLender varsa `init_unreal.py` açılışta onu `sys.modules`'a koyar ve
+  `sys.path.insert` hiçbir şey yapmaz. Dakikalar önce yazılan fonksiyon
+  "modülde yok" dedi. Gölgeleyeni düşür, yeniden import et, ve hangi kopyayı
+  sınadığını **assert et**
+- ❌ Unreal kamerasına Maya'nın ham film back'ini yazma; Unreal'de film fit
+  yok, çerçeveyi filmback oranından kurar. Fit'i render aspect'ine karşı
+  çözüp pişir (`tests/docs/film_fit.md`). Maya'nın FOV sorgusu bu soruya
+  cevap vermez — fit'i de çözünürlüğü de yok sayıyor
 - ❌ Bir artefaktı **içeriğine bakarak** doğrulama; üç arşivi de içinde
   bulup "tamam" denen installer açılışta `no module named tkinter` ile öldü
   ve o haliyle release'e çıktı. PyInstaller **derleyen** yorumlayıcının

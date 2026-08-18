@@ -25,6 +25,37 @@ PACKAGE_PYTHON = os.path.join(REPO, "mlender_unreal", "Content", "Python")
 if PACKAGE_PYTHON not in sys.path:
     sys.path.insert(0, PACKAGE_PYTHON)
 
+
+def _use_the_checkout():
+    """Make sure this tests the repository, not a plugin installed beside it.
+
+    If the project has mLender in its Plugins folder and enabled, Unreal runs
+    that copy's init_unreal.py before this file exists, so mlender_unreal is
+    already in sys.modules and inserting a path changes nothing. Measured: a
+    copy that had been taken from the repository earlier in the day shadowed
+    it completely, and an edit made minutes before simply was not there --
+    the module reported no attribute that the file on disk plainly had.
+
+    Dropping the modules and importing again is the fix, and the check that
+    follows is the point: this test says which copy it exercised rather than
+    leaving it to be discovered.
+    """
+    shadowed = sys.modules.get("mlender_unreal")
+    origin = os.path.dirname(getattr(shadowed, "__file__", "") or "")
+    if shadowed is not None and not os.path.samefile(
+            os.path.dirname(origin) or ".", PACKAGE_PYTHON) \
+            if origin else False:
+        pass
+    if shadowed is not None:
+        for name in [n for n in sys.modules
+                     if n == "mlender_unreal" or n.startswith(
+                         "mlender_unreal.")]:
+            del sys.modules[name]
+    return origin
+
+
+SHADOWED_BY = _use_the_checkout()
+
 PACKAGE = os.path.join(tempfile.gettempdir(), "mlender_test", "mLender_01")
 
 failures = []
@@ -48,6 +79,19 @@ def close(label, got, want, tolerance):
 
 def main():
     import mlender_unreal
+
+    # Which copy is under test. A plugin installed into this project would
+    # otherwise answer for the repository and freeze whatever was last copied.
+    where = os.path.dirname(os.path.dirname(mlender_unreal.__file__))
+    check("the test is exercising the checkout, not an installed copy",
+          os.path.normcase(os.path.abspath(where))
+          == os.path.normcase(os.path.abspath(PACKAGE_PYTHON)),
+          (where, PACKAGE_PYTHON))
+    if SHADOWED_BY and os.path.normcase(os.path.abspath(
+            os.path.dirname(SHADOWED_BY))) != os.path.normcase(
+                os.path.abspath(PACKAGE_PYTHON)):
+        print("  note: an installed plugin was loaded first and dropped: "
+              "{0}".format(SHADOWED_BY))
     from mlender_unreal import lights, transforms
 
     print("mLender build:", mlender_unreal.BUILD_VERSION)
@@ -571,6 +615,71 @@ def main():
                   for w in result.get("warnings") or []),
               [w for w in result.get("warnings") or []
                if "layeredShader" in w][:1])
+
+    # Film fit, resolved against the render aspect.
+    #
+    # Maya frames with the film back *and* its fit *and* the resolution.
+    # Unreal's cine camera has no fit, so a raw film back only reproduces
+    # Maya's framing when the render happens to share its aspect -- and here
+    # it does not: a 36 x 24 back is 1.5 against a 1920 x 804 image.
+    render_record = package_data.get("render") or {}
+    width = float(render_record.get("width") or 0)
+    height = float(render_record.get("height") or 0)
+    pixel = float(render_record.get("pixel_aspect") or 1.0) or 1.0
+    if width > 0 and height > 0:
+        want_aspect = (width / height) * pixel
+        cine = []
+        for actor in (unreal.get_editor_subsystem(
+                unreal.EditorActorSubsystem).get_all_level_actors() or []):
+            if isinstance(actor, unreal.CineCameraActor):
+                cine.append(actor)
+        check("the scene brought cine cameras", bool(cine), len(cine))
+        off = []
+        for actor in cine:
+            filmback = actor.camera_component.filmback
+            if not filmback.sensor_height:
+                continue
+            got = filmback.sensor_width / filmback.sensor_height
+            if abs(got - want_aspect) > 0.001:
+                off.append((actor.get_actor_label(), round(got, 4)))
+        check("the film fit was resolved against the render aspect",
+              not off, (off, round(want_aspect, 4)))
+        # And the extent the fit promises to keep is the one that survived.
+        # Horizontal keeps the width, so the width must be Maya's own number;
+        # a fit resolved the wrong way round would still match the aspect
+        # above while framing something else entirely.
+        kept = []
+        for record in package_data.get("cameras") or []:
+            fit = str(record.get("film_fit") or "").lower()
+            actor = next(
+                (a for a in cine
+                 if a.get_actor_label() == record.get("name")), None)
+            if actor is None:
+                continue
+            filmback = actor.camera_component.filmback
+            source_w = float(record.get("sensor_width_mm") or 0)
+            source_h = float(record.get("sensor_height_mm") or 0)
+            if fit.startswith("horizontal"):
+                kept.append((record.get("name"), "width",
+                             abs(filmback.sensor_width - source_w) < 0.01))
+            elif fit.startswith("vertical"):
+                kept.append((record.get("name"), "height",
+                             abs(filmback.sensor_height - source_h) < 0.01))
+        check("and each fit kept the extent it names",
+              kept and all(ok for _n, _k, ok in kept),
+              [(n, k) for n, k, ok in kept if not ok] or kept)
+        # The render itself, which is the other half of the same question.
+        if result.get("render_config_path"):
+            config = unreal.load_asset(
+                result["render_config_path"].split(".")[0])
+            found = None
+            for setting in (config.get_all_settings() or []) if config else []:
+                if isinstance(setting, unreal.MoviePipelineOutputSetting):
+                    found = setting.get_editor_property("output_resolution")
+            check("the render config carries Maya's resolution",
+                  found is not None and found.x == int(width)
+                  and found.y == int(height),
+                  (found.x, found.y) if found else None)
 
     # AOVs, as a Movie Render Queue config. Render passes are not level
     # contents in Unreal, so what has to exist is the config the user renders

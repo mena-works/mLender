@@ -40,8 +40,64 @@ def _set_if_present(target, name, value):
         return False
 
 
-def apply_filmback(component, record, warnings):
-    """Sensor size in millimetres, which both applications state directly.
+def render_aspect(package_data):
+    """The aspect of the image the scene renders, or 0 if it says nothing.
+
+    Width over height times the pixel aspect, which is what the picture
+    actually is. Maya's own deviceAspectRatio is only a fallback: it is
+    bookkeeping the UI maintains, and setting width and height directly leaves
+    it stale -- measured on this repo's own fixture, which renders 1920 x 804
+    while still reporting a device aspect of 1.7778.
+    """
+    render = (package_data or {}).get("render") or {}
+    width = scalar(render.get("width"), 0.0)
+    height = scalar(render.get("height"), 0.0)
+    if width > 0.0 and height > 0.0:
+        return (width / height) * (scalar(render.get("pixel_aspect"), 1.0)
+                                   or 1.0)
+    return scalar(render.get("device_aspect"), 0.0)
+
+
+def fitted_filmback(width, height, fit, aspect):
+    """A Maya film back resolved against the render aspect.
+
+    Unreal's cine camera has no film fit. It frames on the filmback aspect
+    alone, so handing it Maya's raw back gives Maya's framing only when the
+    render happens to have the same aspect -- and on this repo's own fixture
+    it does not: a 36 x 24 back is 1.5 against a 2.388 image.
+
+    Which extent survives was measured by rendering a quad that exactly fills
+    the horizontal extent, at a wider and a narrower aspect than the back
+    (tests/docs/film_fit.md). Maya's FOV query cannot answer it: it ignores
+    both the fit and the resolution, and returned the same numbers for all
+    four fits.
+
+        fit           render wider     render narrower
+        Horizontal    keep width       keep width
+        Vertical      keep height      keep height
+        Fill          keep width       keep height
+        Overscan      keep height      keep width
+    """
+    if width <= 0.0 or height <= 0.0 or aspect <= 0.0:
+        return width, height
+    label = str(fit or "").strip().lower()
+    wider = aspect > (width / height)
+    if label.startswith("horizontal"):
+        keep_width = True
+    elif label.startswith("vertical"):
+        keep_width = False
+    elif label.startswith("overscan"):
+        keep_width = not wider
+    else:
+        # Fill, and anything unnamed: Maya's default behaviour.
+        keep_width = wider
+    if keep_width:
+        return width, width / aspect
+    return height * aspect, height
+
+
+def apply_filmback(component, record, warnings, aspect=0.0):
+    """Sensor size in millimetres, resolved against the render aspect.
 
     The struct is read, modified and written back: Unreal exposes filmback as a
     value type, so mutating what the getter returned changes nothing. That is
@@ -52,6 +108,19 @@ def apply_filmback(component, record, warnings):
     height = scalar(record.get("sensor_height_mm"), 0.0)
     if width <= 0.0 or height <= 0.0:
         return False
+    raw = (width, height)
+    width, height = fitted_filmback(
+        width, height, record.get("film_fit"), aspect
+    )
+    if aspect <= 0.0:
+        warnings.append(
+            'Camera "{0}" kept its Maya film back untouched: the package '
+            "carries no render resolution, so there is no aspect to fit it "
+            "to. If the render is not {1:.3f} the framing will differ from "
+            "Maya's.".format(
+                record.get("name") or "Camera", raw[0] / raw[1]
+            )
+        )
     filmback = component.filmback
     _set_if_present(filmback, "sensor_width", width)
     _set_if_present(filmback, "sensor_height", height)
@@ -88,7 +157,7 @@ def apply_focus(component, record, unreal_scale, warnings):
     return True
 
 
-def create_camera_actor(record, unreal_scale, warnings):
+def create_camera_actor(record, unreal_scale, warnings, aspect=0.0):
     location, rotation = unreal_transform(
         record.get("transform") or {}, unreal_scale
     )
@@ -121,7 +190,7 @@ def create_camera_actor(record, unreal_scale, warnings):
         component.lens_settings = lens
         _set_if_present(component, "current_focal_length", focal)
 
-    apply_filmback(component, record, warnings)
+    apply_filmback(component, record, warnings, aspect)
     apply_focus(component, record, unreal_scale, warnings)
 
     if record.get("orthographic"):
@@ -138,13 +207,19 @@ def create_camera_actor(record, unreal_scale, warnings):
 
 
 def import_cameras(package_data, unreal_scale, warnings):
+    # One aspect for every camera in the scene: Maya's film fit is
+    # resolved against the render resolution, and Unreal's cine camera
+    # has no fit of its own to do it with.
+    aspect = render_aspect(package_data)
     records = list((package_data or {}).get("cameras") or [])
     created = 0
     active = ""
     renderable = []
     for record in records:
         try:
-            actor = create_camera_actor(record, unreal_scale, warnings)
+            actor = create_camera_actor(
+                record, unreal_scale, warnings, aspect
+            )
             created += 1
             if record.get("renderable"):
                 renderable.append(actor.get_actor_label())

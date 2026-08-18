@@ -1647,3 +1647,41 @@ Düzeltmeler:
    arşivin de içinde olduğunu doğrulamadan "başarılı" demiyor.
 
 Yani bu hata bir daha sessizce release'e ulaşamaz.
+
+
+## Render aspect ve film fit (2.61.0)
+
+Soru soruldu: kamerada ve render ayarlarında aspect'i ayarlıyor muyuz? Ölçüm
+üç şey söyledi, ikisi iyi biri değil.
+
+* Blender: çözünürlük, pixel aspect ve kamera sensörü + `sensor_fit` — tam.
+* Unreal MRQ: `output_resolution` 1920×804 — tam.
+* Unreal kamerası: filmback **ham** geliyordu. `orthoCam` 36×24 yani 1.5, render
+  ise 2.388. Unreal'in cine kamerasında film fit yok; çerçeveyi filmback
+  oranından kuruyor. Yani Maya'nın çerçevelediği görüntü gelmiyordu.
+
+Fit artık filmback'e **pişiriliyor**. Hangi kenarın korunduğu render edilerek
+ölçüldü (`tests/docs/film_fit.md`), çünkü Maya'nın FOV sorgusu ne fit'i ne
+çözünürlüğü hesaba katıyor — dört fit de aynı sayıyı verdi, ölü rig.
+
+Sonuç: `orthoCam` 36 × 15.075, `shotCam` 32.239 × 13.5, üçü de render
+aspect'i 2.3881'e oturuyor.
+
+**Yan bulgu:** `device_aspect` kayıtta vardı ve **kimse okumuyordu**. Artık
+yedek olarak okunuyor, ama asıl kaynak `width/height × pixel_aspect` — çünkü
+device aspect bayatlayabiliyor ve bu depodaki fixture tam öyle: 1920×804 render
+ederken hâlâ 1.7778 diyor.
+
+## Kurulu kopya testi gölgeliyordu
+
+Bunu düzeltirken çok daha ciddi bir şey çıktı: `MyProject/Plugins/mLender`
+altında repo'dan kopyalanmış bir sürüm duruyor ve **enabled**. Unreal onun
+`init_unreal.py`'ını açılışta çalıştırıp `mlender_unreal`'ı `sys.modules`'a
+koyuyor; host testinin `sys.path.insert`'ı ondan sonra hiçbir şey yapmıyor.
+Dakikalar önce yazdığım fonksiyon "modülde yok" diye hata verdi, oysa dosyada
+duruyordu.
+
+Bu, deponun mayapy'de yaşadığı tuzağın aynadaki hali — orada repo kopyası
+kurulu modülün yerine geçiyordu, burada kurulu kopya repo'nun yerine geçiyor.
+Host testi artık gölgeleyen modülleri düşürüp yeniden import ediyor **ve hangi
+kopyayı sınadığını açıkça assert ediyor**; düşürdüğünü de not olarak yazıyor.

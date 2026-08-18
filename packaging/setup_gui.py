@@ -65,10 +65,12 @@ class InstallerApp(ctk.CTk):
         self.maya_versions = self.detect_maya()
         self.blender_versions = self.detect_blender()
         self.unreal_projects = self.detect_unreal_projects()
+        self.unreal_engines = self.detect_unreal_engines()
         
         self.maya_vars = {}
         self.blender_vars = {}
         self.unreal_vars = {}
+        self.unreal_engine_vars = {}
         
         self.build_ui()
         
@@ -193,6 +195,54 @@ class InstallerApp(ctk.CTk):
                     found[entry] = projects[0]
         return found
 
+    def detect_unreal_engines(self):
+        """Engine installs, which is where a plugin stops being per project.
+
+        A plugin under <Engine>/Engine/Plugins is available to every project
+        on that engine, and mLender enables itself, so nothing has to be done
+        per project at all. The cost is in the notes and it is real: the
+        folder is under Program Files, so writing there needs administrator
+        rights, and an engine update removes what is in it.
+
+        Read from the registry first, because an engine can be installed
+        anywhere, and fall back to the standard folder for the case where the
+        launcher wrote no key.
+        """
+        found = {}
+        try:
+            import winreg
+
+            for hive, flag in ((winreg.HKEY_LOCAL_MACHINE, 0),
+                               (winreg.HKEY_CURRENT_USER, 0)):
+                try:
+                    key = winreg.OpenKey(
+                        hive, r"SOFTWARE\EpicGames\Unreal Engine")
+                except OSError:
+                    continue
+                index = 0
+                while True:
+                    try:
+                        version = winreg.EnumKey(key, index)
+                    except OSError:
+                        break
+                    index += 1
+                    try:
+                        sub = winreg.OpenKey(key, version)
+                        path, _ = winreg.QueryValueEx(sub, "InstalledDirectory")
+                    except OSError:
+                        continue
+                    if path and os.path.isdir(os.path.join(path, "Engine")):
+                        found[version] = path
+        except Exception:
+            pass
+
+        for path in sorted(glob.glob(r"C:\Program Files\Epic Games\UE_*")):
+            if not os.path.isdir(os.path.join(path, "Engine")):
+                continue
+            version = os.path.basename(path).replace("UE_", "")
+            found.setdefault(version, path)
+        return found
+
     def build_ui(self):
         # Header
         header = ctk.CTkFrame(self, fg_color="transparent")
@@ -250,21 +300,34 @@ class InstallerApp(ctk.CTk):
 
         if not self.unreal_z:
             ctk.CTkLabel(main_frame, text="No Unreal plugin in this installer.", text_color="gray").pack(anchor="w", padx=10)
-        elif not self.unreal_projects:
+        else:
+            for version, root in sorted(self.unreal_engines.items()):
+                var = ctk.BooleanVar(value=False)
+                chk = ctk.CTkSwitch(
+                    main_frame,
+                    text="Unreal Engine {0}  -  every project".format(version),
+                    variable=var,
+                )
+                chk.pack(anchor="w", padx=10, pady=5)
+                self.unreal_engine_vars[version] = var
+            if self.unreal_engines:
+                ctk.CTkLabel(
+                    main_frame,
+                    text="Installing into the engine needs administrator rights, and an engine update removes it. Per project below survives updates.",
+                    text_color="gray", font=ctk.CTkFont(size=11),
+                    wraplength=520, justify="left",
+                ).pack(anchor="w", padx=10, pady=(0, 5))
+
+        if self.unreal_z and not self.unreal_projects:
             # Projects, not engines: the engine folder is under Program Files
             # and an engine update wipes what is in it.
             ctk.CTkLabel(main_frame, text="No Unreal projects found under Documents\\Unreal Projects.", text_color="gray").pack(anchor="w", padx=10)
-        else:
+        elif self.unreal_z:
             for name in sorted(self.unreal_projects):
                 var = ctk.BooleanVar(value=False)
                 chk = ctk.CTkSwitch(main_frame, text=name, variable=var)
                 chk.pack(anchor="w", padx=10, pady=5)
                 self.unreal_vars[name] = var
-            ctk.CTkLabel(
-                main_frame,
-                text="The plugin is enabled in the .uproject as well; without that Unreal loads it only after you turn it on.",
-                text_color="gray", font=ctk.CTkFont(size=11), wraplength=520, justify="left",
-            ).pack(anchor="w", padx=10, pady=(0, 5))
 
         # Footer
         footer = ctk.CTkFrame(self, fg_color="transparent")
@@ -357,10 +420,32 @@ class InstallerApp(ctk.CTk):
                 zf.extractall(addons_dir)
 
     def install_unreal(self):
-        selected = [k for k, v in self.unreal_vars.items() if v.get()]
-        if not selected or not self.unreal_z:
+        if not self.unreal_z:
             return
 
+        for version, var in self.unreal_engine_vars.items():
+            if not var.get():
+                continue
+            root = self.unreal_engines.get(version)
+            if not root:
+                continue
+            plugins_dir = os.path.join(root, "Engine", "Plugins")
+            self.after(0, lambda d=plugins_dir: self.status_lbl.configure(
+                text="Installing to {0}...".format(d)))
+            try:
+                replace_folder(os.path.join(plugins_dir, "mLender"))
+                with zipfile.ZipFile(self.unreal_z, "r") as archive:
+                    archive.extractall(plugins_dir)
+            except PermissionError:
+                # Program Files. Said plainly, because "it did not work" sends
+                # the user looking in the wrong place.
+                self.after(0, lambda v=version: self.status_lbl.configure(
+                    text="Unreal {0} needs administrator rights - run this "
+                         "installer as administrator, or install per "
+                         "project.".format(v),
+                    text_color="orange"))
+
+        selected = [k for k, v in self.unreal_vars.items() if v.get()]
         for name in selected:
             uproject = self.unreal_projects.get(name)
             if not uproject:
@@ -374,45 +459,12 @@ class InstallerApp(ctk.CTk):
             # Unreal reads from the .uplugin -- not the one the repository
             # uses. A previous build goes first, for the same reason it does
             # everywhere else.
+            # The project file is left alone. mLender enables itself, so
+            # there is nothing to add to it -- and a project file carries
+            # settings nobody wants an installer rewriting.
             replace_folder(os.path.join(plugins_dir, "mLender"))
             with zipfile.ZipFile(self.unreal_z, "r") as archive:
                 archive.extractall(plugins_dir)
-
-            self.enable_in_uproject(uproject)
-
-    def enable_in_uproject(self, uproject):
-        """Turn the plugin on in the project file.
-
-        Dropping the folder into Plugins/ is not enough: mLender ships
-        EnabledByDefault false, so the editor loads it only once it is
-        enabled. Doing it here is the same edit the Plugins window makes, and
-        it saves the user a restart they would otherwise spend finding out.
-
-        The rest of the file is read and written back untouched -- a project
-        file carries settings nobody wants an installer rewriting.
-        """
-        try:
-            with open(uproject, "r", encoding="utf-8") as handle:
-                data = json.load(handle)
-        except Exception:
-            return
-
-        plugins = data.get("Plugins")
-        if not isinstance(plugins, list):
-            plugins = []
-        for entry in plugins:
-            if isinstance(entry, dict) and entry.get("Name") == "mLender":
-                entry["Enabled"] = True
-                break
-        else:
-            plugins.append({"Name": "mLender", "Enabled": True})
-        data["Plugins"] = plugins
-
-        try:
-            with open(uproject, "w", encoding="utf-8") as handle:
-                json.dump(data, handle, indent=2)
-        except Exception:
-            pass
 
 
 def selftest(report_path):
@@ -437,6 +489,9 @@ def selftest(report_path):
         "blender_versions": InstallerApp.detect_blender(None),
         "unreal_projects": sorted(
             InstallerApp.detect_unreal_projects(None)
+        ),
+        "unreal_engines": sorted(
+            InstallerApp.detect_unreal_engines(None)
         ),
     }
     with open(report_path, "w", encoding="utf-8") as handle:

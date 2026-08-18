@@ -465,6 +465,37 @@ path only runs for packages sent with baking off. That is also why the host
 test imports a second, unbaked package at the end: the stack does not exist in
 the first one.
 
+### Framing: film fit against the render aspect
+
+Maya does not frame with the film back alone. It frames with the back, its
+**film fit**, and the render resolution. Blender models that directly —
+`sensor_fit` is the same idea — so its camera takes Maya's back untouched.
+
+Unreal's cine camera has no fit. It frames on the filmback aspect, so handing
+it Maya's raw back reproduces Maya's framing only when the render happens to
+share that aspect. On this repo's own fixture it does not: a 36 x 24 back is
+1.5 against a 1920 x 804 image. So the fit is **resolved into the filmback**
+before it is written.
+
+Which extent each fit keeps was measured by rendering, because Maya's own FOV
+query ignores both the fit and the resolution and answered identically for all
+four:
+
+| fit | render wider than the back | render narrower |
+|---|---|---|
+| Horizontal | width | width |
+| Vertical | height | height |
+| Fill | width | height |
+| Overscan | height | width |
+
+The aspect comes from `width / height × pixel_aspect`, which is what the image
+actually is. Maya's `deviceAspectRatio` is only a fallback: the UI maintains
+it, and setting width and height directly leaves it stale — this repo's fixture
+renders 1920 x 804 while still reporting 1.7778.
+
+The resolution itself rides on the Movie Render Queue config, since that is
+where a render resolution lives in Unreal.
+
 ### AOVs, as a render config
 
 Render passes are not level contents in Unreal — they are Movie Render Queue
