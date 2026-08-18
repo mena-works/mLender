@@ -401,19 +401,59 @@ receiving end:
 | sheen, subsurface radius and scale | no Unreal input |
 | skeleton root motion | the take plays; re-keying the sampled world truth on top of it would double the motion |
 | Maya constraints | Unreal has no equivalent, and the FBX bake already carries the motion they produced |
-| AOVs | render passes in Unreal are Movie Render Queue configuration, and this engine build does not ship MRQ |
+
+### AOVs, as a render config
+
+Render passes are not level contents in Unreal — they are Movie Render Queue
+configuration. So the AOVs become a `MoviePipelinePrimaryConfig` asset in
+`/Game/mLender/Render`: a deferred pass, an EXR output so the passes are layers
+of one file, and one generated post-process material per AOV.
+
+The mapping is by **quantity**, not by name, and that is the whole discipline.
+Six of them name something Unreal writes into its GBuffer and carry exactly:
+
+| Arnold | Unreal |
+|---|---|
+| `Z` | SceneDepth |
+| `N` | WorldNormal |
+| `albedo` | BaseColor |
+| `motionvector` | Velocity |
+| `opacity` | Opacity |
+| `crypto_object` | the ObjectId render pass |
+
+The rest name a **light transport** result. Arnold's `diffuse` is the diffuse
+lighting response, not the diffuse colour, and Unreal's GBuffer holds the
+surface property instead — `PPI_DIFFUSE_COLOR` next to a request for `diffuse`
+looks like a match and is a different image. Those are reported by name with
+what they are, rather than filled with something plausible.
+
+The post-process materials are generated rather than pulled from
+`/Engine/BufferVisualization`: measured, that path lists zero assets in this
+build, and a generated material is reviewable the way the masters are.
 
 ### Correction nodes
 
 Every texture slot in the master carries a small correction stack — a `Power`
-and a switched `Clamp` — that is identity until a material sets it. Two Maya
-nodes are rebuilt into it and the rest are still reported, deliberately: these
-two have one meaning each. `gammaCorrect` is `in^(1/gamma)`, which is why the
+and a switched `Clamp` — that is identity until a material sets it. Three Maya
+nodes are rebuilt into it and the rest are still reported. `gammaCorrect` is `in^(1/gamma)`, which is why the
 exponent Unreal gets is the **reciprocal** of the number Maya holds, and a clamp
-is a clamp. A colour correct node carries exposure, gain, offset, contrast,
-saturation and hue at once, and guessing at Arnold's composition order would
-produce a plausible picture that is wrong; it stays reported by name until
-somebody bakes the measurement the way `layeredTexture` was.
+is a clamp. `aiColorCorrect` was measured rather than guessed at, because it
+carries exposure, gain, offset, contrast, saturation and hue at once and the
+order they compose in decides the picture. Rendered one parameter at a time
+with Arnold, the chain is:
+
+```text
+invert -> gamma -> contrast(pivot) -> exposure -> multiply -> add
+```
+
+Everything after the gamma is affine, so the whole tail folds into one multiply
+and one add — which is why the stack needs two more nodes rather than six. The
+full table is in `tests/docs/color_correct.md`.
+
+`saturation` and `hueShift` work in HSV, not on channels, and a gain that
+differs per channel cannot ride a one-scalar stack; both are named in a warning
+rather than truncated to the red channel. So is `remapValue`, whose ramp is the
+whole point of it.
 
 The clamp is switched rather than always on: clamping to 0..1 is not identity
 for a channel that legitimately goes past one, and emission does.

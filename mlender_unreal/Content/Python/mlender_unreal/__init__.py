@@ -51,6 +51,7 @@ SUBMODULES = (
     "sets",
     "asrig",
     "animation",
+    "aovs",
     "scene",
     "report",
     "importer",
@@ -77,6 +78,7 @@ from . import instancers  # noqa: E402,F401
 from . import sets  # noqa: E402,F401
 from . import asrig  # noqa: E402,F401
 from . import animation  # noqa: E402,F401
+from . import aovs  # noqa: E402,F401
 from . import scene  # noqa: E402,F401
 from . import report  # noqa: E402,F401
 from . import importer  # noqa: E402,F401

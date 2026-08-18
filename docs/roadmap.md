@@ -1427,3 +1427,34 @@ Unreal'de 1/2.2 = 0.4545 olarak doğrulandı.
 Uygulanamayan zincir artık texture yüklensin yüklenmesin bildiriliyor: ilk
 sürüm yalnız çalışan texture'ın yanında bildiriyordu, o yüzden sahnedeki tek
 colour correct node'u hakkında **hiçbir şey** söylemiyordu.
+
+
+## AOV'lar ve aiColorCorrect (2.56.0)
+
+**MRQ vardı.** Önceki turda "bu motor build'inde MRQ yok" diye yazmıştım;
+yanlıştı — kullanıcı düzeltti ve log zaten kendi `init_unreal.py`'ını
+çalıştırdığını gösteriyordu. AOV'lar artık
+`/Game/mLender/Render/ML_RenderConfig` altında bir `MoviePipelinePrimaryConfig`:
+deferred pass, EXR çıkışı (AOV'lar tek dosyanın katmanları olsun diye), ve AOV
+başına üretilen bir post-process materyali.
+
+Eşleme **isimle değil nicelikle**: Z→SceneDepth, N→WorldNormal,
+albedo→BaseColor, motionvector→Velocity, opacity→Opacity, crypto→ObjectId
+pass. Kalanlar ışık-taşıma sonucu; Arnold'un `diffuse`'u difüz **cevabı**,
+Unreal'in DiffuseColor buffer'ı ise yüzey özelliği — aynı ada sahip iki farklı
+görüntü. Onlar ne oldukları yazılarak bildiriliyor.
+
+**aiColorCorrect ölçüldü** (`tests/docs/color_correct.md`). Rig'in kendisi bir
+kez yanlıştı: `convertSolidTx` ile bake edilen on iki satırın hepsi 0.5 gri
+çıktı — kimlik satırı dahil, ve ele veren buydu. O bake Maya'nın kendi
+değerlendirmesi ve `aiColorCorrect` bir **Arnold** node'u; `layeredTexture`'da
+çalışması o node'un Maya'nın olmasındandı. Arnold node'u `.ass` + `kick` ile
+ölçüldü, yüzey `aiFlat`.
+
+Zincir: `invert → gamma → contrast(pivot) → exposure → multiply → add`. Dokuz
+çiftin dokuzu da iki olası bileşimden tam birine eşit çıktı. Gamma'dan
+sonraki her şey afin olduğu için tek bir çarpan ve tek bir toplama katlanıyor —
+yığına altı değil **iki** node ekliyor.
+
+HSV'de çalışan `saturation`/`hueShift` ve kanal başına farklı `multiply`/`add`
+katlanmıyor; kırmızı kanala kırpmak yerine adıyla bildiriliyorlar.

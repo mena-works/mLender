@@ -18,6 +18,7 @@ from .constants import (
 from .alembic import import_alembic
 from .asrig import apply_as_rigs
 from .animation import import_animation
+from .aovs import build_render_config
 from .cameras import import_cameras
 from .curves import import_curves
 from .empties import import_transforms
@@ -211,6 +212,12 @@ def import_scene_package(
         package_data, unreal_scale, metre_scale, power_scale, warnings
     )
 
+    # Render passes are Movie Render Queue configuration, not level contents,
+    # so this produces the config the user renders with rather than an actor.
+    aov_result = build_render_config(
+        package_data, animation_result.get("sequence_path"), warnings
+    )
+
     _report_uncarried(package_data, warnings)
 
     result = {
@@ -243,6 +250,9 @@ def import_scene_package(
         "animation_track_count": animation_result["track_count"],
         "animation_key_count": animation_result["key_count"],
         "skeletal_animated": animation_result.get("skeletal_animated", 0),
+        "render_config_path": aov_result["render_config_path"],
+        "aov_passes": aov_result["aov_passes"],
+        "aov_reported": aov_result["aov_reported"],
         "set_count": set_result["set_count"],
         "layer_count": set_result["layer_count"],
         "assignments": assignments,
@@ -273,9 +283,6 @@ def _report_uncarried(package_data, warnings):
         ("constraints", "Maya constraints",
          "Unreal has no equivalent; the FBX bake already carries the motion "
          "they produced"),
-        ("aovs", "AOVs",
-         "render passes in Unreal are Movie Render Queue configuration, which "
-         "this engine build does not ship"),
     )
     for key, label, reason in kinds:
         items = package_data.get(key) or []

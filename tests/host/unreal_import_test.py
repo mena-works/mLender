@@ -330,6 +330,145 @@ def main():
               [w for w in result.get("warnings") or []
                if "correction" in w.lower()][:1])
 
+    # A colour correct node whose tail folds into the correction stack. The
+    # chain Arnold runs is invert, gamma, contrast, exposure, multiply, add,
+    # and everything after the gamma is affine -- measured, not assumed, in
+    # tests/docs/color_correct.md. The expected numbers below come from that
+    # measurement, not from the code under test.
+    fold = None
+    for mesh_record in package_data.get("meshes") or []:
+        for material_record in mesh_record.get("materials") or []:
+            for channel_record in (
+                    material_record.get("channels") or {}).values():
+                texture = (channel_record or {}).get("texture") or {}
+                for entry in texture.get("corrections") or []:
+                    if entry.get("type") != "aiColorCorrect":
+                        continue
+                    values = entry.get("parameters") or {}
+                    multiply = values.get("multiply")
+                    add = values.get("add")
+                    uniform = all(
+                        not isinstance(v, list) or len(set(
+                            round(x, 6) for x in v)) == 1
+                        for v in (multiply, add) if v is not None
+                    )
+                    if uniform and str(texture.get("path") or "").endswith(
+                            ".png"):
+                        fold = (material_record, values)
+                        break
+                if fold:
+                    break
+            if fold:
+                break
+        if fold:
+            break
+    check("the package has a foldable colour correct chain", fold is not None)
+    if fold is not None:
+        material_record, values = fold
+        instance = unreal.EditorAssetLibrary.load_asset(
+            "/Game/mLender/Materials/ML_{0}".format(
+                material_record.get("material"))
+        )
+        check("its instance exists", instance is not None,
+              material_record.get("material"))
+        if instance is not None:
+            library = unreal.MaterialEditingLibrary
+
+            def first(value, fallback):
+                if isinstance(value, list) and value:
+                    return float(value[0])
+                return float(value) if value is not None else fallback
+
+            gamma = first(values.get("gamma"), 1.0)
+            contrast = first(values.get("contrast"), 1.0)
+            pivot = first(values.get("contrast_pivot"), 0.18)
+            exposure = 2.0 ** first(values.get("exposure"), 0.0)
+            multiply = first(values.get("multiply"), 1.0)
+            offset = first(values.get("add"), 0.0)
+            want_scale = contrast * exposure * multiply
+            want_offset = (pivot * (1.0 - contrast) * exposure * multiply
+                           + offset)
+            got_gamma = library.get_material_instance_scalar_parameter_value(
+                instance, "BaseColorMapGamma")
+            got_scale = library.get_material_instance_scalar_parameter_value(
+                instance, "BaseColorMapCorrScale")
+            got_offset = library.get_material_instance_scalar_parameter_value(
+                instance, "BaseColorMapCorrOffset")
+            check("the gamma folded to the reciprocal",
+                  abs(got_gamma - 1.0 / gamma) < 0.001,
+                  (round(got_gamma, 5), round(1.0 / gamma, 5)))
+            check("contrast, exposure and gain folded into one scale",
+                  abs(got_scale - want_scale) < 0.001,
+                  (round(got_scale, 5), round(want_scale, 5)))
+            check("and the offset came with them",
+                  abs(got_offset - want_offset) < 0.001,
+                  (round(got_offset, 5), round(want_offset, 5)))
+    # A gain that differs per channel cannot ride a one-scalar stack, and
+    # taking the red channel quietly would lose the other two.
+    check("a per-channel gain is reported rather than truncated",
+          any("per-channel" in w for w in result.get("warnings") or []),
+          [w for w in result.get("warnings") or [] if "per-channel" in w][:1])
+
+    # AOVs, as a Movie Render Queue config. Render passes are not level
+    # contents in Unreal, so what has to exist is the config the user renders
+    # with -- and the mapping has to be by quantity, not by name: Unreal has a
+    # DiffuseColor buffer and Arnold's "diffuse" AOV is not it.
+    aov_records = package_data.get("aovs") or []
+    if aov_records:
+        check("a render config was built",
+              bool(result.get("render_config_path")),
+              result.get("render_config_path"))
+        config = None
+        if result.get("render_config_path"):
+            config = unreal.load_asset(
+                result["render_config_path"].split(".")[0])
+        check("and it loads", config is not None)
+        if config is not None:
+            settings = config.get_all_settings() or []
+            kinds = [type(setting).__name__ for setting in settings]
+            check("it has a deferred pass to render",
+                  any("DeferredPass" in kind for kind in kinds), kinds)
+            check("and an EXR output, so the AOVs are layers of one file",
+                  any("EXR" in kind for kind in kinds), kinds)
+            wanted_crypto = any(
+                str(record.get("name") or "").lower().startswith("crypto")
+                for record in aov_records
+            )
+            if wanted_crypto:
+                check("cryptomatte became the object id pass",
+                      any("ObjectId" in kind for kind in kinds), kinds)
+            materials = []
+            for setting in settings:
+                if isinstance(setting, unreal.MoviePipelineDeferredPassBase):
+                    materials = setting.get_editor_property(
+                        "additional_post_process_materials") or []
+            names = [entry.get_editor_property("name") for entry in materials]
+            # The quantities Unreal really holds. Depth and normal are the two
+            # a compositor asks for first.
+            for wanted in ("Z", "N"):
+                if any(str(r.get("name")) == wanted for r in aov_records):
+                    check("the " + wanted + " AOV became a pass",
+                          wanted in names, names)
+            check("every AOV pass has its material",
+                  all(entry.get_editor_property("material") is not None
+                      for entry in materials),
+                  names)
+            check("depth is written at high precision, not quantised to 8 bit",
+                  all(entry.get_editor_property("high_precision_output")
+                      for entry in materials),
+                  names)
+        # And the ones that are a different quantity must be named, not
+        # quietly filled with the buffer that shares their name.
+        check("a light transport AOV is reported rather than faked",
+              any("diffuse" in w and "different image" in w
+                  for w in result.get("warnings") or []),
+              [w for w in result.get("warnings") or [] if "AOV" in w][:1])
+        check("the importer counted what it carried and what it did not",
+              (result.get("aov_passes", 0) + result.get("aov_reported", 0))
+              == len(aov_records),
+              (result.get("aov_passes"), result.get("aov_reported"),
+               len(aov_records)))
+
     # The FBX brings an AnimSequence and used to leave it in the content
     # browser: measured, four skeletal actors sat in ANIMATION_BLUEPRINT mode
     # with no asset while Take_001 existed beside them, so a skinned character

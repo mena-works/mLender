@@ -10,7 +10,7 @@ Everything under "measured" was read off a live Unreal 5.8.1 session or solved
 from a probe, never guessed. tests/docs/unreal_calibration.md records how.
 """
 
-BUILD_VERSION = "2.55.0"
+BUILD_VERSION = "2.56.0"
 
 TOOL_NAME = "mLender"
 
@@ -45,6 +45,7 @@ MESH_CONTENT_PATH = CONTENT_ROOT + "/Meshes"
 MATERIAL_CONTENT_PATH = CONTENT_ROOT + "/Materials"
 TEXTURE_CONTENT_PATH = CONTENT_ROOT + "/Textures"
 SEQUENCE_CONTENT_PATH = CONTENT_ROOT + "/Sequences"
+AOV_CONTENT_PATH = CONTENT_ROOT + "/Render"
 IES_CONTENT_PATH = CONTENT_ROOT + "/IES"
 MASTER_MATERIAL_NAME = ASSET_PREFIX + "Master"
 MASTER_MATERIAL_PATH = MATERIAL_CONTENT_PATH + "/" + MASTER_MATERIAL_NAME
@@ -56,6 +57,9 @@ CAMERA_FOLDER = ACTOR_FOLDER_ROOT + "/mLender Cameras"
 
 # The Level Sequence that carries light, camera and visibility keys.
 ANIMATION_SEQUENCE_NAME = "ML_Sequence"
+
+# The Movie Render Queue config that carries the scene AOVs.
+RENDER_CONFIG_NAME = "ML_RenderConfig"
 
 # --------------------------------------------------------------- measured
 # Maya Y-up right-handed to Unreal Z-up left-handed is a plain Y/Z swap with no
@@ -197,13 +201,21 @@ MASTER_TEXTURE_PARAMETERS = {
 # composition order would produce a plausible picture that is wrong; it stays
 # reported until somebody bakes the measurement the way layeredTexture was.
 CORRECTION_GAMMA_SUFFIX = "Gamma"
+# Everything aiColorCorrect does after its gamma is affine, so the
+# tail folds into one multiply and one add. The order that makes that
+# true was measured, not assumed: tests/docs/color_correct.md.
+#   A = contrast * 2^exposure * multiply
+#   B = pivot * (1 - contrast) * 2^exposure * multiply + add
+CORRECTION_SCALE_SUFFIX = "CorrScale"
+CORRECTION_OFFSET_SUFFIX = "CorrOffset"
 CORRECTION_CLAMP_MIN_SUFFIX = "ClampMin"
 CORRECTION_CLAMP_MAX_SUFFIX = "ClampMax"
 CORRECTION_CLAMP_SWITCH_SUFFIX = "ClampUse"
 
 # What this build can rebuild. Anything else in a chain is reported, and so is
 # a chain that puts these in an order the fixed stack cannot express.
-REBUILT_CORRECTIONS = ("gammaCorrect", "clamp")
+REBUILT_CORRECTIONS = ("gammaCorrect", "clamp",
+                       "aiColorCorrect")
 
 MASTER_SWITCH_SUFFIX = "Use"
 

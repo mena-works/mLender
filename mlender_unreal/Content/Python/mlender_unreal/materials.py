@@ -28,6 +28,8 @@ from .constants import (
     CORRECTION_CLAMP_MIN_SUFFIX,
     CORRECTION_CLAMP_SWITCH_SUFFIX,
     CORRECTION_GAMMA_SUFFIX,
+    CORRECTION_OFFSET_SUFFIX,
+    CORRECTION_SCALE_SUFFIX,
     ASSET_PREFIX,
     BLEND_MODE_MASKED,
     BLEND_MODE_OPAQUE,
@@ -267,6 +269,27 @@ def _correction_stack(material, parameter, sampler, x, y):
     library.connect_material_expressions(sampler, "", power, "Base")
     library.connect_material_expressions(exponent, "", power, "Exponent")
 
+    # Everything a colour correct node does after its gamma -- contrast,
+    # exposure, multiply, add -- is affine, so the whole tail is one multiply
+    # and one add. Identity until a material sets them.
+    head = power
+    scale = _scalar_parameter(
+        material, parameter + CORRECTION_SCALE_SUFFIX, 1.0, x - 200, y - 60
+    )
+    times = _expression(material, "MaterialExpressionMultiply", x + 100, y)
+    if scale is not None and times is not None:
+        library.connect_material_expressions(head, "", times, "A")
+        library.connect_material_expressions(scale, "", times, "B")
+        head = times
+    offset = _scalar_parameter(
+        material, parameter + CORRECTION_OFFSET_SUFFIX, 0.0, x - 200, y - 120
+    )
+    plus = _expression(material, "MaterialExpressionAdd", x + 160, y)
+    if offset is not None and plus is not None:
+        library.connect_material_expressions(head, "", plus, "A")
+        library.connect_material_expressions(offset, "", plus, "B")
+        head = plus
+
     low = _scalar_parameter(
         material, parameter + CORRECTION_CLAMP_MIN_SUFFIX, 0.0,
         x - 200, y + 120
@@ -281,13 +304,13 @@ def _correction_stack(material, parameter, sampler, x, y):
         x - 200, y + 240
     )
     if None in (low, high, clamp, use):
-        return power
-    library.connect_material_expressions(power, "", clamp, "Input")
+        return head
+    library.connect_material_expressions(head, "", clamp, "Input")
     library.connect_material_expressions(low, "", clamp, "Min")
     library.connect_material_expressions(high, "", clamp, "Max")
     # Switched rather than always on: a clamp to 0..1 is not identity for a
     # channel that legitimately goes past one, and emission does.
-    return _lerp(material, power, clamp, use, x + 400, y) or clamp
+    return _lerp(material, head, clamp, use, x + 400, y) or clamp
 
 
 def _build_master(surface_class, warnings):
@@ -653,58 +676,128 @@ def _channel_is_live(channels, channel):
             or bool(channel_texture_path(gate_record)))
 
 
+def _first(value, fallback):
+    """A Maya colour attribute arrives as a triple; a scalar arrives alone."""
+    if isinstance(value, (list, tuple)):
+        return scalar(value[0], fallback) if value else fallback
+    return scalar(value, fallback)
+
+
+def _is_uniform(value):
+    """Whether a colour attribute holds the same number in all channels.
+
+    The correction stack carries one scalar per slot, so a gain of
+    (2, 1, 0.5) cannot ride on it. Taking the red channel and going quiet
+    would be a silent loss of the other two.
+    """
+    if not isinstance(value, (list, tuple)) or len(value) < 2:
+        return True
+    first = scalar(value[0], 0.0)
+    return all(abs(scalar(item, 0.0) - first) < 1e-6 for item in value[1:])
+
+
 def apply_corrections(instance, channel_record, parameter):
     """Set the correction parameters from a Maya chain.
 
     Returns the correction kinds this build did not rebuild, so the caller can
     name them rather than report a count.
 
-    Two nodes are rebuilt and the rest are not, deliberately. These two have
-    one meaning each: gammaCorrect is in^(1/gamma) -- already measured for the
-    Blender receiver, where the same-named node is in^gamma -- and a clamp is a
-    clamp. A colour correct node carries exposure, gain, offset, contrast,
-    saturation and hue at once, and guessing Arnold's composition order would
-    produce a plausible picture that is wrong.
+    The model is deliberately small: one gamma, then one affine. That is
+    exactly what a measured aiColorCorrect collapses to -- its chain runs
+    invert, gamma, contrast, exposure, multiply, add, and everything after the
+    gamma is affine (tests/docs/color_correct.md). A gammaCorrect folds into
+    the same gamma and a clamp rides on the end.
+
+    What will not fold says so instead of being approximated:
+
+    * saturation and hue work in HSV, not on channels
+    * a second gamma arriving after an affine step cannot be composed with it
+    * invert sits before the gamma, so it only folds when the gamma is idle
     """
     texture = (channel_record or {}).get("texture") or {}
     chain = texture.get("corrections") or []
     if not chain:
         return []
+
     unhandled = []
     gamma = 1.0
+    scale = 1.0
+    shift = 0.0
     clamp_low = None
     clamp_high = None
+
+    def affine_is_identity():
+        return abs(scale - 1.0) < 1e-6 and abs(shift) < 1e-6
+
     for entry in chain:
         kind = str((entry or {}).get("type") or "")
         parameters = (entry or {}).get("parameters") or {}
+
         if kind == "gammaCorrect":
-            value = parameters.get("gamma")
-            if isinstance(value, (list, tuple)) and value:
-                value = value[0]
-            value = scalar(value, 1.0)
-            if value:
-                # Two gammas compose: in^(1/a)^(1/b) is in^(1/ab).
-                gamma = gamma * value
+            value = _first(parameters.get("gamma"), 1.0)
+            if not value:
+                continue
+            if not affine_is_identity():
+                unhandled.append("gammaCorrect after another correction")
+                continue
+            gamma = gamma * value
+
         elif kind == "clamp":
-            low = parameters.get("clamp_min")
-            high = parameters.get("clamp_max")
-            if isinstance(low, (list, tuple)) and low:
-                low = low[0]
-            if isinstance(high, (list, tuple)) and high:
-                high = high[0]
-            clamp_low = scalar(low, 0.0)
-            clamp_high = scalar(high, 1.0)
+            clamp_low = _first(parameters.get("clamp_min"), 0.0)
+            clamp_high = _first(parameters.get("clamp_max"), 1.0)
+
+        elif kind == "aiColorCorrect":
+            for name, identity in (("saturation", 1.0), ("hue_shift", 0.0)):
+                value = scalar(parameters.get(name), identity)
+                if abs(value - identity) > 1e-4:
+                    unhandled.append("aiColorCorrect " + name)
+
+            node_gamma = scalar(parameters.get("gamma"), 1.0)
+            if node_gamma and abs(node_gamma - 1.0) > 1e-6:
+                if not affine_is_identity():
+                    unhandled.append("aiColorCorrect gamma after another "
+                                     "correction")
+                else:
+                    gamma = gamma * node_gamma
+
+            if parameters.get("invert"):
+                if abs(gamma - 1.0) > 1e-6 or not affine_is_identity():
+                    unhandled.append("aiColorCorrect invert before a gamma")
+                else:
+                    # out = a*(1-x) + b, which is (-a)*x + (a+b).
+                    scale = -scale
+                    shift = shift - scale
+
+            for name in ("multiply", "add"):
+                if not _is_uniform(parameters.get(name)):
+                    unhandled.append(
+                        "aiColorCorrect per-channel " + name
+                    )
+            contrast = scalar(parameters.get("contrast"), 1.0)
+            pivot = scalar(parameters.get("contrast_pivot"), 0.18)
+            exposure = 2.0 ** scalar(parameters.get("exposure"), 0.0)
+            multiply = _first(parameters.get("multiply"), 1.0)
+            offset = _first(parameters.get("add"), 0.0)
+            step_scale = contrast * exposure * multiply
+            step_shift = pivot * (1.0 - contrast) * exposure * multiply + offset
+            scale = scale * step_scale
+            shift = shift * step_scale + step_shift
+
         else:
             unhandled.append(kind or "unknown")
 
     if not parameter:
-        # No texture slot to correct -- the caller still wants the list of
-        # kinds so it can name them.
+        # No texture slot to correct; the caller still wants the names.
         return unhandled
-    if gamma and gamma != 1.0:
+
+    if gamma and abs(gamma - 1.0) > 1e-6:
         # Unreal's Power is in^exponent, so the exponent is the reciprocal.
         _set_scalar(instance, parameter + CORRECTION_GAMMA_SUFFIX,
                     1.0 / float(gamma))
+    if abs(scale - 1.0) > 1e-6:
+        _set_scalar(instance, parameter + CORRECTION_SCALE_SUFFIX, scale)
+    if abs(shift) > 1e-6:
+        _set_scalar(instance, parameter + CORRECTION_OFFSET_SUFFIX, shift)
     if clamp_low is not None:
         _set_scalar(instance, parameter + CORRECTION_CLAMP_MIN_SUFFIX,
                     clamp_low)

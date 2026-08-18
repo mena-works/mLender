@@ -240,6 +240,26 @@ def build_scene():
     cmds.connectAttr(corr_clamp + ".output", corr_shader + ".baseColor",
                      force=True)
 
+    # A colour correct node whose whole tail folds into one multiply and one
+    # add. The measured chain is invert, gamma, contrast, exposure, multiply,
+    # add (tests/docs/color_correct.md), so these values have a single right
+    # answer on the other side and the receiver can be checked against it
+    # rather than against its own arithmetic.
+    fold_transform, fold_shader = shaded_cube("ccFoldCube", "aiStandardSurface")
+    fold_png = os.path.join(OUT, "ccfold_basecolor.png").replace("\\", "/")
+    _write_png(fold_png)
+    fold_file = cmds.shadingNode("file", asTexture=True, name="ccFoldTex")
+    cmds.setAttr(fold_file + ".fileTextureName", fold_png, type="string")
+    fold_cc = cmds.shadingNode("aiColorCorrect", asUtility=True,
+                               name="ccFoldCorrect")
+    cmds.connectAttr(fold_file + ".outColor", fold_cc + ".input", force=True)
+    cmds.setAttr(fold_cc + ".gamma", 2.2)
+    cmds.setAttr(fold_cc + ".exposure", 1.0)
+    cmds.setAttr(fold_cc + ".multiply", 1.5, 1.5, 1.5, type="double3")
+    cmds.setAttr(fold_cc + ".add", 0.05, 0.05, 0.05, type="double3")
+    cmds.connectAttr(fold_cc + ".outColor", fold_shader + ".baseColor",
+                     force=True)
+
     # A UDIM set, driven through Maya's own tiling mode rather than a token in
     # the path, which is the case a naive path scan gets wrong.
     #
@@ -1428,7 +1448,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("58 meshes exported", payload["mesh_count"] == 58,
+    check("59 meshes exported", payload["mesh_count"] == 59,
           payload["mesh_count"])
     # The locator, the empty null, the nested locator, the group holding
     # only a curve, and the two shapeless FKIK switchers (root and NSRig:).
