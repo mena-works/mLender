@@ -815,6 +815,12 @@ Kullanıcının elle doğrulaması gereken adımlar:
   `set_range`, `set_playback_start/end` ve oynatma konumu **hepsi tick**.
   Ölçüldü: 24 karede 100→900 anahtarlanan sekans tick 12000'de 500,
   "kare 12"de 100.40 okuyor. Display rate yalnız cetveli adlandırır
+- ❌ Mesh animasyonunun FBX'ten doğru geldiğini varsayma; Interchange onu
+  kendi Level Sequence'ına, her anahtarı **kare numarasını tick olarak**
+  yazarak koyuyor. Ölçüldü: 520 karelik hareket tick 1..519'da, yani ilk
+  karenin ellide birinde bitiyor ve "hiç hareket yok" gibi görünüyor.
+  Anahtarları geri okuyup doğru zaman tabanıyla yaz, ve sıkışmayı **tespit et**
+  — varsayarsan düzelmiş bir motorda animasyonu bin katına gerersin
 - ❌ Bir kanalı ağırlığına bakmadan "kayboldu" diye bildirme; `coat_ior`
   varsayılanı 1.5 olduğu için coat kapalıyken bile uyarı çıkıyordu ve 31
   materyalin 28'i sahte uyarıydı, üç gerçeği gömüyordu

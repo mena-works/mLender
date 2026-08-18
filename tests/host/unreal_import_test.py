@@ -1100,6 +1100,40 @@ def main():
                       [w for w in result.get("warnings") or []
                        if "does not animate it" in w][:1])
 
+            # Object motion, which does not ride in the package at all --
+            # meshes carry their animation inside the FBX. Interchange
+            # imports it into a sequence of its own with every key written at
+            # its frame number as a *tick*, so a move that spans the whole
+            # shot happens inside the first fiftieth of a frame and is over
+            # before frame one. It reads exactly like nothing moved, which is
+            # how it was reported. The keys are retimed onto this sequence, so
+            # what has to be true is that the object is in a different place
+            # at the end than at the start.
+            mover = None
+            for actor in (unreal.get_editor_subsystem(
+                    unreal.EditorActorSubsystem).get_all_level_actors() or []):
+                try:
+                    if actor.get_actor_label() == "flatCube":
+                        mover = actor
+                        break
+                except Exception:
+                    continue
+            check("the mesh Maya animated is in the level", mover is not None)
+            if mover is not None:
+                places = []
+                for frame in (start, middle, last_inside):
+                    scrub(frame)
+                    location = mover.get_actor_location()
+                    places.append(round(location.x, 2))
+                check("and the sequence moves it, not just the lights",
+                      abs(places[-1] - places[0]) > 1.0, places)
+                # Monotonic, because a move that lands right but jumps about
+                # in between is a retime that got its scale wrong.
+                check("smoothly, in one direction",
+                      (places[0] <= places[1] <= places[2])
+                      or (places[0] >= places[1] >= places[2]),
+                      places)
+
             camera_record = None
             for record in (package_data.get("cameras") or []):
                 samples = record.get("samples") or []

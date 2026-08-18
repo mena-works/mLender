@@ -662,6 +662,126 @@ def assign_skeletal_animation(warnings):
     return assigned
 
 
+def _interchange_sequences():
+    """Level Sequences the FBX import made, as opposed to the one we build."""
+    found = []
+    try:
+        paths = unreal.EditorAssetLibrary.list_assets(
+            MESH_CONTENT_PATH, recursive=True) or []
+    except Exception:
+        return found
+    for path in paths:
+        try:
+            asset = unreal.EditorAssetLibrary.load_asset(path)
+        except Exception:
+            continue
+        if isinstance(asset, unreal.LevelSequence):
+            found.append(asset)
+    return found
+
+
+def _channel_keys(section):
+    """Every channel of a section as (name, [(tick, value)]), keys only."""
+    read = []
+    for channel in section.get_all_channels() or []:
+        try:
+            keys = channel.get_keys() or []
+        except Exception:
+            continue
+        pairs = []
+        for key in keys:
+            try:
+                pairs.append((key.get_time().frame_number.value,
+                              key.get_value()))
+            except Exception:
+                continue
+        if pairs:
+            read.append((channel.get_name(), pairs))
+    return read
+
+
+def adopt_object_animation(sequence, ticks_per_frame, first, last, warnings):
+    """Object motion from the FBX, retimed into the sequence we built.
+
+    Meshes carry their animation inside the FBX rather than in the package,
+    and Interchange does import it -- into a Level Sequence of its own, with
+    every key written at its **frame number as a tick**. Measured on a 520
+    frame move: the keys land at ticks 1 and 519, so the whole animation
+    happens inside the first fiftieth of a frame and the object is already at
+    its end position before frame one. That reads exactly like nothing moved.
+
+    So the keys are read out and written back on our sequence at the right
+    time base, where the lights and cameras already are. The compression is
+    detected rather than assumed: if the keys already span more than a frame,
+    they are taken as they are, so an engine build that fixes this does not
+    get its animation stretched by a thousand.
+    """
+    if ticks_per_frame <= 0:
+        return 0, 0
+
+    actors = actors_by_label()
+    adopted = 0
+    keys_written = 0
+    for source in _interchange_sequences():
+        for binding in source.get_bindings() or []:
+            label = str(binding.get_display_name() or "")
+            actor = actors.get(label)
+            if actor is None:
+                continue
+            for track in binding.get_tracks() or []:
+                if not isinstance(track, unreal.MovieScene3DTransformTrack):
+                    continue
+                for section in track.get_sections() or []:
+                    channels = _channel_keys(section)
+                    if not channels:
+                        continue
+                    span = max(
+                        (pairs[-1][0] - pairs[0][0]) for _n, pairs in channels
+                    )
+                    scale = ticks_per_frame if span < ticks_per_frame else 1.0
+                    target = sequence.add_possessable(actor)
+                    _track, destination = _section(
+                        target, unreal.MovieScene3DTransformTrack, first, last
+                    )
+                    written = _copy_channels(destination, channels, scale)
+                    if written:
+                        adopted += 1
+                        keys_written += written
+                        if scale != 1.0:
+                            warnings.append(
+                                'Object "{0}" was animated in the FBX at one '
+                                "tick per frame, which plays entirely inside "
+                                "the first frame. Its {1} key(s) were retimed "
+                                "onto the mLender sequence.".format(
+                                    label, written
+                                )
+                            )
+    return adopted, keys_written
+
+
+def _copy_channels(section, channels, scale):
+    """Write read-back channels onto a section, scaling their times."""
+    destination = section.get_all_channels() or []
+    if not destination:
+        return 0
+    written = 0
+    by_index = {}
+    for index, channel in enumerate(destination):
+        by_index[channel.get_name()] = index
+    for order, (name, pairs) in enumerate(channels):
+        # Match by position: the nine transform channels come back in the
+        # same order on both sections, and the names carry a suffix that
+        # differs between assets.
+        index = order if order < len(destination) else None
+        if index is None:
+            continue
+        for tick, value in pairs:
+            if _add_key(destination[index], int(round(tick * scale)),
+                        float(value)):
+                written += 1
+    return written
+
+
 def import_animation(package_data, unreal_scale, metre_scale, power_scale,
                      warnings):
     """Build the Level Sequence and place an actor that plays it."""
@@ -712,6 +832,22 @@ def import_animation(package_data, unreal_scale, metre_scale, power_scale,
             continue
         tracks += built_tracks
         keys += built_keys
+
+    # Object motion rides the FBX, and Interchange puts it in a sequence of
+    # its own at the wrong time base. Adopted last, so it joins everything
+    # else on one timeline.
+    try:
+        adopted, adopted_keys = adopt_object_animation(
+            sequence, ticks_per_frame, first, last, warnings
+        )
+        tracks += adopted
+        keys += adopted_keys
+    except Exception as exc:
+        warnings.append(
+            "Object animation from the FBX could not be adopted: {0}".format(
+                exc
+            )
+        )
 
     path = ""
     try:

@@ -1725,3 +1725,34 @@ akış. Ama artık keşfedilebilir.
 **Bir yan not:** Blender testi bu turda traceback verip **exit 0** döndü. Özet
 satırı çıkmadığı için yakalandı; "çıkış kodu sıfır" bu host'ta geçtiğinin
 kanıtı değil.
+
+
+## Obje hareketi Unreal'e gelmiyordu (2.63.0)
+
+İkinci gerçek sahne raporu: 520 karelik bir animasyon gönderildi, Unreal'de
+sekans 1001'de başladı ve "hiç hareket yok".
+
+**1001 hata değildi.** Maya'nın kare numaraları bilerek korunuyor; sahnenin
+playback aralığı 1001–1520 ise sekans da 1001–1520 okur. 1001–1520 aralıklı bir
+sahne export edilip ölçüldü, birebir öyle çıktı.
+
+**Hareket eksikliği gerçekti ve sebebi şuydu:** mesh'ler animasyonlarını
+pakette değil **FBX'in içinde** taşıyor. Interchange onu import ediyor — kendi
+Level Sequence'ına, ve her anahtarı **kare numarasını tick olarak** yazarak.
+Ölçüldü: 520 karelik bir hareketin anahtarları tick 1 ve 519'da, yani bütün
+animasyon ilk karenin ellide birinde olup bitiyor ve obje daha 1. karede son
+konumunda. Ekranda bu, hiç kıpırdamamaktan ayırt edilemez.
+
+Interchange'in animasyon pipeline'ında bunu düzelten bir ayar yok (seçenekler
+kemik animasyonu ve eğrilerle ilgili), o yüzden anahtarlar geri okunup doğru
+zaman tabanıyla **bizim sekansımıza** yazılıyor. Böylece ışık, kamera,
+görünürlük, materyal parametreleri ve obje hareketi tek zaman çizgisinde.
+
+Sıkışma **tespit ediliyor**, varsayılmıyor: anahtarlar zaten bir kareden geniş
+bir aralığa yayılıyorsa olduğu gibi alınıyor — bunu düzelten bir motor sürümü
+geldiğinde animasyonu bin katına germesin diye.
+
+Fixture'da zaten keyli bir mesh vardı (`flatCube`, translateX 0→8) ve hiçbir
+assertion ona bakmıyordu; artık üç kontrol var: level'da mı, sekans onu
+kıpırdatıyor mu, ve tek yönde mi (yanlış ölçekli bir retime doğru yere varıp
+arada zıplayabilir).

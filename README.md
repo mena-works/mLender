@@ -639,6 +639,30 @@ in 2, but `coat_ior` and `sheen_roughness` carry their defaults in all 31 — so
 on, and the three real ones were buried in them. Dependent channels are now
 gated on the weight that drives them.
 
+### Object motion, and why the frame numbers look high
+
+Meshes carry their animation **inside the FBX**, not in the package — the
+package samples lights, cameras and visibility, and leaves geometry to the
+format that already does it well. Unreal's Interchange does import that motion,
+into a Level Sequence of its own, and writes every key at its frame number **as
+a tick**. Measured on a 520-frame move: the keys land at ticks 1 and 519, so the
+whole animation happens inside the first fiftieth of a frame and the object has
+finished moving before frame one. On screen that is indistinguishable from
+nothing having moved at all.
+
+Those keys are read back and rewritten onto the mLender sequence at the right
+time base, so one timeline carries the lights, the cameras, the visibility, the
+material parameters and the object motion together. The compression is
+**detected**, not assumed: keys that already span more than a frame are taken as
+they are, so an engine build that fixes this will not have its animation
+stretched by a thousand.
+
+And the frame numbers: **Maya's own are kept**. A scene that plays 1001–1520
+produces a sequence that reads 1001–1520, because a package that starts on
+frame 1 in one application and frame 1001 in another is a conversation nobody
+can have. If the sequence starts at 1001, that is the scene's start frame, not
+an offset.
+
 ### If nothing animated arrives
 
 **Export Animation is off by default.** With it off the package carries a
