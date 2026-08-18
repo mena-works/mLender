@@ -444,12 +444,22 @@ def main():
         exported_channels <= accounted,
         "unaccounted {0}".format(sorted(exported_channels - accounted)),
     )
+    # A channel is wired or it is metadata, with one documented exception:
+    # coat has an input only on a clear coat master, so it is wired there and
+    # still reported everywhere else. The overlap must equal that list exactly,
+    # which keeps the check as strong as it was for every other channel.
+    conditional = set(getattr(receiver.constants, "CONDITIONAL_CHANNELS", ()))
+    overlap = wired & set(receiver.constants.UNREAL_METADATA_CHANNELS)
     check(
-        "no channel is both wired and metadata",
-        not (wired & set(receiver.constants.UNREAL_METADATA_CHANNELS)),
-        "both {0}".format(
-            sorted(wired & set(receiver.constants.UNREAL_METADATA_CHANNELS))
-        ),
+        "no channel is both wired and metadata, beyond the declared ones",
+        overlap == conditional,
+        "overlap {0} declared {1}".format(sorted(overlap), sorted(conditional)),
+    )
+    check(
+        "every conditional channel really is in both tables",
+        conditional <= wired
+        and conditional <= set(receiver.constants.UNREAL_METADATA_CHANNELS),
+        sorted(conditional),
     )
     # Every channel the material builder claims to wire must name a real
     # Unreal material input. The names were probed on 5.8.1; this is what

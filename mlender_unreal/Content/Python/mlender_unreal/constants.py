@@ -10,7 +10,7 @@ Everything under "measured" was read off a live Unreal 5.8.1 session or solved
 from a probe, never guessed. tests/docs/unreal_calibration.md records how.
 """
 
-BUILD_VERSION = "2.49.0"
+BUILD_VERSION = "2.50.0"
 
 TOOL_NAME = "mLender"
 
@@ -45,6 +45,7 @@ MESH_CONTENT_PATH = CONTENT_ROOT + "/Meshes"
 MATERIAL_CONTENT_PATH = CONTENT_ROOT + "/Materials"
 TEXTURE_CONTENT_PATH = CONTENT_ROOT + "/Textures"
 SEQUENCE_CONTENT_PATH = CONTENT_ROOT + "/Sequences"
+IES_CONTENT_PATH = CONTENT_ROOT + "/IES"
 MASTER_MATERIAL_NAME = ASSET_PREFIX + "Master"
 MASTER_MATERIAL_PATH = MATERIAL_CONTENT_PATH + "/" + MASTER_MATERIAL_NAME
 # Actor folder paths, Unreal's equivalent of the Blender collections the
@@ -156,6 +157,8 @@ DEFAULT_LIGHT_POWER_SCALE = 1.0
 # sheen. Measured twice on 5.8.1. Those channels are therefore metadata, and
 # the import says so rather than pretending.
 MASTER_SCALAR_PARAMETERS = {
+    "coat": "Coat",
+    "coat_roughness": "CoatRoughness",
     "roughness": "Roughness",
     "metallic": "Metallic",
     "specular": "Specular",
@@ -190,6 +193,34 @@ MASTER_SWITCH_SUFFIX = "Use"
 # Channels with no Unreal input, kept as metadata on the material instance and
 # reported. Coat and sheen are here for the reason above, not because they were
 # forgotten.
+# A channel whose weight is zero changes nothing, so reporting it as lost is
+# noise. Measured on the test scene: coat was on in 3 materials of 31 and
+# sheen in 2, but coat_ior and sheen_roughness carry their defaults in all 31 --
+# so 28 of the 31 warnings were about parameters of an effect nobody switched
+# on, and the three real ones were buried in them.
+CHANNEL_WEIGHT_GATES = {
+    "coat_roughness": "coat",
+    "coat_tint": "coat",
+    "coat_ior": "coat",
+    "coat_darkening": "coat",
+    "sheen_roughness": "sheen",
+    "sheen_tint": "sheen",
+    "subsurface_color": "subsurface",
+    "subsurface_radius": "subsurface",
+    "subsurface_scale": "subsurface",
+    "transmission_roughness": "transmission",
+    "thin_walled": "transmission",
+    "transmission_affects_alpha": "transmission",
+}
+
+# Channels that are wired on one master and metadata on the others. Coat only
+# has an Unreal input on a clear coat master, so on any other surface it is
+# still something that did not travel and still has to be reported. This set is
+# the whole list of channels allowed to sit in both tables -- the contract test
+# checks the overlap against it exactly, so a channel that lands in both by
+# accident still fails.
+CONDITIONAL_CHANNELS = frozenset(("coat", "coat_roughness"))
+
 UNREAL_METADATA_CHANNELS = (
     "transmission",
     "transmission_roughness",

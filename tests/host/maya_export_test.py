@@ -948,8 +948,25 @@ def build_scene():
 
     ies = cmds.createNode("aiPhotometricLight", name="aiIesShape")
     profile = os.path.join(OUT, "fake.ies").replace("\\", "/")
+    # A real IESNA LM-63 file, not a stub with the header line and nothing
+    # after it. The stub was enough to prove the path travelled, and no more:
+    # a receiver that actually loads the profile needs photometric data, and
+    # measured, Unreal rejects a header-only file. Three vertical angles at
+    # one horizontal angle, falling 1000 -> 500 -> 0 candela, so a receiver
+    # that reads it has something with a shape to read.
     with open(profile, "w") as handle:
-        handle.write("IESNA:LM-63-2002")
+        handle.write("\n".join([
+            "IESNA:LM-63-2002",
+            "[TEST] mLender fixture",
+            "[MANUFAC] mLender",
+            "TILT=NONE",
+            "1 1000 1 3 1 1 2 0 0 0",
+            "1 1 100",
+            "0 45 90",
+            "0",
+            "1000 500 0",
+            "",
+        ]))
     cmds.setAttr(ies + ".aiFilename", profile, type="string")
     cmds.setAttr(ies + ".coneAngle", 75.0)
 

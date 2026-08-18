@@ -794,6 +794,15 @@ Kullanıcının elle doğrulaması gereken adımlar:
   `set_range`, `set_playback_start/end` ve oynatma konumu **hepsi tick**.
   Ölçüldü: 24 karede 100→900 anahtarlanan sekans tick 12000'de 500,
   "kare 12"de 100.40 okuyor. Display rate yalnız cetveli adlandırır
+- ❌ Bir kanalı ağırlığına bakmadan "kayboldu" diye bildirme; `coat_ior`
+  varsayılanı 1.5 olduğu için coat kapalıyken bile uyarı çıkıyordu ve 31
+  materyalin 28'i sahte uyarıydı, üç gerçeği gömüyordu
+- ❌ Unreal'de bir shading model girdisini `connect_material_property` ile
+  arama; ClearCoat `CustomData0/1`'de ve enum'da yok. Yol
+  `MakeMaterialAttributes`. Dönüş değerine güvenmeden önce uydurma bir pin
+  adıyla kontrol et — sahte ad `False` dönüyorsa `True` bir şey anlatır
+- ❌ Coat'u yalnız opak yüzeye verme; Unreal'de blend mode ile shading model
+  bağımsızdır, masked bir yüzey de coat giyer
 - ❌ Component property'sini actor binding'ine anahtarlama; intensity ve
   LightColor `light_component`, focal/aperture `camera_component`
   binding'ine gider

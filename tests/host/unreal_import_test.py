@@ -184,6 +184,115 @@ def main():
             check("the trim survived to Unreal, hole and all",
                   triangles == 896, triangles)
 
+    # Clear coat. Unreal keeps it in CustomData0/1, which the Python
+    # MaterialProperty enum does not expose, so the master routes everything
+    # through MakeMaterialAttributes to reach the ClearCoat pins.
+    coated = {}
+    for mesh_record in package_data.get("meshes") or []:
+        for material_record in mesh_record.get("materials") or []:
+            channels = material_record.get("channels") or {}
+            weight = (channels.get("coat") or {}).get("value") or 0.0
+            # Translucent and unlit surfaces do not take a coat here, on
+            # purpose: translucent clear coat is a different lighting argument
+            # in Unreal, and an unlit surface answers no light at all. Both are
+            # reported instead, so they must not be counted as expected here.
+            transmission = (channels.get("transmission") or {}).get("value") or 0.0
+            unlit = bool(material_record.get("unlit")) or str(
+                material_record.get("material_mode") or "").lower() in (
+                    "unlit", "emission")
+            if weight and not transmission and not unlit:
+                coated[material_record.get("material")
+                       or material_record.get("shader") or ""] = (
+                    weight,
+                    (channels.get("coat_roughness") or {}).get("value"),
+                )
+    check("the package has a coated material", bool(coated),
+          sorted(coated))
+    if coated:
+        library = unreal.MaterialEditingLibrary
+        instances = {}
+        for path in (unreal.EditorAssetLibrary.list_assets(
+                "/Game/mLender/Materials", recursive=True) or []):
+            asset = unreal.EditorAssetLibrary.load_asset(path)
+            if isinstance(asset, unreal.MaterialInstanceConstant):
+                instances[asset.get_name()] = asset
+        on_coat_master = []
+        for name, asset in instances.items():
+            parent = asset.get_editor_property("parent")
+            if parent is not None and "Coat" in parent.get_name():
+                on_coat_master.append(name)
+        check("its instance was parented to a clear coat master",
+              len(on_coat_master) == len(coated),
+              (sorted(on_coat_master), sorted(coated)))
+        for name in on_coat_master:
+            master = instances[name].get_editor_property("parent")
+            check("and that master really is a clear coat: " + name,
+                  master.get_editor_property("shading_model")
+                  == unreal.MaterialShadingModel.MSM_CLEAR_COAT,
+                  master.get_editor_property("shading_model"))
+            break
+        # The values, not just the wiring: a first version built the master,
+        # parented the instance and then set nothing, so every coated material
+        # arrived with a coat weight of zero.
+        matched = []
+        for name in on_coat_master:
+            got = library.get_material_instance_scalar_parameter_value(
+                instances[name], "Coat")
+            source = name[3:] if name.startswith("ML_") else name
+            want = None
+            for key, value in coated.items():
+                if key and (key in name or source in key):
+                    want = value[0]
+                    break
+            if want is not None:
+                matched.append((name, round(got, 4), round(want, 4)))
+        check("the coat weight Maya set is the one Unreal has",
+              bool(matched) and all(abs(got - want) < 0.001
+                                    for _n, got, want in matched),
+              matched)
+        check("and coat is no longer reported as lost",
+              not [w for w in result.get("warnings") or []
+                   if "carries coat," in w],
+              [w for w in result.get("warnings") or []
+               if "carries coat," in w][:1])
+
+    # An IES profile, which shapes the light without taking over its
+    # brightness. use_ies_brightness stays off on purpose: turning it on hands
+    # the level to whatever the file says and abandons the measured intensity
+    # conversion, so two lights calibrated the same way would disagree.
+    ies_record = next(
+        (record for record in (package_data.get("lights") or [])
+         if (record.get("ies_profile") or {}).get("path")),
+        None,
+    )
+    if ies_record is not None:
+        ies_actor = None
+        for actor in (unreal.get_editor_subsystem(
+                unreal.EditorActorSubsystem).get_all_level_actors() or []):
+            try:
+                if actor.get_actor_label() == ies_record.get("name"):
+                    ies_actor = actor
+                    break
+            except Exception:
+                continue
+        check("the IES light is in the level", ies_actor is not None,
+              ies_record.get("name"))
+        if ies_actor is not None:
+            component = ies_actor.light_component
+            profile = component.get_editor_property("ies_texture")
+            check("its IES profile was loaded and attached",
+                  profile is not None, profile)
+            check("and the profile did not take over the brightness",
+                  not component.get_editor_property("use_ies_brightness"),
+                  component.get_editor_property("use_ies_brightness"))
+            check("so the intensity is still the converted one",
+                  component.get_editor_property("intensity") > 0.0,
+                  component.get_editor_property("intensity"))
+        check("nothing reported the IES profile as dropped",
+              not [w for w in result.get("warnings") or []
+                   if "IES" in w and "plain" in w],
+              [w for w in result.get("warnings") or [] if "IES" in w][:1])
+
     # --- Level Sequence: light, camera and visibility animation.
     #
     # These assertions play the sequence rather than counting its keys. Keys

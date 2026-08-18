@@ -397,10 +397,49 @@ receiving end:
 | not carried | why |
 |---|---|
 | Advanced Skeleton **control layer** | Unreal's equivalent is a Control Rig asset, and authoring one from Python means building a rig graph. The skeletal meshes themselves do arrive — see below |
+| coat tint and coat IOR | the coat weight and its roughness travel (below); Unreal's clear coat has no tint or IOR input at all |
+| sheen, subsurface radius and scale | no Unreal input |
 | skeleton root motion | this build keys no skeletal animation in Unreal |
 | material parameter animation | a keyed roughness needs a Material Instance track per parameter; the first sample is set and the rest reported |
 | Maya constraints | Unreal has no equivalent, and the FBX bake already carries the motion they produced |
 | AOVs | render passes in Unreal are Movie Render Queue configuration, and this engine build does not ship MRQ |
+
+### Clear coat
+
+A coated Arnold or Redshift surface arrives coated. Unreal keeps clear coat in
+`CustomData0`/`CustomData1`, and the Python `MaterialProperty` enum does not
+expose those — `MP_CUSTOMDATA0` is simply not in it. The way in is
+`MakeMaterialAttributes`, whose `ClearCoat` and `ClearCoatRoughness` pins do
+accept a connection; a nonsense pin name is refused, so the `True` those two
+return means something. A coat master therefore routes **every** channel
+through that node, which is why it is wired differently from the other masters.
+
+Coat is a modifier on a surface class rather than a class of its own, because
+Unreal keeps blend mode and shading model apart: a masked cutout can wear a
+clear coat as happily as an opaque surface. The first version coated only
+opaque materials and silently dropped the coat off a half-opacity one — the
+test caught it.
+
+Translucent and unlit surfaces do not take a coat: translucent clear coat is a
+different lighting argument in Unreal, and an unlit surface answers no light at
+all. Both are reported rather than approximated.
+
+### IES profiles
+
+A Maya photometric light brings its `.ies` file, which Unreal reads natively as
+a `TextureLightProfile`. The profile shapes the light and deliberately does not
+set its brightness: `use_ies_brightness` is left off so the measured intensity
+conversion stays in charge, and two lights calibrated the same way do not end
+up disagreeing.
+
+### Reporting a channel that is switched off
+
+A channel whose weight is zero changes nothing, so reporting it as lost is
+noise. Measured on the test scene: coat was on in 3 materials of 31 and sheen
+in 2, but `coat_ior` and `sheen_roughness` carry their defaults in all 31 — so
+28 of the 31 warnings were about parameters of an effect nobody had switched
+on, and the three real ones were buried in them. Dependent channels are now
+gated on the weight that drives them.
 
 ### Animation, as a Level Sequence
 

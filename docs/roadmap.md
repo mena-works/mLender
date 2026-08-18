@@ -1282,3 +1282,38 @@ görünürlük örneği tek tek Maya'yla eşleştiriliyor. Dokuz yeni assertion.
 Not: `LevelSequenceEditorBlueprintLibrary.open_level_sequence` commandlet'te
 Slate olmadığı için **motoru assert'e sokuyor**; `LevelSequenceActor`ın
 player'ı UI istemiyor ve doğru yol o.
+
+
+## Unreal materyal turu (2.50.0) — coat, IES, ve 28 sahte uyarı
+
+**Clear coat taşınıyor.** Unreal coat'u `CustomData0/1`'de tutuyor ve Python'un
+`MaterialProperty` enum'unda o yok — `MP_CUSTOMDATA0` listede bile değil. Giriş
+yolu `MakeMaterialAttributes`: `ClearCoat` ve `ClearCoatRoughness` pinleri
+bağlantı kabul ediyor. Kontrol hücresi kondu: uydurma pin adı `False` dönüyor,
+yani bu ikisinin `True`'su bir şey anlatıyor. Coat master'ı bu yüzden **bütün**
+kanalları o node üzerinden geçiriyor, diğer dörtten farklı.
+
+Coat ayrı bir yüzey sınıfı değil, **değiştirici**: Unreal'de blend mode ile
+shading model bağımsız, masked bir yüzey de coat giyebilir. İlk sürüm yalnız
+opak yüzeyi coat'luyordu ve opacity 0.5 olan `stdSurfCube`'un coat'unu sessizce
+düşürüyordu — assertion yakaladı. Translucent ve unlit coat almıyor (ilki ayrı
+bir ışıklandırma tartışması, ikincisi zaten ışığa cevap vermiyor) ve ikisi de
+bildiriliyor.
+
+**IES yükleniyor.** `.ies` dosyası `TextureLightProfile` olarak import edilip
+`light_component.ies_texture`'a bağlanıyor. `use_ies_brightness` **kapalı
+bırakılıyor**: açmak, ölçülmüş yoğunluk dönüşümünü dosyanın kendi parlaklığına
+teslim ederdi. Fixture'daki IES 16 baytlık bir başlıktı ve Unreal onu
+reddediyor; yerine gerçek bir IESNA LM-63 dosyası yazılıyor (3 dikey açı,
+1000/500/0 kandela).
+
+**28 uyarı 5'e indi.** Ağırlığı sıfır olan bir kanal görüntüde hiçbir şey
+yapmaz, ama `coat_ior` varsayılanı 1.5 olduğu için 31 materyalin 31'inde
+"kayboldu" yazıyordu. Ölçüm: coat 31'in 3'ünde, sheen 2'sinde açık. Yani
+uyarıların 28'i kapalı bir efektin parametreleriydi ve üç gerçek olanı
+gömüyordu. Bağımlı kanallar artık kendilerini süren ağırlığa bağlı.
+
+Sözleşme testi de güncellendi: bir kanalın hem kablolu hem metadata olması
+yasaktı, coat artık ikisi birden (coat master'da kablolu, diğerlerinde hâlâ
+bildirilmesi gereken bir kayıp). Kontrol zayıflatılmadı — `CONDITIONAL_CHANNELS`
+diye açık bir liste var ve kesişim ona **birebir** eşit olmak zorunda.

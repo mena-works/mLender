@@ -23,6 +23,7 @@ per-material compile -- which is the whole reason to use instances.
 import unreal
 
 from .constants import (
+    CHANNEL_WEIGHT_GATES,
     ASSET_PREFIX,
     BLEND_MODE_MASKED,
     BLEND_MODE_OPAQUE,
@@ -56,9 +57,44 @@ SURFACE_OPAQUE = "opaque"
 SURFACE_MASKED = "masked"
 SURFACE_TRANSLUCENT = "translucent"
 SURFACE_UNLIT = "unlit"
+# Coat is a modifier, not a surface of its own. Unreal keeps blend mode and
+# shading model apart, so a masked cutout can wear a clear coat as happily as
+# an opaque surface can -- and the first version, which only coated opaque
+# materials, silently dropped the coat off a half-opacity one.
+COAT_SUFFIX = "|coat"
+
+# The two metadata channels a coat master turns into real parameters.
+COAT_INSTANCE_CHANNELS = ("coat", "coat_roughness")
+
+
+def is_coated(surface_class):
+    return str(surface_class or "").endswith(COAT_SUFFIX)
+
+
+def base_surface(surface_class):
+    return str(surface_class or "").split("|")[0]
 
 # Which Unreal material input each channel reaches. Anything not here is
 # metadata, and UNREAL_METADATA_CHANNELS says so explicitly.
+# Clear coat lives in CustomData0/1, and the Python MaterialProperty enum does
+# not expose those -- measured, MP_CUSTOMDATA0 simply is not there. The way in
+# is MakeMaterialAttributes: its ClearCoat and ClearCoatRoughness pins do
+# accept a connection, and a nonsense pin name is refused, so the True those
+# two return means something. Everything else then has to go through the same
+# node, which is why a coat master is wired differently from the other four.
+PROPERTY_TO_ATTRIBUTE_PIN = {
+    "MP_BASE_COLOR": "BaseColor",
+    "MP_ROUGHNESS": "Roughness",
+    "MP_METALLIC": "Metallic",
+    "MP_SPECULAR": "Specular",
+    "MP_NORMAL": "Normal",
+    "MP_EMISSIVE_COLOR": "EmissiveColor",
+    "MP_OPACITY": "Opacity",
+    "MP_OPACITY_MASK": "OpacityMask",
+    "MP_ANISOTROPY": "Anisotropy",
+    "MP_SUBSURFACE_COLOR": "SubsurfaceColor",
+}
+
 CHANNEL_TO_PROPERTY = {
     "base_color": "MP_BASE_COLOR",
     "roughness": "MP_ROUGHNESS",
@@ -89,19 +125,23 @@ def resolve_surface_class(record, warnings):
     channels = record.get("channels") or {}
     mode = str(record.get("material_mode") or "").lower()
     if mode in ("unlit", "emission") or record.get("unlit"):
+        # An unlit surface answers no light, so a coat on it would be a
+        # parameter nobody can see. Reported rather than built.
         return SURFACE_UNLIT
+    coated = scalar((channels.get("coat") or {}).get("value"), 0.0) > 0.0
     transmission = scalar(
         (channels.get("transmission") or {}).get("value"), 0.0
     )
     if transmission > 0.0:
+        # Translucent clear coat is a different lighting argument in Unreal,
+        # and guessing at it would be worse than saying so.
         return SURFACE_TRANSLUCENT
     opacity_record = channels.get("opacity") or {}
     opacity = scalar(opacity_record.get("value"), 1.0)
-    if channel_texture_path(opacity_record):
-        return SURFACE_MASKED
-    if opacity < OPACITY_MASKED_THRESHOLD:
-        return SURFACE_MASKED
-    return SURFACE_OPAQUE
+    masked = (channel_texture_path(opacity_record)
+              or opacity < OPACITY_MASKED_THRESHOLD)
+    base = SURFACE_MASKED if masked else SURFACE_OPAQUE
+    return base + COAT_SUFFIX if coated else base
 
 
 # --------------------------------------------------------------- master build
@@ -167,9 +207,30 @@ def _lerp(material, flat, texture, switch, x, y):
     return node
 
 
-def _connect(material, node, property_name):
+def _connect(material, node, property_name, attributes=None):
+    """Wire a node to a material output, directly or through attributes.
+
+    A coat master routes everything through MakeMaterialAttributes, because
+    that is the only node whose ClearCoat pins Python can reach. The pin names
+    differ from the property names, so the mapping is explicit rather than
+    derived from the enum name.
+    """
+    if node is None:
+        return False
+    if attributes is not None:
+        pin = PROPERTY_TO_ATTRIBUTE_PIN.get(property_name)
+        if pin is None:
+            return False
+        try:
+            return bool(
+                unreal.MaterialEditingLibrary.connect_material_expressions(
+                    node, "", attributes, pin
+                )
+            )
+        except Exception:
+            return False
     prop = getattr(unreal.MaterialProperty, property_name, None)
-    if prop is None or node is None:
+    if prop is None:
         return False
     try:
         unreal.MaterialEditingLibrary.connect_material_property(
@@ -187,7 +248,13 @@ def _build_master(surface_class, warnings):
     repository is a thing nobody can review, and it would have to be rebuilt
     for every engine version anyway.
     """
-    name = "{0}Master_{1}".format(ASSET_PREFIX, surface_class.capitalize())
+    # "masked|coat" is a surface class, not an asset name -- the separator
+    # would be rejected, so each part is capitalised and joined with an
+    # underscore: ML_Master_Masked_Coat.
+    name = "{0}Master_{1}".format(
+        ASSET_PREFIX,
+        "_".join(part.capitalize() for part in surface_class.split("|")),
+    )
     path = "{0}/{1}".format(MATERIAL_CONTENT_PATH, name)
     if unreal.EditorAssetLibrary.does_asset_exist(path):
         existing = unreal.EditorAssetLibrary.load_asset(path)
@@ -204,20 +271,42 @@ def _build_master(surface_class, warnings):
             "Unreal refused to create the master material {0}".format(name)
         )
 
-    if surface_class == SURFACE_UNLIT:
+    if base_surface(surface_class) == SURFACE_UNLIT:
         material.set_editor_property(
             "shading_model", unreal.MaterialShadingModel.MSM_UNLIT
         )
+    attributes = None
+    if is_coated(surface_class):
+        material.set_editor_property(
+            "shading_model", unreal.MaterialShadingModel.MSM_CLEAR_COAT
+        )
+        material.set_editor_property("use_material_attributes", True)
+        attributes = _expression(
+            material, "MaterialExpressionMakeMaterialAttributes", -300, 0
+        )
+        if attributes is None:
+            warnings.append(
+                "This engine has no MakeMaterialAttributes expression, so a "
+                "coated material was built without its coat."
+            )
+        else:
+            prop = getattr(
+                unreal.MaterialProperty, "MP_MATERIAL_ATTRIBUTES", None
+            )
+            if prop is not None:
+                unreal.MaterialEditingLibrary.connect_material_property(
+                    attributes, "", prop
+                )
     blend = {
         SURFACE_OPAQUE: BLEND_MODE_OPAQUE,
         SURFACE_MASKED: BLEND_MODE_MASKED,
         SURFACE_TRANSLUCENT: BLEND_MODE_TRANSLUCENT,
         SURFACE_UNLIT: BLEND_MODE_OPAQUE,
-    }[surface_class]
+    }[base_surface(surface_class)]
     blend_value = getattr(unreal.BlendMode, blend, None)
     if blend_value is not None:
         material.set_editor_property("blend_mode", blend_value)
-    if surface_class == SURFACE_TRANSLUCENT:
+    if base_surface(surface_class) == SURFACE_TRANSLUCENT:
         try:
             material.set_editor_property(
                 "translucency_lighting_mode",
@@ -289,10 +378,10 @@ def _build_master(surface_class, warnings):
                 )
                 mixed = multiply
         if target:
-            _connect(material, mixed, target)
+            _connect(material, mixed, target, attributes)
         # Masked surfaces drive the mask from the same opacity chain.
-        if channel == "opacity" and surface_class == SURFACE_MASKED:
-            _connect(material, mixed, "MP_OPACITY_MASK")
+        if channel == "opacity" and base_surface(surface_class) == SURFACE_MASKED:
+            _connect(material, mixed, "MP_OPACITY_MASK", attributes)
         row += 1
 
     # Scalar-only channels: no texture slot, so a plain parameter is enough.
@@ -303,8 +392,25 @@ def _build_master(surface_class, warnings):
         node = _scalar_parameter(material, parameter, 0.0, x - 400, y)
         target = CHANNEL_TO_PROPERTY.get(channel)
         if target:
-            _connect(material, node, target)
+            _connect(material, node, target, attributes)
         row += 1
+
+    if attributes is not None:
+        # The coat itself. Its tint and IOR have no Unreal input at all, so
+        # they stay in the report rather than being approximated here.
+        library = unreal.MaterialEditingLibrary
+        for parameter, pin, default in (
+            (MASTER_SCALAR_PARAMETERS["coat"], "ClearCoat", 0.0),
+            (MASTER_SCALAR_PARAMETERS["coat_roughness"],
+             "ClearCoatRoughness", 0.1),
+        ):
+            x, y = place()
+            node = _scalar_parameter(material, parameter, default, x - 400, y)
+            if node is not None:
+                library.connect_material_expressions(
+                    node, "", attributes, pin
+                )
+            row += 1
 
     unreal.MaterialEditingLibrary.recompile_material(material)
     unreal.EditorAssetLibrary.save_loaded_asset(material, False)
@@ -395,7 +501,14 @@ def build_material(record, package_folder, warnings):
     )
 
     for channel, channel_record in sorted(channels.items()):
-        if channel in UNREAL_METADATA_CHANNELS:
+        # Metadata channels have no socket to reach -- except on a coat
+        # master, where coat and its roughness became real parameters. Left
+        # in place, this skip built the coat master, parented the instance to
+        # it and then set nothing, so a coated material arrived with a coat
+        # weight of zero: all the plumbing and none of the water.
+        if channel in UNREAL_METADATA_CHANNELS and not (
+                is_coated(surface_class)
+                and channel in COAT_INSTANCE_CHANNELS):
             continue
         parameter = MASTER_TEXTURE_PARAMETERS.get(channel)
         texture_path = channel_texture_path(channel_record)
@@ -424,20 +537,43 @@ def build_material(record, package_folder, warnings):
         elif channel in MASTER_SCALAR_PARAMETERS:
             _set_scalar(instance, MASTER_SCALAR_PARAMETERS[channel], value)
 
-    _report_unsupported(record, name, warnings)
+    _report_unsupported(record, name, warnings, surface_class)
     unreal.EditorAssetLibrary.save_loaded_asset(instance, False)
     return instance
 
 
-def _report_unsupported(record, name, warnings):
+def _channel_is_live(channels, channel):
+    """Whether a channel is doing anything at all.
+
+    A value or a texture makes it live, but only if whatever weights it is
+    also on: a coat IOR under a coat weight of zero is a number in a record,
+    not something the image would show.
+    """
+    record = channels.get(channel)
+    if record is None:
+        return False
+    if (scalar((record or {}).get("value"), 0.0) == 0.0
+            and not channel_texture_path(record)):
+        return False
+    gate = CHANNEL_WEIGHT_GATES.get(channel)
+    if gate is None:
+        return True
+    gate_record = channels.get(gate)
+    if gate_record is None:
+        return False
+    return (scalar((gate_record or {}).get("value"), 0.0) != 0.0
+            or bool(channel_texture_path(gate_record)))
+
+
+def _report_unsupported(record, name, warnings, surface_class=None):
     """Say what did not travel. Silence is the failure mode this repo fears."""
     channels = record.get("channels") or {}
+    carried = set()
+    if is_coated(surface_class):
+        carried.update(("coat", "coat_roughness"))
     present = [
         channel for channel in UNREAL_METADATA_CHANNELS
-        if channel in channels and (
-            scalar((channels[channel] or {}).get("value"), 0.0) != 0.0
-            or channel_texture_path(channels[channel])
-        )
+        if channel not in carried and _channel_is_live(channels, channel)
     ]
     if present:
         warnings.append(

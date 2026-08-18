@@ -21,9 +21,12 @@ Two traps live in that sentence, both of which this project has paid for once:
 
 import math
 
+import os
+
 import unreal
 
 from .constants import (
+    IES_CONTENT_PATH,
     AREA_SIZE_PER_SCALE,
     DEFAULT_LIGHT_POWER_SCALE,
     DIRECTIONAL_LIGHT_UNIT_IS_LUX,
@@ -329,12 +332,83 @@ def create_light_actor(
             component, "cast_shadows", bool(parameters.get("cast_shadows"))
         )
 
-    if record.get("ies_profile"):
-        warnings.append(
-            'Light "{0}" carries an IES profile, which this build does not '
-            "load in Unreal; it arrived as a plain spot light.".format(label)
-        )
+    apply_ies_profile(component, record, label, warnings)
     return actor
+
+
+def import_ies_profile(path, warnings):
+    """An .ies file as a TextureLightProfile asset, or None.
+
+    Unreal reads IESNA LM-63 natively; the only thing needed here is to hand
+    the file to the import task and check what came back. Measured: a
+    header-only file is refused, which is worth knowing because a stub is
+    exactly what a fixture tends to contain.
+    """
+    if not path or not os.path.isfile(path):
+        return None
+    name = safe_asset_name(
+        os.path.splitext(os.path.basename(path))[0], "IES"
+    )
+    destination = "{0}/{1}".format(IES_CONTENT_PATH, name)
+    if unreal.EditorAssetLibrary.does_asset_exist(destination):
+        existing = unreal.EditorAssetLibrary.load_asset(destination)
+        if existing is not None:
+            return existing
+
+    task = unreal.AssetImportTask()
+    task.filename = path
+    task.destination_path = IES_CONTENT_PATH
+    task.destination_name = name
+    task.automated = True
+    task.replace_existing = True
+    task.save = False
+    try:
+        unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks([task])
+    except Exception as exc:
+        warnings.append(
+            'IES profile "{0}" could not be imported: {1}'.format(path, exc)
+        )
+        return None
+    for imported in task.imported_object_paths or []:
+        asset = unreal.EditorAssetLibrary.load_asset(imported)
+        if asset is not None:
+            return asset
+    return None
+
+
+def apply_ies_profile(component, record, label, warnings):
+    """Attach the Maya photometric profile to an Unreal light.
+
+    The profile shapes the light; it deliberately does not set its brightness.
+    ``use_ies_brightness`` is left off so the measured intensity conversion
+    stays in charge -- turning it on hands the level over to whatever the file
+    says, and two lights calibrated the same way would then disagree.
+    """
+    profile = record.get("ies_profile") or {}
+    path = profile.get("path") if isinstance(profile, dict) else profile
+    if not path:
+        return False
+    asset = import_ies_profile(path, warnings)
+    if asset is None:
+        warnings.append(
+            'Light "{0}" carries an IES profile that Unreal would not read '
+            '("{1}"), so it arrived as a plain light.'.format(label, path)
+        )
+        return False
+    # Assigning the property directly raises here, the same way intensity
+    # does; the setter is the one that works.
+    try:
+        component.set_ies_texture(asset)
+    except Exception:
+        try:
+            component.set_editor_property("ies_texture", asset)
+        except Exception as exc:
+            warnings.append(
+                'Light "{0}" has an IES profile that could not be attached: '
+                "{1}".format(label, exc)
+            )
+            return False
+    return True
 
 
 def create_sky_light(dome_records, unreal_scale, warnings):
