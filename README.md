@@ -403,6 +403,25 @@ receiving end:
 | Maya constraints | Unreal has no equivalent, and the FBX bake already carries the motion they produced |
 | AOVs | render passes in Unreal are Movie Render Queue configuration, and this engine build does not ship MRQ |
 
+### Correction nodes
+
+Every texture slot in the master carries a small correction stack — a `Power`
+and a switched `Clamp` — that is identity until a material sets it. Two Maya
+nodes are rebuilt into it and the rest are still reported, deliberately: these
+two have one meaning each. `gammaCorrect` is `in^(1/gamma)`, which is why the
+exponent Unreal gets is the **reciprocal** of the number Maya holds, and a clamp
+is a clamp. A colour correct node carries exposure, gain, offset, contrast,
+saturation and hue at once, and guessing at Arnold's composition order would
+produce a plausible picture that is wrong; it stays reported by name until
+somebody bakes the measurement the way `layeredTexture` was.
+
+The clamp is switched rather than always on: clamping to 0..1 is not identity
+for a channel that legitimately goes past one, and emission does.
+
+What cannot be rebuilt is reported whether or not the texture loaded. A first
+version only reported alongside a working texture, which meant the scene's one
+colour correct node — sitting on a stub texture — produced no warning at all.
+
 ### Skeletal animation
 
 The FBX brings an `AnimSequence` and used to leave it in the content browser.

@@ -24,6 +24,10 @@ import unreal
 
 from .constants import (
     CHANNEL_WEIGHT_GATES,
+    CORRECTION_CLAMP_MAX_SUFFIX,
+    CORRECTION_CLAMP_MIN_SUFFIX,
+    CORRECTION_CLAMP_SWITCH_SUFFIX,
+    CORRECTION_GAMMA_SUFFIX,
     ASSET_PREFIX,
     BLEND_MODE_MASKED,
     BLEND_MODE_OPAQUE,
@@ -241,6 +245,51 @@ def _connect(material, node, property_name, attributes=None):
         return False
 
 
+def _correction_stack(material, parameter, sampler, x, y):
+    """Gamma and clamp, sitting between a texture sample and the channel.
+
+    Identity by default: the gamma exponent is 1 and the clamp is switched
+    off, so a material with no corrections builds exactly the picture it built
+    before this existed. Returns the end of the chain, or the sample itself if
+    this engine will not give one of the expressions -- losing a correction is
+    bad, losing the texture is worse.
+    """
+    library = unreal.MaterialEditingLibrary
+    if sampler is None:
+        return None
+
+    exponent = _scalar_parameter(
+        material, parameter + CORRECTION_GAMMA_SUFFIX, 1.0, x - 200, y + 60
+    )
+    power = _expression(material, "MaterialExpressionPower", x, y)
+    if exponent is None or power is None:
+        return sampler
+    library.connect_material_expressions(sampler, "", power, "Base")
+    library.connect_material_expressions(exponent, "", power, "Exponent")
+
+    low = _scalar_parameter(
+        material, parameter + CORRECTION_CLAMP_MIN_SUFFIX, 0.0,
+        x - 200, y + 120
+    )
+    high = _scalar_parameter(
+        material, parameter + CORRECTION_CLAMP_MAX_SUFFIX, 1.0,
+        x - 200, y + 180
+    )
+    clamp = _expression(material, "MaterialExpressionClamp", x + 200, y)
+    use = _scalar_parameter(
+        material, parameter + CORRECTION_CLAMP_SWITCH_SUFFIX, 0.0,
+        x - 200, y + 240
+    )
+    if None in (low, high, clamp, use):
+        return power
+    library.connect_material_expressions(power, "", clamp, "Input")
+    library.connect_material_expressions(low, "", clamp, "Min")
+    library.connect_material_expressions(high, "", clamp, "Max")
+    # Switched rather than always on: a clamp to 0..1 is not identity for a
+    # channel that legitimately goes past one, and emission does.
+    return _lerp(material, power, clamp, use, x + 400, y) or clamp
+
+
 def _build_master(surface_class, warnings):
     """Create one master material for a surface class.
 
@@ -352,6 +401,11 @@ def _build_master(surface_class, warnings):
                 material, MASTER_SCALAR_PARAMETERS.get(channel, parameter),
                 0.5, x - 400, y - 90
             )
+        corrected = _correction_stack(
+            material, parameter, texture, x - 200, y
+        )
+        if corrected is not None:
+            texture = corrected
         if None in (switch, texture, flat):
             warnings.append(
                 'Master material "{0}" could not build the "{1}" channel; '
@@ -510,6 +564,7 @@ def build_material(record, package_folder, warnings):
         instance, parent
     )
 
+    unrebuilt_corrections = []
     for channel, channel_record in sorted(channels.items()):
         # Metadata channels have no socket to reach -- except on a coat
         # master, where coat and its roughness became real parameters. Left
@@ -531,6 +586,16 @@ def build_material(record, package_folder, warnings):
                 is_colour_data(channel, channel_record, COLOUR_CHANNELS),
                 warnings,
             )
+        # The Maya nodes that sat between this texture and the shader. What
+        # cannot be rebuilt is reported whether or not the texture loaded: a
+        # chain that did not travel did not travel either way, and a first
+        # version that only reported alongside a working texture said nothing
+        # at all about the scene's one colour correct node.
+        applied = apply_corrections(
+            instance, channel_record, parameter if texture is not None else ""
+        )
+        for kind in applied:
+            unrebuilt_corrections.append((channel, kind))
         if texture is not None and _set_texture(instance, parameter, texture):
             _set_scalar(instance, parameter + MASTER_SWITCH_SUFFIX, 1.0)
             if channel_record.get("invert"):
@@ -547,6 +612,19 @@ def build_material(record, package_folder, warnings):
         elif channel in MASTER_SCALAR_PARAMETERS:
             _set_scalar(instance, MASTER_SCALAR_PARAMETERS[channel], value)
 
+    if unrebuilt_corrections:
+        warnings.append(
+            'Material "{0}" has Maya correction nodes this build cannot '
+            "rebuild in Unreal: {1}. Gamma and clamp travel; the rest left "
+            "the texture uncorrected. Use Bake Procedurals to carry "
+            "them.".format(
+                name,
+                ", ".join(sorted(set(
+                    '{0} on "{1}"'.format(kind, channel)
+                    for channel, kind in unrebuilt_corrections
+                ))),
+            )
+        )
     _report_unsupported(record, name, warnings, surface_class)
     unreal.EditorAssetLibrary.save_loaded_asset(instance, False)
     return instance
@@ -573,6 +651,67 @@ def _channel_is_live(channels, channel):
         return False
     return (scalar((gate_record or {}).get("value"), 0.0) != 0.0
             or bool(channel_texture_path(gate_record)))
+
+
+def apply_corrections(instance, channel_record, parameter):
+    """Set the correction parameters from a Maya chain.
+
+    Returns the correction kinds this build did not rebuild, so the caller can
+    name them rather than report a count.
+
+    Two nodes are rebuilt and the rest are not, deliberately. These two have
+    one meaning each: gammaCorrect is in^(1/gamma) -- already measured for the
+    Blender receiver, where the same-named node is in^gamma -- and a clamp is a
+    clamp. A colour correct node carries exposure, gain, offset, contrast,
+    saturation and hue at once, and guessing Arnold's composition order would
+    produce a plausible picture that is wrong.
+    """
+    texture = (channel_record or {}).get("texture") or {}
+    chain = texture.get("corrections") or []
+    if not chain:
+        return []
+    unhandled = []
+    gamma = 1.0
+    clamp_low = None
+    clamp_high = None
+    for entry in chain:
+        kind = str((entry or {}).get("type") or "")
+        parameters = (entry or {}).get("parameters") or {}
+        if kind == "gammaCorrect":
+            value = parameters.get("gamma")
+            if isinstance(value, (list, tuple)) and value:
+                value = value[0]
+            value = scalar(value, 1.0)
+            if value:
+                # Two gammas compose: in^(1/a)^(1/b) is in^(1/ab).
+                gamma = gamma * value
+        elif kind == "clamp":
+            low = parameters.get("clamp_min")
+            high = parameters.get("clamp_max")
+            if isinstance(low, (list, tuple)) and low:
+                low = low[0]
+            if isinstance(high, (list, tuple)) and high:
+                high = high[0]
+            clamp_low = scalar(low, 0.0)
+            clamp_high = scalar(high, 1.0)
+        else:
+            unhandled.append(kind or "unknown")
+
+    if not parameter:
+        # No texture slot to correct -- the caller still wants the list of
+        # kinds so it can name them.
+        return unhandled
+    if gamma and gamma != 1.0:
+        # Unreal's Power is in^exponent, so the exponent is the reciprocal.
+        _set_scalar(instance, parameter + CORRECTION_GAMMA_SUFFIX,
+                    1.0 / float(gamma))
+    if clamp_low is not None:
+        _set_scalar(instance, parameter + CORRECTION_CLAMP_MIN_SUFFIX,
+                    clamp_low)
+        _set_scalar(instance, parameter + CORRECTION_CLAMP_MAX_SUFFIX,
+                    clamp_high if clamp_high is not None else 1.0)
+        _set_scalar(instance, parameter + CORRECTION_CLAMP_SWITCH_SUFFIX, 1.0)
+    return unhandled
 
 
 def _report_unsupported(record, name, warnings, surface_class=None):

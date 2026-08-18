@@ -213,6 +213,33 @@ def build_scene():
     cmds.connectAttr(file_node + ".outColor", composite + ".A", force=True)
     cmds.connectAttr(composite + ".outColor", std + ".coatColor", force=True)
 
+    # A correction chain on a texture a receiver can actually open. The
+    # chains elsewhere in this scene sit on .tx stubs, which Unreal refuses to
+    # import -- so the correction never had anything to correct there, and the
+    # gamma the receiver computes was never checked against a number. Named
+    # against the existing fixtures first; that has bitten this repo twice.
+    corr_transform, corr_shader = shaded_cube("corrTexCube", "aiStandardSurface")
+    corr_png = os.path.join(OUT, "corr_basecolor.png").replace("\\", "/")
+    _write_png(corr_png)
+    corr_file = cmds.shadingNode("file", asTexture=True, name="corrTex")
+    cmds.setAttr(corr_file + ".fileTextureName", corr_png, type="string")
+    corr_gamma = cmds.shadingNode("gammaCorrect", asUtility=True,
+                                  name="corrGamma")
+    cmds.setAttr(corr_gamma + ".gamma", 2.2, 2.2, 2.2, type="double3")
+    cmds.connectAttr(corr_file + ".outColor", corr_gamma + ".value",
+                     force=True)
+    corr_clamp = cmds.shadingNode("clamp", asUtility=True, name="corrClamp")
+    cmds.setAttr(corr_clamp + ".minR", 0.1)
+    cmds.setAttr(corr_clamp + ".minG", 0.1)
+    cmds.setAttr(corr_clamp + ".minB", 0.1)
+    cmds.setAttr(corr_clamp + ".maxR", 0.75)
+    cmds.setAttr(corr_clamp + ".maxG", 0.75)
+    cmds.setAttr(corr_clamp + ".maxB", 0.75)
+    cmds.connectAttr(corr_gamma + ".outValue", corr_clamp + ".input",
+                     force=True)
+    cmds.connectAttr(corr_clamp + ".output", corr_shader + ".baseColor",
+                     force=True)
+
     # A UDIM set, driven through Maya's own tiling mode rather than a token in
     # the path, which is the case a naive path scan gets wrong.
     #
@@ -1401,7 +1428,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("57 meshes exported", payload["mesh_count"] == 57,
+    check("58 meshes exported", payload["mesh_count"] == 58,
           payload["mesh_count"])
     # The locator, the empty null, the nested locator, the group holding
     # only a curve, and the two shapeless FKIK switchers (root and NSRig:).

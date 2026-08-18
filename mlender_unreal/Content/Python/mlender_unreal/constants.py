@@ -10,7 +10,7 @@ Everything under "measured" was read off a live Unreal 5.8.1 session or solved
 from a probe, never guessed. tests/docs/unreal_calibration.md records how.
 """
 
-BUILD_VERSION = "2.54.0"
+BUILD_VERSION = "2.55.0"
 
 TOOL_NAME = "mLender"
 
@@ -188,6 +188,23 @@ MASTER_TEXTURE_PARAMETERS = {
 
 # One switch per texture slot, so an instance that has no map keeps the flat
 # value instead of multiplying by a black texture.
+# The correction stack every texture slot carries, in the order it is applied.
+# Only two Maya correction nodes are rebuilt here, and deliberately: these two
+# have one meaning each. gammaCorrect is in^(1/gamma) -- measured for the
+# Blender receiver, where the same node is in^gamma and the exponent has to be
+# inverted -- and clamp is a clamp. A colour correct node carries exposure,
+# gain, offset, contrast, saturation and hue at once, and guessing at Arnold's
+# composition order would produce a plausible picture that is wrong; it stays
+# reported until somebody bakes the measurement the way layeredTexture was.
+CORRECTION_GAMMA_SUFFIX = "Gamma"
+CORRECTION_CLAMP_MIN_SUFFIX = "ClampMin"
+CORRECTION_CLAMP_MAX_SUFFIX = "ClampMax"
+CORRECTION_CLAMP_SWITCH_SUFFIX = "ClampUse"
+
+# What this build can rebuild. Anything else in a chain is reported, and so is
+# a chain that puts these in an order the fixed stack cannot express.
+REBUILT_CORRECTIONS = ("gammaCorrect", "clamp")
+
 MASTER_SWITCH_SUFFIX = "Use"
 
 # Channels with no Unreal input, kept as metadata on the material instance and

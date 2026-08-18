@@ -1399,3 +1399,31 @@ Kök hareketi hâlâ bildiriliyor, uygulanmıyor: exporter her kök eklemin
 değerlendirilmiş dünyasını kare kare örnekliyor çünkü bağlantıyla sürülen
 hareket için FBX bake'ine güvenilmez — ama zaten oynayan bir take'in üstüne
 bunu yeniden anahtarlamak hareketi düzeltmez, **ikiye katlar**.
+
+
+## Düzeltme node'ları (2.55.0) — ikisi taşınıyor, gerisi adıyla bildiriliyor
+
+Master'daki her texture slot'u küçük bir düzeltme yığını taşıyor: bir `Power`
+ve anahtarlı bir `Clamp`, materyal set etmedikçe birim. İçine iki Maya node'u
+kuruluyor, bilerek: bu ikisinin **tek** anlamı var. `gammaCorrect`
+`in^(1/gamma)` (bu depoda Blender alıcısı için zaten ölçülmüştü, orada aynı
+adlı node `in^gamma`), yani Unreal'e giden üs Maya'nın tuttuğu sayının
+**tersi**. Clamp da clamp.
+
+`aiColorCorrect` bir node'da exposure, gain, offset, contrast, saturation ve
+hue taşıyor; Arnold'un bunları hangi sırayla birleştirdiğini tahmin etmek makul
+görünen ama yanlış bir görüntü üretir. `layeredTexture` gibi bake ile
+ölçülene kadar adıyla bildiriliyor. `remapValue` da öyle — rampası asıl işi.
+
+Clamp anahtarlı, hep açık değil: 0..1'e kırpmak 1'i meşru şekilde aşan bir
+kanal için birim değildir ve emission aşar.
+
+**Fixture yine yetmiyordu.** Sahnedeki bütün düzeltme zincirleri `.tx`
+taslaklarının üstündeydi ve Unreal onları reddediyor — yani düzeltmenin
+düzeltecek bir şeyi yoktu ve hesaplanan gamma hiçbir sayıyla karşılaştırılmadı.
+Gerçek PNG'li bir zincir eklendi (`corrTexCube`, gamma 2.2 + clamp 0.1–0.75) ve
+Unreal'de 1/2.2 = 0.4545 olarak doğrulandı.
+
+Uygulanamayan zincir artık texture yüklensin yüklenmesin bildiriliyor: ilk
+sürüm yalnız çalışan texture'ın yanında bildiriyordu, o yüzden sahnedeki tek
+colour correct node'u hakkında **hiçbir şey** söylemiyordu.

@@ -256,6 +256,80 @@ def main():
               [w for w in result.get("warnings") or []
                if "carries coat," in w][:1])
 
+    # A correction chain on a texture a receiver can actually open. The other
+    # chains in this scene sit on .tx stubs Unreal refuses, so the correction
+    # had nothing to correct and the gamma was never checked against a number.
+    corrected = None
+    for mesh_record in package_data.get("meshes") or []:
+        for material_record in mesh_record.get("materials") or []:
+            for channel, channel_record in (
+                    material_record.get("channels") or {}).items():
+                texture = (channel_record or {}).get("texture") or {}
+                kinds = [str(entry.get("type")) for entry
+                         in texture.get("corrections") or []]
+                path = str(texture.get("path") or "")
+                if "gammaCorrect" in kinds and path.lower().endswith(".png"):
+                    corrected = (material_record, channel, texture, kinds)
+                    break
+            if corrected:
+                break
+        if corrected:
+            break
+    check("the package has a correction chain on a loadable texture",
+          corrected is not None)
+    if corrected is not None:
+        material_record, channel, texture, kinds = corrected
+        instance = unreal.EditorAssetLibrary.load_asset(
+            "/Game/mLender/Materials/ML_{0}".format(
+                material_record.get("material"))
+        )
+        check("its material instance exists", instance is not None,
+              material_record.get("material"))
+        if instance is not None:
+            library = unreal.MaterialEditingLibrary
+            parameter = "BaseColorMap"
+            source_gamma = 1.0
+            low = high = None
+            for entry in texture.get("corrections") or []:
+                values = (entry or {}).get("parameters") or {}
+                if entry.get("type") == "gammaCorrect":
+                    value = values.get("gamma")
+                    if isinstance(value, list):
+                        value = value[0]
+                    source_gamma *= float(value or 1.0)
+                if entry.get("type") == "clamp":
+                    low = values.get("clamp_min")
+                    high = values.get("clamp_max")
+                    if isinstance(low, list):
+                        low = low[0]
+                    if isinstance(high, list):
+                        high = high[0]
+            got = library.get_material_instance_scalar_parameter_value(
+                instance, parameter + "Gamma")
+            # Maya applies in^(1/gamma) and Unreal's Power is in^exponent, so
+            # the exponent is the reciprocal, not the number Maya holds.
+            check("the gamma arrived as the reciprocal Unreal needs",
+                  abs(got - 1.0 / source_gamma) < 0.001,
+                  (round(got, 5), round(1.0 / source_gamma, 5)))
+            if low is not None:
+                check("the clamp bounds arrived",
+                      abs(library.get_material_instance_scalar_parameter_value(
+                          instance, parameter + "ClampMin") - low) < 0.001
+                      and abs(
+                          library.get_material_instance_scalar_parameter_value(
+                              instance, parameter + "ClampMax") - high) < 0.001,
+                      (low, high))
+                check("and the clamp is switched on, not left at its default",
+                      library.get_material_instance_scalar_parameter_value(
+                          instance, parameter + "ClampUse") == 1.0,
+                      library.get_material_instance_scalar_parameter_value(
+                          instance, parameter + "ClampUse"))
+        # A chain this build cannot rebuild must still be named.
+        check("a correction it cannot rebuild is still reported by name",
+              any("aiColorCorrect" in w for w in result.get("warnings") or []),
+              [w for w in result.get("warnings") or []
+               if "correction" in w.lower()][:1])
+
     # The FBX brings an AnimSequence and used to leave it in the content
     # browser: measured, four skeletal actors sat in ANIMATION_BLUEPRINT mode
     # with no asset while Take_001 existed beside them, so a skinned character
