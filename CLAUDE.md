@@ -881,6 +881,12 @@ Kullanıcının elle doğrulaması gereken adımlar:
   dışarıda kalmıştı)
 - ❌ Testi repo kökünden çalıştırıp dağıtım artefaktını doğruladığını sanma;
   host çalışma dizinini `sys.path`'e koyar ve repo kopyası import edilir
+- ❌ Bir artefaktı **içeriğine bakarak** doğrulama; üç arşivi de içinde
+  bulup "tamam" denen installer açılışta `no module named tkinter` ile öldü
+  ve o haliyle release'e çıktı. PyInstaller **derleyen** yorumlayıcının
+  runtime'ını donduruyor; Blender'ın Python'unda tkinter yok, mayapy ve
+  Unreal'inkinde var. Çalıştığını sına — windowed bir exe'nin stdout'u
+  yoktur, `--selftest` gibi dosyaya yazan bir yol aç
 - ❌ Gizli bir mesh'te deformasyon ölçme; Blender gizli objeyi depsgraph'tan
   çıkarır, modifier hiç çalışmaz ve sağlam rig "0 vertex kıpırdadı" gösterir
 - ❌ Animasyonu yalnız değer farkıyla assert etme; span kontrolü bir karelik

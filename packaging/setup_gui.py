@@ -6,6 +6,7 @@ import glob
 import shutil
 import zipfile
 import threading
+import tkinter
 import customtkinter as ctk
 
 # Configure CustomTkinter
@@ -414,6 +415,40 @@ class InstallerApp(ctk.CTk):
             pass
 
 
+def selftest(report_path):
+    """Everything the installer does except open a window, written to a file.
+
+    A windowed build has no stdout, so "does it run" cannot be read from a
+    shell -- which is how a build with no tkinter in it reached a release.
+    This runs the same imports and the same detection and writes what it
+    found, so a check has something to read and an exit code to trust.
+    """
+    maya_zip, blender_zip, unreal_zip = find_zips()
+    report = {
+        "python": sys.version.split()[0],
+        "frozen": bool(getattr(sys, "frozen", False)),
+        "tk": tkinter.TkVersion,
+        "customtkinter": getattr(ctk, "__version__", "?"),
+        "maya_zip": os.path.basename(maya_zip or ""),
+        "blender_zip": os.path.basename(blender_zip or ""),
+        "unreal_zip": os.path.basename(unreal_zip or ""),
+        "version": bundled_version(blender_zip),
+        "maya_versions": InstallerApp.detect_maya(None),
+        "blender_versions": InstallerApp.detect_blender(None),
+        "unreal_projects": sorted(
+            InstallerApp.detect_unreal_projects(None)
+        ),
+    }
+    with open(report_path, "w", encoding="utf-8") as handle:
+        json.dump(report, handle, indent=2)
+    return 0
+
+
 if __name__ == "__main__":
+    if "--selftest" in sys.argv:
+        index = sys.argv.index("--selftest")
+        target = (sys.argv[index + 1] if len(sys.argv) > index + 1
+                  else "mlender_setup_selftest.json")
+        sys.exit(selftest(target))
     app = InstallerApp()
     app.mainloop()

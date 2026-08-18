@@ -1615,3 +1615,35 @@ kare kare örneklerinin animasyonlanmadığı bildiriliyor.
 
 Bu, bu oturumda kapatılan beşinci fixture boşluğu: bir yolun "kapsandığı"
 görünüp aslında düşmesi imkânsız bir assertion'la örtülmüş olması.
+
+
+## Installer — bozuk bir .exe yayınlandı ve geri çekildi
+
+Kurulumcu Unreal'i öğrendi, derlendi, release'e kondu. **Ve çalışmıyordu:**
+"no module named tkinter".
+
+Sebep: PyInstaller, derlemeyi yapan yorumlayıcının runtime'ını donduruyor.
+Ben Blender'ın gömülü Python'unu kullandım, onda tkinter **yok**, customtkinter
+ise tkinter üstüne kurulu. Exe derlendi, üç arşivi de içine aldı, ve açılışta
+öldü.
+
+Asıl hata teknik değil yöntemsel: exe'yi **içeriğine bakarak** doğruladım —
+"üç zip içinde mi" diye binary'de arayıp "evet" dedim. Bu depo tam bunu
+söylüyor zaten ("bir DCC çağrısının argümanı kabul etmesini uyguladığı sanma"),
+ben paketleme tarafında aynı hatayı yaptım. Çalıştığını sınamadım.
+
+Düzeltmeler:
+
+1. Bozuk asset release'ten kaldırıldı (indiren kimse çalışmayan kurulumcu
+   almasın diye önce bu yapıldı).
+2. tkinter'ı olan Python'la yeniden derlendi. Kontrol: Blender 5.2'nin
+   Python'unda yok; mayapy 3.9.7 ve Unreal'in 3.11.8'inde var.
+3. `setup_gui.py` bir `--selftest <dosya>` bayrağı aldı: pencereyi açmadan
+   arşivleri ve tespit ettiği host'ları JSON olarak yazıyor. Windowed bir
+   build'in stdout'u yok, yani "çalışıyor mu" ancak böyle okunabiliyor.
+4. `build_setup.py` artık iki yerden koruyor: tkinter'ı olmayan bir Python'la
+   çalıştırılırsa **derlemeyi reddediyor** ve neyi kullanması gerektiğini
+   söylüyor; derledikten sonra da exe'yi `--selftest` ile çalıştırıp üç
+   arşivin de içinde olduğunu doğrulamadan "başarılı" demiyor.
+
+Yani bu hata bir daha sessizce release'e ulaşamaz.
