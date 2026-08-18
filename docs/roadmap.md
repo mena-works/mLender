@@ -1341,3 +1341,19 @@ argümanlarını zorunlu tutuyor.
 Doğrulama yine oynatarak: Sequencer slot'u sürdüğünde bileşenin materyali
 `MaterialInstanceDynamic`'e dönüşüyor, ve değerler oradan okunuyor. Beş yeni
 assertion; artık yanlış olan "bu build animasyonlamıyor" uyarısı kaldırıldı.
+
+
+## Dome HDR (2.52.0) — ve fixture'daki bir boşluk daha
+
+Arnold sky dome'unun HDR'ı Unreal sky light'ının cubemap'i oluyor. Ölçüldü:
+Unreal bir Radiance `.hdr`'ı doğrudan **TextureCube** olarak alıyor, ara adım
+gerekmiyor. Sonuç yine de kontrol ediliyor — karar import'un: `Texture2D`
+olarak gelen bir format sky light'ı süremez ve bunu söylemek, kimsenin
+açıklayamadığı siyah bir ortam bırakmaktan iyidir.
+
+**Fixture yine boşluk taşıyordu.** Sahnedeki dome'un hiç texture'ı yoktu, yani
+`dome_texture` kaydı her zaman boştu ve **üç alıcının da ortam yolu** düşmesi
+imkânsız testlerle kapsanıyordu. Bu, animasyonlu ışıkta çıkan hatanın aynısı:
+fixture bir alanı taşıdığını söylüyor ama o alan hep boş. Dome'a elle yazılan
+gerçek bir `.hdr` kondu (32×16, düz RGBE; ikili dosya depoya konmuyor çünkü
+kimse review edemez) ve Blender ile Unreal'e assertion eklendi.

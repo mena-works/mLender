@@ -808,6 +808,9 @@ Kullanıcının elle doğrulaması gereken adımlar:
   ticks-per-frame'e **bölüyor** (1000 verince 1 saklıyor), transform kanalı
   bölmüyor. Tick'i geri çarp; yoksa bütün anahtarlar sekansın ilk birkaç
   tick'ine yığılır ve "animasyon yok" gibi görünür
+- ❌ Fixture'da bir alanın **dolu** olduğunu varsayma; bu depoda iki kez
+  çıktı (dört ışığın da örnekleri aynıydı, dome'un texture'ı hiç yoktu) ve
+  ikisinde de üç alıcının yolu düşmesi imkânsız assertion'larla kaplıydı
 - ❌ Component property'sini actor binding'ine anahtarlama; intensity ve
   LightColor `light_component`, focal/aperture `camera_component`
   binding'ine gider

@@ -27,6 +27,7 @@ import unreal
 
 from .constants import (
     IES_CONTENT_PATH,
+    TEXTURE_CONTENT_PATH,
     AREA_SIZE_PER_SCALE,
     DEFAULT_LIGHT_POWER_SCALE,
     DIRECTIONAL_LIGHT_UNIT_IS_LUX,
@@ -411,6 +412,83 @@ def apply_ies_profile(component, record, label, warnings):
     return True
 
 
+def apply_dome_texture(component, record, warnings):
+    """The dome HDR as the sky light cubemap.
+
+    Measured: Unreal reads a Radiance .hdr straight into a **TextureCube**, so
+    a lat-long environment needs no conversion step -- it is the import that
+    decides, which is why the result is checked rather than assumed. A format
+    that lands as a plain Texture2D cannot drive a sky light, and saying so is
+    better than leaving a black environment nobody can explain.
+    """
+    texture = record.get("dome_texture") or {}
+    path = texture.get("path") if isinstance(texture, dict) else texture
+    label = record.get("name") or "Dome"
+    if not path:
+        return False
+    if not os.path.isfile(path):
+        warnings.append(
+            'Dome light "{0}" references "{1}", which is not on disk, so the '
+            "sky light kept its captured scene.".format(label, path)
+        )
+        return False
+
+    name = safe_asset_name(
+        os.path.splitext(os.path.basename(path))[0], "Dome"
+    )
+    destination = "{0}/{1}".format(TEXTURE_CONTENT_PATH, name)
+    asset = None
+    if unreal.EditorAssetLibrary.does_asset_exist(destination):
+        asset = unreal.EditorAssetLibrary.load_asset(destination)
+    if asset is None:
+        task = unreal.AssetImportTask()
+        task.filename = path
+        task.destination_path = TEXTURE_CONTENT_PATH
+        task.destination_name = name
+        task.automated = True
+        task.replace_existing = True
+        task.save = False
+        try:
+            unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks(
+                [task]
+            )
+        except Exception as exc:
+            warnings.append(
+                'Dome light "{0}" texture could not be imported: {1}'.format(
+                    label, exc
+                )
+            )
+            return False
+        for imported in task.imported_object_paths or []:
+            asset = unreal.EditorAssetLibrary.load_asset(imported)
+            if asset is not None:
+                break
+
+    if not isinstance(asset, unreal.TextureCube):
+        warnings.append(
+            'Dome light "{0}" texture "{1}" arrived as {2} rather than a '
+            "cubemap, so the sky light kept its captured scene. A lat-long "
+            ".hdr is the format Unreal turns into one.".format(
+                label, os.path.basename(path),
+                type(asset).__name__ if asset is not None else "nothing",
+            )
+        )
+        return False
+    try:
+        component.set_editor_property(
+            "source_type", unreal.SkyLightSourceType.SLS_SPECIFIED_CUBEMAP
+        )
+        component.set_editor_property("cubemap", asset)
+    except Exception as exc:
+        warnings.append(
+            'Dome light "{0}" cubemap could not be attached: {1}'.format(
+                label, exc
+            )
+        )
+        return False
+    return True
+
+
 def create_sky_light(dome_records, unreal_scale, warnings):
     """The first active dome drives a Sky Light; the rest are reported.
 
@@ -434,14 +512,7 @@ def create_sky_light(dome_records, unreal_scale, warnings):
     )))
     _set_if_present(component, "light_color", light_colour(record))
 
-    texture = str(record.get("dome_texture") or "").strip()
-    if texture:
-        warnings.append(
-            'Dome light "{0}" references "{1}"; this build sets the sky light '
-            "intensity and colour but does not load the HDR cubemap.".format(
-                record.get("name") or "Dome", texture
-            )
-        )
+    apply_dome_texture(component, record, warnings)
     for extra in dome_records[1:]:
         warnings.append(
             'Dome light "{0}" was not applied: Unreal has one sky light per '

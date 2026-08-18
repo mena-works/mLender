@@ -256,6 +256,38 @@ def main():
               [w for w in result.get("warnings") or []
                if "carries coat," in w][:1])
 
+    # The dome HDR as the sky light cubemap. Measured: Unreal reads a
+    # Radiance .hdr straight into a TextureCube, so a lat-long environment
+    # needs no conversion step -- but the import decides that, so the result
+    # is checked rather than assumed.
+    dome_record = next(
+        (record for record in (package_data.get("lights") or [])
+         if (record.get("dome_texture") or {}).get("path")),
+        None,
+    )
+    if dome_record is not None:
+        sky = None
+        for actor in (unreal.get_editor_subsystem(
+                unreal.EditorActorSubsystem).get_all_level_actors() or []):
+            if isinstance(actor, unreal.SkyLight):
+                sky = actor
+                break
+        check("a sky light stands in for the dome", sky is not None)
+        if sky is not None:
+            component = sky.light_component
+            check("its source is the specified cubemap, not the scene",
+                  component.get_editor_property("source_type")
+                  == unreal.SkyLightSourceType.SLS_SPECIFIED_CUBEMAP,
+                  component.get_editor_property("source_type"))
+            cubemap = component.get_editor_property("cubemap")
+            check("and the Maya HDR is the cubemap",
+                  isinstance(cubemap, unreal.TextureCube),
+                  type(cubemap).__name__ if cubemap else "none")
+        check("nothing reported the HDR as unloaded",
+              not [w for w in result.get("warnings") or []
+                   if "cubemap" in w and "does not load" in w],
+              [w for w in result.get("warnings") or [] if "cubemap" in w][:1])
+
     # An IES profile, which shapes the light without taking over its
     # brightness. use_ies_brightness stays off on purpose: turning it on hands
     # the level to whatever the file says and abandons the measured intensity

@@ -945,6 +945,32 @@ def build_scene():
     dome = cmds.createNode("aiSkyDomeLight", name="aiDomeShape")
     cmds.setAttr(dome + ".intensity", 2.0)
     cmds.setAttr(dome + ".aiExposure", 1.0)
+    # A real Radiance .hdr on the dome. The dome had no texture at all before,
+    # so every receiver's environment path was covered by a record that was
+    # always empty. Written by hand rather than shipped as a binary: the
+    # format is a header and flat RGBE pixels, and a checked-in .hdr is a
+    # thing nobody can review.
+    dome_hdr = os.path.join(OUT, "fake_dome.hdr").replace("\\", "/")
+    width, height = 32, 16
+    rows = []
+    for row_index in range(height):
+        row = bytearray()
+        for column in range(width):
+            row += bytearray([
+                max(1, int(255 * (column / float(width - 1)))),
+                max(1, int(255 * (row_index / float(height - 1)))),
+                128,
+                128,
+            ])
+        rows.append(bytes(row))
+    with open(dome_hdr, "wb") as handle:
+        handle.write(b"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n")
+        handle.write("-Y {0} +X {1}\n".format(height, width).encode("ascii"))
+        for row in rows:
+            handle.write(row)
+    dome_file = cmds.shadingNode("file", asTexture=True, name="domeHdrFile")
+    cmds.setAttr(dome_file + ".fileTextureName", dome_hdr, type="string")
+    cmds.connectAttr(dome_file + ".outColor", dome + ".color", force=True)
 
     ies = cmds.createNode("aiPhotometricLight", name="aiIesShape")
     profile = os.path.join(OUT, "fake.ies").replace("\\", "/")

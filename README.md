@@ -423,6 +423,16 @@ Translucent and unlit surfaces do not take a coat: translucent clear coat is a
 different lighting argument in Unreal, and an unlit surface answers no light at
 all. Both are reported rather than approximated.
 
+### The dome HDR
+
+An Arnold sky dome drives Unreal's sky light, and its HDR now comes with it.
+Measured: Unreal reads a Radiance `.hdr` straight into a **TextureCube**, so a
+lat-long environment needs no conversion step — the sky light takes it with
+`source_type` set to the specified cubemap. The result is checked rather than
+assumed, because it is the import that decides: a format that lands as a plain
+`Texture2D` cannot drive a sky light, and that is reported rather than left as
+a black environment nobody can explain.
+
 ### IES profiles
 
 A Maya photometric light brings its `.ies` file, which Unreal reads natively as

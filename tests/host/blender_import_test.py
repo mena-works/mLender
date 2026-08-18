@@ -2759,6 +2759,23 @@ def main():
 
     check("dome became the World environment",
           bpy.context.scene.world is not None)
+
+    # The dome carries a real .hdr now. Before, the record was always empty,
+    # so every receiver's environment path was covered by a test that could
+    # not have failed.
+    world = bpy.context.scene.world
+    env_nodes = []
+    if world is not None and world.node_tree is not None:
+        env_nodes = [n for n in world.node_tree.nodes
+                     if n.type == "TEX_ENVIRONMENT"]
+    check("the dome HDR became an environment texture",
+          bool(env_nodes) and env_nodes[0].image is not None,
+          [n.type for n in (world.node_tree.nodes if world
+                            and world.node_tree else [])][:6])
+    if env_nodes and env_nodes[0].image is not None:
+        check("and it is the file Maya named",
+              env_nodes[0].image.name.lower().startswith("fake_dome"),
+              env_nodes[0].image.name)
     check("one dome counted", result["dome_count"] == 1, result["dome_count"])
 
     # Last, because importing replaces the scene: everything above is read
