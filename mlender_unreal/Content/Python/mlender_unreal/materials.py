@@ -899,16 +899,30 @@ def _report_unsupported(record, name, warnings, surface_class=None):
                 "value.".format(name, channel, texture.get("color_set"))
             )
 
-    if record.get("corrections") or record.get("unsupported_corrections"):
+    if record.get("unsupported_corrections"):
+        # The chain that *is* rebuilt reports itself per node, in
+        # apply_corrections. This one is for what Maya could not hand over at
+        # all, which is a different thing and has a different answer.
         warnings.append(
-            'Material "{0}" has Maya correction nodes between a texture and a '
-            "channel; this build wires the texture directly, so the "
-            "correction did not travel. Use Bake Procedurals to carry "
-            "it.".format(name)
+            'Material "{0}" has Maya correction nodes the exporter could not '
+            "describe, so the texture arrived uncorrected. Use Bake "
+            "Procedurals to carry them.".format(name)
         )
-    if record.get("layered_texture") or record.get("layers"):
+    if record.get("layered_texture"):
         warnings.append(
-            'Material "{0}" uses a layered texture stack, which this build '
-            "does not rebuild in Unreal; the base layer's texture was used. "
-            "Use Bake Procedurals to carry it.".format(name)
+            'Material "{0}" reads an unbaked layeredTexture stack, which this '
+            "build does not rebuild in Unreal; the base layer's texture was "
+            "used. Bake Procedurals resolves the stack into one texture, "
+            "which does travel.".format(name)
+        )
+    if record.get("layers"):
+        # Not the same thing as a layeredTexture, and the advice is not the
+        # same either: baking flattens a texture stack, but it cannot merge
+        # two shaders into one. A blend shader needs a material graph per
+        # material, which this build does not author.
+        warnings.append(
+            'Material "{0}" is a blend shader with {1} layer(s). Unreal '
+            "instances share one master material, and a stack of shaders "
+            "needs a graph of its own, so the base layer was used on its own. "
+            "Baking does not help here.".format(name, len(record["layers"]))
         )

@@ -1478,3 +1478,30 @@ düz çizgi çizen bir alıcı knee'de 0.9 yerine 0.4 okur.
 Fixture'da `remapValue` texture slot'u olmayan bir kanaldaydı (coat), yani
 eğrinin ineceği yer yoktu ve rebuild sınanamıyordu; slot'u olan bir vaka
 eklendi (`remapTexCube`, roughness).
+
+
+## layeredTexture — bulunan şey aradığım şey değildi
+
+`layeredTexture`'ı Unreal'de kurmaya giderken pakette **hiç** texture
+seviyesinde `layered` kaydı olmadığı ortaya çıktı. Sebebi basit: bake varsayılan
+olarak açık ve layeredTexture yığınları alıcıya ulaşmadan tek dokuya bake
+ediliyor. Yani bake açıkken layeredTexture zaten taşınıyor.
+
+Unreal'in "layered texture stack" diye uyardığı şey başka bir şeydi: materyal
+seviyesindeki `layers`, yani **blend shader** yığını (`aiMixShader`,
+`aiLayerShader`, `layeredShader`). Uyarı yanlış adı veriyordu ve yanlış çözümü
+öneriyordu — "Bake Procedurals kullan" bir texture yığınını düzleştirir ama iki
+**shader**'ı tek materyale indiremez.
+
+İkisi ayrıldı ve her biri kendi doğru cümlesini söylüyor. Kalan gerçek iş:
+
+| durum | bugün |
+|---|---|
+| layeredTexture, bake açık | **taşınıyor** (tek dokuya bake ediliyor) |
+| layeredTexture, bake kapalı | taban katman kullanılıyor, bildiriliyor |
+| blend shader (2+ shader) | taban katman kullanılıyor, bildiriliyor |
+
+Son iki satır aynı çözümü bekliyor: **materyal başına graph**. Unreal'de
+instance'lar tek master'ı paylaşır, değişken derinlikli bir yığın ise kendi
+graph'ını ister — bu, kullanıcının başta seçtiği "gerektiğinde graph"ın ta
+kendisi ve bu turdaki dört maddenin toplamından büyük bir iş.
