@@ -218,10 +218,14 @@ def import_scene_package(
         package_data, animation_result.get("sequence_path"), warnings
     )
 
+    # Maya's own warnings first: they describe what never left the scene,
+    # which is a different thing from what this build could not rebuild.
+    carried_warnings = carry_export_warnings(package_data, warnings)
     _report_uncarried(package_data, warnings)
 
     result = {
         "package_folder": package_folder,
+        "export_warning_count": carried_warnings,
         "fbx_path": fbx_path,
         "actor_count": len(actors),
         "mesh_count": matched,
@@ -265,6 +269,25 @@ def import_scene_package(
         engine = ""
     result["report_path"] = write_report(result, engine)
     return result
+
+
+def carry_export_warnings(package_data, warnings):
+    """Repeat what Maya said, where the person who has to act on it is.
+
+    The exporter writes its warnings into the package -- what did not travel,
+    what was tessellated, what froze because the frame range was not exported
+    -- and until now nothing read them. Every one of them was written for
+    somebody sitting in front of this application, and none of them arrived
+    here. A scene sent with Export Animation off produced no sequence, no
+    visibility keys and no explanation on either side.
+    """
+    said = [
+        str(line) for line in
+        ((package_data or {}).get("export_warnings") or []) if line
+    ]
+    for line in said:
+        warnings.append("Maya said: {0}".format(line))
+    return len(said)
 
 
 def _report_uncarried(package_data, warnings):

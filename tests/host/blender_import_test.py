@@ -450,6 +450,20 @@ def main():
         check("and no faces, the way a point cloud arrives",
               len(nucleus.data.polygons) == 0, len(nucleus.data.polygons))
 
+    # The same repetition on this side. A warning written in Maya and read by
+    # nobody is a warning that does not exist.
+    scene_json = glob.glob(os.path.join(find_package(), "*_scene.json"))
+    with open(scene_json[0], encoding="utf-8") as handle:
+        package_said = (json.load(handle).get("export_warnings") or [])
+    check("the package carries warnings from the Maya side",
+          bool(package_said), len(package_said))
+    if package_said:
+        repeated = [w for w in result.get("warnings") or []
+                    if str(w).startswith("Maya said:")]
+        check("and Blender repeats every one of them",
+              len(repeated) == len(package_said),
+              (len(repeated), len(package_said)))
+
     print("\nparticle bake")
     check("the import reported every bake",
           result["particle_baked_count"] == 3,

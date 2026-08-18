@@ -96,6 +96,25 @@ def validate_schema_version(package_data):
     return version
 
 
+def carry_export_warnings(package_data, warnings):
+    """Repeat what Maya said, where the person who has to act on it is.
+
+    The exporter writes its warnings into the package -- what did not travel,
+    what was tessellated, what froze because the frame range was not exported
+    -- and until now nothing read them. Every one of them was written for
+    somebody sitting in front of this application, and none of them arrived
+    here. A scene sent with Export Animation off produced no sequence, no
+    visibility keys and no explanation on either side.
+    """
+    said = [
+        str(line) for line in
+        ((package_data or {}).get("export_warnings") or []) if line
+    ]
+    for line in said:
+        warnings.append("Maya said: {0}".format(line))
+    return len(said)
+
+
 def import_scene_package(
     package_folder,
     package_data=None,
@@ -137,6 +156,9 @@ def import_scene_package(
     before_objects = set(bpy.data.objects)
     before_materials = set(bpy.data.materials)
     warnings = []
+    # Maya's own warnings, which nothing read until a scene arrived with
+    # its animation switched off and neither side said so.
+    carry_export_warnings(package_data, warnings)
     import_fbx(fbx_path, import_scale)
     # The cache goes in before anything is matched, so its objects are
     # organised, named and given materials by the same passes as the rest.

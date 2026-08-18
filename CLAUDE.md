@@ -717,6 +717,14 @@ Kullanıcının elle doğrulaması gereken adımlar:
   olabilir ve yanlışı okumak makul görünür
 - ❌ Exporter'ın yazdığı bir bayrağı okuyan var mı diye bakmadan bırakma; `unsupported_network`
   başından beri yazılıyordu ve **kimse okumuyordu** — kanal sessizce siyaha çöküyordu
+- ❌ Uyarıyı pakete yazıp işin bittiğini sanma; `export_warnings`'i **hiçbir
+  alıcı okumuyordu**, yani kapsam/tessellation/donmuş kanal uyarılarının
+  hiçbiri Blender veya Unreal'de görünmüyordu. Uyarı okunmuyorsa yok demektir
+- ❌ Animasyon kapalıyken sessiz kalma; `export_animation` varsayılanı **False**
+  ve tek kare export uçan kamerayı da blink'i de düşürüyor. Ne düştüğünü
+  kind kind say ve hangi kutunun tıklanacağını söyle
+- ❌ Blender host testinde çıkış kodunu geçti sanma; traceback verip **exit 0**
+  döndüğü ölçüldü. Özet satırını ara
 - ❌ AOV'u substring ile eşleştirme; `"z" in name` OpenPBR'ın **fuzz**'ını
   derinlik pass'i yapıyordu. Tam eşleşme kullan
 - ❌ Blender'da eşleşmeyen AOV'u sessizce custom slot yapma; shader yazmadıkça

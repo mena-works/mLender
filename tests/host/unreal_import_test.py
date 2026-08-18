@@ -681,6 +681,22 @@ def main():
                   and found.y == int(height),
                   (found.x, found.y) if found else None)
 
+    # Maya's own warnings, repeated here. Until a real scene turned up, the
+    # exporter wrote them into the package and no receiver read them -- so a
+    # scene sent with Export Animation off built no sequence and explained
+    # nothing on either side.
+    said = package_data.get("export_warnings") or []
+    check("the package carries warnings from the Maya side", bool(said),
+          len(said))
+    if said:
+        carried = [w for w in result.get("warnings") or []
+                   if w.startswith("Maya said:")]
+        check("and every one of them is repeated here",
+              len(carried) == len(said), (len(carried), len(said)))
+        check("the importer counted them",
+              result.get("export_warning_count") == len(said),
+              result.get("export_warning_count"))
+
     # AOVs, as a Movie Render Queue config. Render passes are not level
     # contents in Unreal, so what has to exist is the config the user renders
     # with -- and the mapping has to be by quantity, not by name: Unreal has a

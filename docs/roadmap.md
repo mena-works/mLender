@@ -1685,3 +1685,43 @@ Bu, deponun mayapy'de yaşadığı tuzağın aynadaki hali — orada repo kopyas
 kurulu modülün yerine geçiyordu, burada kurulu kopya repo'nun yerine geçiyor.
 Host testi artık gölgeleyen modülleri düşürüp yeniden import ediyor **ve hangi
 kopyayı sınadığını açıkça assert ediyor**; düşürdüğünü de not olarak yazıyor.
+
+
+## Gerçek sahne turu — ilk gönderi üç sessizlik buldu (2.62.0)
+
+Kullanıcı Maya'dan gerçek bir sahne gönderdi: Unreal Level Sequence kurmadı,
+görünürlük anahtarları gelmedi, kamera için timeline oluşmadı. Belirtiyi
+yeniden ürettim (keyli kamera + keyli görünürlük + hareketli obje, `export_scene`
+varsayılanlarıyla) ve üç sessizlik çıktı, üçü de üst üste biniyor:
+
+1. **`export_animation` varsayılanı `False`** — UI'daki "Export Animation"
+   kutusu işaretli değilse paket tek kare taşıyor. Üç belirtinin üçü de
+   bundan.
+2. **Exporter bunu söylemiyordu.** Keyli *materyal kanalları* için bir uyarı
+   vardı; kamera, ışık, görünürlük ve hareket için yoktu. Sahne uçan bir
+   kamerayla tek kare olarak export ediliyor ve paket bundan hiç bahsetmiyordu.
+3. **Alıcıların hiçbiri `export_warnings`'i okumuyordu.** Exporter uyarılarını
+   pakete yazıyor — kapsam taraması, tessellation, donmuş kanallar — ve ne
+   Blender ne Unreal onları gösteriyordu. Yani (2) düzeltilse bile mesaj yine
+   ulaşmayacaktı. Bu, deponun kendi yasak listesindeki "yazdığın bayrağı okuyan
+   var mı diye bakmadan bırakma" maddesinin aynısı, bu sefer uyarılarda.
+
+Düzeltmeler: `frozen_animation_kinds` tek kare export'un neyi düşürdüğünü kind
+kind sayıyor ve hangi kutunun tıklanacağını söylüyor; her iki alıcı da Maya'nın
+uyarılarını `Maya said:` önekiyle tekrarlıyor.
+
+Uçtan uca doğrulandı: animasyon kapalı export edilmiş bir paket Unreal'de artık
+`sequence_path=''` **ve** şu satırı üretiyor:
+
+```text
+Maya said: This export is a single frame, so the scene's animation did not
+travel: 1 camera(s) (shotCam1); 1 object(s) whose visibility is keyed (blinker);
+1 moving object(s) (mover). Tick Export Animation to carry it.
+```
+
+Varsayılan bilerek değiştirilmedi — lookdev için tek kare göndermek meşru bir
+akış. Ama artık keşfedilebilir.
+
+**Bir yan not:** Blender testi bu turda traceback verip **exit 0** döndü. Özet
+satırı çıkmadığı için yakalandı; "çıkış kodu sıfır" bu host'ta geçtiğinin
+kanıtı değil.

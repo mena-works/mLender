@@ -1568,6 +1568,30 @@ def main():
           "probeCurve" not in by_transform and "probeCircle" not in
           by_transform, sorted(by_transform))
 
+    # What a single frame export would be dropping. The scene is still open,
+    # so the detector can be asked directly -- and it has to name the kinds,
+    # because "there is animation" is not something a user can act on.
+    from mlender_exporter.animation import frozen_animation_kinds
+    from mlender_exporter.cameras import scene_camera_shapes
+    from mlender_exporter.lights import scene_light_shapes
+    frozen_kinds = frozen_animation_kinds(
+        scene_camera_shapes(), scene_light_shapes(),
+        payload.get("meshes") or [],
+    )
+    print("\nanimation left behind by a single frame export")
+    check("it names the cameras that move",
+          any("camera" in item for item in frozen_kinds), frozen_kinds)
+    check("and the objects whose visibility is keyed",
+          any("visibility" in item for item in frozen_kinds), frozen_kinds)
+    # This scene exports with animation on, so the warning itself must NOT be
+    # in the package -- a warning that fires when nothing was lost is worse
+    # than none.
+    check("and the warning stays out of an animated export",
+          not [w for w in payload.get("export_warnings") or []
+               if "did not travel" in w and "single frame" in w],
+          [w for w in payload.get("export_warnings") or []
+           if "single frame" in w][:1])
+
     print("\nparticles")
     by_particle = {}
     for record in payload.get("particles") or []:

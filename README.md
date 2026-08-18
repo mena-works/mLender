@@ -639,6 +639,24 @@ in 2, but `coat_ior` and `sheen_roughness` carry their defaults in all 31 — so
 on, and the three real ones were buried in them. Dependent channels are now
 gated on the weight that drives them.
 
+### If nothing animated arrives
+
+**Export Animation is off by default.** With it off the package carries a
+single frame, so there is no Level Sequence to build, no visibility keys and no
+camera timeline — in either receiver. That is a legitimate way to send a
+lookdev still, and it used to be a silent one: the scene's animation was
+dropped in Maya without a word, and the receiver had nothing to report because
+nothing had arrived.
+
+Both halves of that are closed. The exporter now names what a single frame is
+leaving behind — the cameras that move, the lights, the objects whose
+visibility is keyed, the ones that travel — and says which box to tick. And the
+receivers repeat **everything Maya said**: until a real scene turned up, the
+exporter wrote its warnings into the package and nothing on the other side ever
+read them, so coverage, tessellation and frozen-channel warnings were all
+written for somebody who never saw them. They appear now prefixed with
+`Maya said:`.
+
 ### Animation, as a Level Sequence
 
 The FBX brings mesh and skeletal animation with it. Everything else the

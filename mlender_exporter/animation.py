@@ -19,7 +19,12 @@ import maya.cmds as cmds
 import maya.mel as mel
 
 from .constants import DEFAULT_FPS, MAX_ANIMATION_FRAMES, TIME_UNIT_FPS
-from .mayautils import current_frame, plug_value
+from .mayautils import (
+    current_frame,
+    node_label,
+    parent_of,
+    plug_value,
+)
 
 
 def scene_fps():
@@ -145,6 +150,60 @@ def is_animated(node):
         return bool(cmds.listConnections(node, type="animCurve") or [])
     except Exception:
         return False
+
+
+def frozen_animation_kinds(camera_shapes, light_shapes, mesh_records):
+    """What a single frame export is leaving behind, kind by kind.
+
+    Keyed material channels already had a line of their own. Everything else
+    did not: a scene whose camera flies, whose lights fade and whose props
+    blink exported as one still frame and said nothing at all, so the receiver
+    built no sequence and nobody could tell whether that was the tool or the
+    checkbox.
+
+    Returns a list of readable phrases, or an empty list when the scene really
+    is still.
+    """
+    found = []
+
+    def _moves(shape):
+        parent = parent_of(shape)
+        return is_animated(shape) or (bool(parent) and is_animated(parent))
+
+    cameras = [
+        node_label(parent_of(shape) or shape)
+        for shape in (camera_shapes or []) if _moves(shape)
+    ]
+    if cameras:
+        found.append("{0} camera(s) ({1})".format(
+            len(cameras), ", ".join(sorted(cameras)[:4])))
+
+    lights = [
+        node_label(parent_of(shape) or shape)
+        for shape in (light_shapes or []) if _moves(shape)
+    ]
+    if lights:
+        found.append("{0} light(s) ({1})".format(
+            len(lights), ", ".join(sorted(lights)[:4])))
+
+    blinking = []
+    moving = []
+    for record in (mesh_records or []):
+        path = record.get("mesh_path") or ""
+        if not path:
+            continue
+        label = record.get("mesh") or path
+        if plug_animated(path + ".visibility"):
+            blinking.append(label)
+        elif is_animated(path):
+            moving.append(label)
+    if blinking:
+        found.append("{0} object(s) whose visibility is keyed ({1})".format(
+            len(blinking), ", ".join(sorted(blinking)[:4])))
+    if moving:
+        found.append("{0} moving object(s) ({1})".format(
+            len(moving), ", ".join(sorted(moving)[:4])))
+    return found
 
 
 def _number(value, default):

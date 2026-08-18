@@ -25,6 +25,7 @@ from .constants import (
 from .animation import (
     animated_material_channels,
     animation_info,
+    frozen_animation_kinds,
     material_animation_entries,
     sample_records,
 )
@@ -286,6 +287,18 @@ def export_scene(
         # export frame. That is a legitimate choice, but it was a silent one:
         # the package looked the same as one whose materials never moved.
         if not animation["enabled"]:
+            # The rest of the scene's animation, which had no line of its own
+            # until a real scene arrived with a flying camera and blinking
+            # props and produced a package that mentioned neither.
+            frozen = frozen_animation_kinds(
+                camera_shapes, light_shapes, mesh_records
+            )
+            if frozen:
+                warnings.append(
+                    "This export is a single frame, so the scene's animation "
+                    "did not travel: {0}. Tick Export Animation to carry "
+                    "it.".format("; ".join(frozen))
+                )
             keyed = animated_material_channels(mesh_records)
             if keyed:
                 warnings.append(
