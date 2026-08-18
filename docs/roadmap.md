@@ -1785,3 +1785,27 @@ her şey X'te hareket ediyordu, dolayısıyla konum eşlemesi tesadüfen doğru
 bir küp eklendi. İki yeni kontrol: Unreal'in Z'sinde düşüyor mu (Maya'nın Y'si),
 ve diğer iki eksende duruyor mu — ikincisi olmadan kayan bir eşleme yine
 "animasyon var" diye geçerdi.
+
+
+## Mevcut ışıklandırmayı koruma seçeneği (2.65.0)
+
+İstendi: Unreal'de hâlihazırda kurulu ışıklandırmayı silmeme seçeneği.
+
+Karar alıcı tarafında, çünkü bir level'da ne olduğu Maya'nın bilebileceği bir
+şey değil. `Tools > mLender` altında iki anahtar:
+
+* **Keep Existing Lighting** — level'ın kendi ışıkları, sky, fog, post process
+  volume ve reflection capture'ları duruyor.
+* **Build The Package's Lights** — kapalıyken paketin ışıkları hiç kurulmuyor.
+
+**İncelik:** korumak "her şeyi korumak" değil. Önceki gönderinin ürettiği
+ışıklar bizim tag'imizi taşıyor ve yine siliniyor — onları da korusak her
+gönderide paketin ışıklandırması bir kat daha üst üste binerdi ve bu, poz
+yanlış görünene kadar "çalışıyor" gibi durur. Ölçüldü: koruma açıkken bizimkiler
+5'te kalıyor, 10 olmuyor.
+
+Sky ve fog da ışıklandırma sayılıyor: bir level'ı aydınlatan kişi onları da
+koymuştur, ışıkları koruyup fog'u silmek kurduğu şeye benzemeyen bir sahne
+bırakır.
+
+Menüde tik gösterilemediği için `LiveLink Status` iki ayarı da yazıyor.

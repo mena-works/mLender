@@ -13,6 +13,7 @@ from .constants import (
     ACTOR_FOLDER_ROOT,
     CONTENT_ROOT,
     GENERATED_TAG,
+    LIGHTING_ACTOR_CLASSES,
 )
 
 
@@ -38,18 +39,58 @@ def is_generated(actor):
         return False
 
 
-def clear_level(warnings):
+def is_lighting_actor(actor):
+    """Whether an actor is part of the level's own lighting setup."""
+    try:
+        name = actor.get_class().get_name()
+    except Exception:
+        return False
+    if name in LIGHTING_ACTOR_CLASSES:
+        return True
+    # Reflection captures and light kinds a future engine adds are still
+    # lighting; the class list is the fast path, not the whole answer.
+    for base in ("Light", "ReflectionCapture"):
+        if name.endswith(base):
+            return True
+    return False
+
+
+def is_ours(actor):
+    """Whether a previous send made this actor."""
+    try:
+        return GENERATED_TAG in [str(tag) for tag in (actor.tags or [])]
+    except Exception:
+        return False
+
+
+def clear_level(warnings, keep_lighting=False):
     """Delete every actor in the level, then check that it worked.
 
     Actors that refuse to go are named rather than counted, because "3 actors
     survived" is not something a user can act on.
+
+    ``keep_lighting`` spares the lighting the level already had -- the lights,
+    the sky, the fog, the post process volume. What it does **not** spare is
+    the lighting a previous send made: those carry this tool's tag, and
+    keeping them would pile a new copy on top of the old one every time.
     """
     subsystem = _actor_subsystem()
+    kept = 0
     for actor in level_actors():
+        if keep_lighting and is_lighting_actor(actor) and not is_ours(actor):
+            kept += 1
+            continue
         try:
             subsystem.destroy_actor(actor)
         except Exception:
             pass
+    if keep_lighting:
+        warnings.append(
+            "Kept {0} lighting actor(s) the level already had; the package's "
+            "own lights were still rebuilt on top of them.".format(kept)
+            if kept else
+            "Keep existing lighting was on, but the level had none to keep."
+        )
 
     survivors = []
     for actor in level_actors():
@@ -57,6 +98,8 @@ def clear_level(warnings):
             # A level's own built-in actors cannot be destroyed and are not
             # scene content; anything else surviving is a real failure.
             if actor.get_class().get_name() in _PERMANENT_CLASSES:
+                continue
+            if keep_lighting and is_lighting_actor(actor) and not is_ours(actor):
                 continue
             survivors.append(actor.get_actor_label())
         except Exception:

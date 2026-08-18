@@ -58,6 +58,18 @@ def register():
         "import mlender_unreal; mlender_unreal.stop_listener()",
     )
     _entry(
+        menu, "mLenderKeepLights", "Toggle: Keep Existing Lighting",
+        "Leave the lighting this level already has in place when a package "
+        "arrives. Lights a previous send made are still replaced.",
+        "import mlender_unreal; "
+        "mlender_unreal.toggle_keep_existing_lights()",
+    )
+    _entry(
+        menu, "mLenderImportLights", "Toggle: Build The Package's Lights",
+        "Whether the lights in the package are rebuilt here at all.",
+        "import mlender_unreal; mlender_unreal.toggle_import_lights()",
+    )
+    _entry(
         menu, "mLenderStatus", "LiveLink Status",
         "Print the listener status and build number to the log",
         "import mlender_unreal; mlender_unreal.print_status()",
@@ -77,6 +89,18 @@ def unregister():
 
 
 def print_status():
+    # The toggles have no tick in the menu, so this is where their state is
+    # readable. A setting nobody can see the value of is a setting nobody
+    # trusts.
+    settings = livelink.configure()
     unreal.log(
         "mLender {0} -- {1}".format(BUILD_VERSION, livelink.get_status())
+    )
+    unreal.log(
+        "  existing lighting: {0} | package lights: {1} | "
+        "import scale: {2} | light power: {3}".format(
+            "kept" if settings.get("keep_existing_lights") else "cleared",
+            "built" if settings.get("import_lights") else "skipped",
+            settings.get("import_scale"), settings.get("power_scale"),
+        )
     )

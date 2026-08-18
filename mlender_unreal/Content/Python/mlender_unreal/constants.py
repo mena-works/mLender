@@ -10,7 +10,7 @@ Everything under "measured" was read off a live Unreal 5.8.1 session or solved
 from a probe, never guessed. tests/docs/unreal_calibration.md records how.
 """
 
-BUILD_VERSION = "2.64.0"
+BUILD_VERSION = "2.65.0"
 
 TOOL_NAME = "mLender"
 
@@ -40,6 +40,28 @@ SOCKET_POLL_SECONDS = 0.25
 # an actor tag instead.
 ASSET_PREFIX = "ML_"
 GENERATED_TAG = "mLender"
+
+# What counts as "the lighting already in the level", for the option that
+# keeps it. Deliberately wider than lights: an artist who has lit a level has
+# usually also placed the sky, the fog and a post process volume, and keeping
+# the lights while deleting those leaves a scene that looks nothing like what
+# they set up.
+LIGHTING_ACTOR_CLASSES = (
+    "DirectionalLight",
+    "PointLight",
+    "SpotLight",
+    "RectLight",
+    "SkyLight",
+    "SkyAtmosphere",
+    "ExponentialHeightFog",
+    "VolumetricCloud",
+    "PostProcessVolume",
+    "ReflectionCapture",
+    "SphereReflectionCapture",
+    "BoxReflectionCapture",
+    "PlanarReflection",
+    "LightmassImportanceVolume",
+)
 CONTENT_ROOT = "/Game/mLender"
 MESH_CONTENT_PATH = CONTENT_ROOT + "/Meshes"
 MATERIAL_CONTENT_PATH = CONTENT_ROOT + "/Materials"

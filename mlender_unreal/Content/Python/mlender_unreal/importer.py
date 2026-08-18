@@ -24,7 +24,7 @@ from .curves import import_curves
 from .empties import import_transforms
 from .images import reset_cache as reset_texture_cache
 from .instancers import import_instancers
-from .lights import import_lights
+from .lights import import_lights as build_lights
 from .materials import build_material, reset_cache as reset_material_cache
 from .particles import import_particles
 from .report import write_report
@@ -93,6 +93,8 @@ def import_scene_package(
     package_data=None,
     import_scale=1.0,
     power_scale=None,
+    keep_existing_lights=False,
+    import_lights=True,
 ):
     package_folder = normalize_folder(package_folder)
     if package_data is None:
@@ -109,7 +111,7 @@ def import_scene_package(
     # call unattended, so the level is cleared without saving. The tool's
     # destructiveness is documented; silently overwriting a user's save is not
     # something to add on top of it.
-    clear_level(warnings)
+    clear_level(warnings, keep_lighting=keep_existing_lights)
     purge_generated_content(warnings)
 
     before = {id(actor) for actor in level_actors()}
@@ -157,9 +159,21 @@ def import_scene_package(
             "materials": names,
         })
 
-    light_result = import_lights(
-        package_data, unreal_scale, metre_scale, power_scale, warnings
-    )
+    if import_lights:
+        light_result = build_lights(
+            package_data, unreal_scale, metre_scale, power_scale, warnings
+        )
+    else:
+        # Asked for, so said plainly: a scene sent without its lights looks
+        # like a scene whose lights failed to arrive.
+        wanted = len((package_data or {}).get("lights") or [])
+        if wanted:
+            warnings.append(
+                "Lighting transfer is off, so the package's {0} light(s) were "
+                "not built. The level keeps whatever lighting it "
+                "had.".format(wanted)
+            )
+        light_result = {"light_count": 0, "object_count": 0, "dome_count": 0}
     camera_result = import_cameras(package_data, unreal_scale, warnings)
 
     # Everything the JSON rebuilds rather than the FBX. Order is dependency

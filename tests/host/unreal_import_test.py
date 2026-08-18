@@ -1531,6 +1531,55 @@ def main():
             )
         break
 
+    # --- keeping the lighting the level already had.
+    #
+    # Imports over the level, so it runs after the assertions above. The
+    # interesting part is not that the artist's lights survive -- it is that
+    # ours do not pile up while they do. Keeping every light would double the
+    # package's lighting on every send, which looks like it worked until the
+    # exposure is wrong.
+    def lights_now():
+        mine, theirs = [], []
+        for actor in (unreal.get_editor_subsystem(
+                unreal.EditorActorSubsystem).get_all_level_actors() or []):
+            name = actor.get_class().get_name()
+            if not (name.endswith("Light")
+                    or name in ("SkyLight", "ExponentialHeightFog")):
+                continue
+            tags = [str(tag) for tag in (actor.tags or [])]
+            (mine if "mLender" in tags else theirs).append(
+                actor.get_actor_label())
+        return mine, theirs
+
+    ours_before, _theirs = lights_now()
+    studio = unreal.EditorLevelLibrary.spawn_actor_from_class(
+        unreal.DirectionalLight, unreal.Vector(0.0, 0.0, 500.0))
+    studio.set_actor_label("ArtistKeyLight")
+    fog = unreal.EditorLevelLibrary.spawn_actor_from_class(
+        unreal.ExponentialHeightFog, unreal.Vector(0.0, 0.0, 0.0))
+    fog.set_actor_label("ArtistFog")
+
+    mlender_unreal.import_scene_package(PACKAGE, keep_existing_lights=True)
+    ours_after, theirs_after = lights_now()
+    check("the lighting the level already had survives the send",
+          {"ArtistKeyLight", "ArtistFog"} <= set(theirs_after), theirs_after)
+    check("and the package's own lights do not pile up on top of it",
+          len(ours_after) == len(ours_before),
+          (len(ours_before), len(ours_after)))
+    # Sky and fog count as lighting too: an artist who lit a level placed
+    # those as well, and keeping the lights while deleting the fog leaves
+    # something that looks nothing like what they set up.
+    check("sky and fog count as lighting, not just lights",
+          "ArtistFog" in theirs_after, theirs_after)
+
+    mlender_unreal.import_scene_package(
+        PACKAGE, keep_existing_lights=True, import_lights=False)
+    ours_off, theirs_off = lights_now()
+    check("turning the transfer off builds none of the package's lights",
+          not ours_off, ours_off)
+    check("and still leaves the level's own alone",
+          {"ArtistKeyLight", "ArtistFog"} <= set(theirs_off), theirs_off)
+
     # --- a second package, exported with baking off.
     #
     # Baking resolves a layeredTexture into one file before any receiver sees

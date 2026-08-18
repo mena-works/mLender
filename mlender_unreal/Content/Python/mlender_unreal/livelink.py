@@ -36,7 +36,14 @@ _stop_event = None
 _tick_handle = None
 _messages = queue.Queue()
 _status = "Listener is stopped."
-_settings = {"import_scale": 1.0, "power_scale": 1.0}
+_settings = {
+    "import_scale": 1.0,
+    "power_scale": 1.0,
+    # Receiving side choices, so they belong here rather than in the package:
+    # what a level already holds is not something Maya can know about.
+    "keep_existing_lights": False,
+    "import_lights": True,
+}
 
 
 def get_status():
@@ -48,12 +55,45 @@ def is_running():
     return _server is not None
 
 
-def configure(import_scale=None, power_scale=None):
+def configure(import_scale=None, power_scale=None,
+              keep_existing_lights=None, import_lights=None):
+    """Set what the next package does when it lands.
+
+    Named rather than positional, and every argument optional, because these
+    are set one at a time from a menu entry.
+    """
     if import_scale is not None:
         _settings["import_scale"] = float(import_scale)
     if power_scale is not None:
         _settings["power_scale"] = float(power_scale)
+    if keep_existing_lights is not None:
+        _settings["keep_existing_lights"] = bool(keep_existing_lights)
+    if import_lights is not None:
+        _settings["import_lights"] = bool(import_lights)
     return dict(_settings)
+
+
+def toggle_keep_existing_lights():
+    """Flip it and say which way it went, since a menu shows no state."""
+    state = not _settings["keep_existing_lights"]
+    configure(keep_existing_lights=state)
+    unreal.log(
+        "mLender: existing lighting will be {0} on the next import.".format(
+            "kept" if state else "cleared with everything else"
+        )
+    )
+    return state
+
+
+def toggle_import_lights():
+    state = not _settings["import_lights"]
+    configure(import_lights=state)
+    unreal.log(
+        "mLender: the package's lights will {0} on the next import.".format(
+            "be built" if state else "not be built"
+        )
+    )
+    return state
 
 
 def start_listener(host=None, port=None):
@@ -194,6 +234,8 @@ def process_messages():
             payload.get("package_folder") or "",
             package_data=payload.get("package_json"),
             import_scale=_settings["import_scale"],
+            keep_existing_lights=_settings["keep_existing_lights"],
+            import_lights=_settings["import_lights"],
             power_scale=_settings["power_scale"],
         )
         _status = (

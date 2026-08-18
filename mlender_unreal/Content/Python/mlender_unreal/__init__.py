@@ -90,6 +90,8 @@ from . import ui  # noqa: E402,F401
 from .importer import import_scene_package  # noqa: E402
 from .livelink import (  # noqa: E402
     configure,
+    toggle_import_lights,
+    toggle_keep_existing_lights,
     get_status,
     is_running,
     start_listener,
@@ -101,6 +103,8 @@ from .ui import print_status, register, unregister  # noqa: E402
 __all__ = [
     "BUILD_VERSION",
     "configure",
+    "toggle_import_lights",
+    "toggle_keep_existing_lights",
     "get_status",
     "import_scene_package",
     "is_running",

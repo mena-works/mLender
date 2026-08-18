@@ -672,6 +672,30 @@ that silently stops tracking. The installer says which projects it skipped and
 why. `os.path.islink` does not answer this for junctions on Windows, so the
 reparse attribute is read directly.
 
+### Keeping the lighting a level already has
+
+The import replaces the level, which is the tool's design and is documented
+above. Two receiving-side options soften that for the case where somebody has
+lit the level in Unreal and does not want it wiped on every send. They live in
+`Tools > mLender`, because what a level already holds is not something Maya can
+know about:
+
+| toggle | what it does |
+|---|---|
+| **Keep Existing Lighting** | leaves the lights, sky, fog, post process volume and reflection captures the level already had |
+| **Build The Package's Lights** | off means the package's lights are not rebuilt at all |
+
+Keeping is not the same as keeping *everything*: lighting a previous send made
+carries this tool's tag and is still replaced. Keeping that too would stack a
+new copy of the package's lighting on top of the old one every time, which
+looks like it worked until the exposure is wrong.
+
+Sky, fog and post process count as lighting here. An artist who lit a level
+placed those as well, and keeping the lights while deleting the fog leaves
+something that looks nothing like what they set up.
+
+`LiveLink Status` prints both settings, since a menu entry shows no tick.
+
 ### Simulation
 
 A rigid body simulation carries. Measured with a Bullet sim: the solver drives
