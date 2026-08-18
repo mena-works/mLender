@@ -2809,6 +2809,47 @@ def main():
 
     # Last, because importing replaces the scene: everything above is read
     # from the baked package and would be gone after this.
+    print("\nanimated objects carried as a cache")
+    cache_packages = sorted(
+        glob.glob(os.path.join(TEST_ROOT, "animcache", "mLender_*"))
+    )
+    check("the animated-cache package is there", bool(cache_packages),
+          TEST_ROOT)
+    if cache_packages:
+        zi.import_scene_package(cache_packages[-1], import_scale=1.0)
+        cached = bpy.data.objects.get("simCube")
+        check("an object moved by a solver arrives", cached is not None)
+        if cached is not None:
+            # It came from the .abc rather than the FBX, which is the whole
+            # point: nothing keyed it, so the FBX had nothing to carry.
+            check("through the cache, not the FBX",
+                  bool(cached.get("ml_alembic")), dict(cached.items()))
+            names = [slot.material.name for slot in cached.material_slots
+                     if slot.material]
+            # Materials are why the JSON still describes a cached mesh. A
+            # cache with no material assignment renders grey and reads as a
+            # shading bug rather than a transfer that dropped the look.
+            check("wearing the material Maya gave it",
+                  any("simCube_shd" in name for name in names), names)
+        rider = bpy.data.objects.get("simRider")
+        check("so does the prop inside the moving group", rider is not None)
+        if rider is not None:
+            # The static group above the cache root sits thirty units up, and
+            # a root records its own matrix and nothing above it. Reading the
+            # evaluated vertices rather than the object origin, because the
+            # cache modifier is what places the geometry.
+            depsgraph = bpy.context.evaluated_depsgraph_get()
+            evaluated = rider.evaluated_get(depsgraph)
+            heights = [
+                (rider.matrix_world @ vertex.co).z
+                for vertex in evaluated.data.vertices
+            ]
+            # Thirty Maya centimetres, in Blender metres: the scene arrives
+            # at scene scale, so the number to beat is 0.2 rather than 20.
+            # Without the parent it sits at 0.005.
+            check("at the height its static parent put it",
+                  heights and max(heights) > 0.2, max(heights or [0.0]))
+
     print("\nramp texture, unbaked package")
     packages = sorted(
         glob.glob(os.path.join(TEST_ROOT, "unbaked", "mLender_*"))

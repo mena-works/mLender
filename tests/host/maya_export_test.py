@@ -2706,6 +2706,24 @@ def main():
           any("not instanced" in str(line)
               for line in animated_payload.get("export_warnings") or []),
           animated_payload.get("export_warnings"))
+    # Whether the FBX still bakes is decided from what is left in it, and it
+    # is worth asking directly: the export that prompted this spent over an
+    # hour baking seven thousand objects that do not move, and the answer is
+    # invisible from the package -- an FBX written without a bake looks like
+    # one whose objects happened to hold still.
+    from mlender_exporter.package import _fbx_animation
+    span = {"enabled": True, "start": 1.0, "end": 25.0, "step": 1.0}
+    check("with the cache off the FBX bakes as it always did",
+          _fbx_animation(span, False, [], [])["enabled"])
+    check("with a skeleton left in it, it still bakes",
+          _fbx_animation(span, True, [], ["|joint1"])["enabled"])
+    check("with a deformed mesh left in it, it still bakes",
+          _fbx_animation(span, True, ["|wobblePlane|wobblePlaneShape"],
+                         [])["enabled"])
+    check("but with every mover cached there is nothing left to bake",
+          not _fbx_animation(span, True, ["|flatCube|flatCubeShape"],
+                             [])["enabled"])
+
     # The default has to stay where it was, or every existing package changes
     # shape because a new checkbox exists. The main package has the cache on
     # for deformers, which is the closest neighbour this could leak into.

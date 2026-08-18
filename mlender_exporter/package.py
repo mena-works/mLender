@@ -41,6 +41,7 @@ from .particles import (
 )
 from .alembic import (
     animated_cache_roots,
+    deformed_shapes,
     cache_roots,
     cache_only_shapes,
     export_alembic,
@@ -414,6 +415,10 @@ def export_scene(
         for record in particle_list:
             if under_roots(record.get("particle_path"), cached):
                 record["alembic"] = True
+        fbx_shapes = [
+            shape for shape in mesh_shapes
+            if not under_roots(parent_of(shape), cached)
+        ]
         export_fbx(
             [
                 transform
@@ -421,7 +426,12 @@ def export_scene(
                 if not under_roots(transform, cached)
             ] + joints,
             fbx_path,
-            animation,
+            _fbx_animation(
+                animation,
+                cache_animated_meshes and not alembic.get("failed"),
+                fbx_shapes,
+                joints,
+            ),
         )
 
         payload = {
@@ -598,6 +608,35 @@ def _apply_light_linking(light_records, light_shapes, mesh_records):
     return restricted
 
 
+def _fbx_animation(animation, cache_animated_meshes, fbx_shapes, joints):
+    """The animation settings the FBX should be written with.
+
+    Baking is what makes an FBX carry motion, and it costs one scene
+    evaluation per frame per node. On a layout of seven thousand meshes over a
+    Bullet sim that was over an hour, nearly all of it spent baking objects
+    that do not move.
+
+    When every moving object was measured and sent to the cache, the FBX holds
+    what is left, and what is left provably did not move -- so there is nothing
+    for the bake to find. Two things still move without moving a transform,
+    and both keep it on: a skeleton, whose motion is on the joints, and a
+    deformer, whose motion is in the points.
+
+    The caller is responsible for the third: a cache that was asked for the
+    movers and could not be written leaves them in the FBX, where the bake is
+    the only thing that would carry them.
+    """
+    if not animation.get("enabled") or not cache_animated_meshes:
+        return animation
+    if joints:
+        return animation
+    if deformed_shapes(fbx_shapes):
+        return animation
+    frozen = dict(animation)
+    frozen["enabled"] = False
+    return frozen
+
+
 def _write_alembic(path, mesh_shapes, particle_list, particle_shapes,
                    animation, warnings, cache_animated_meshes=False):
     """Cache what FBX loses. Returns what the payload should say about it.
@@ -618,6 +657,11 @@ def _write_alembic(path, mesh_shapes, particle_list, particle_shapes,
         "mesh_count": 0,
         "particle_count": 0,
         "animated_count": 0,
+        # Whether the cache was *asked* for something and could not deliver,
+        # which is not the same as there being nothing to cache. The FBX bake
+        # decision needs the difference: skipping the bake when the cache
+        # failed would drop the motion twice over, silently.
+        "failed": False,
     }
     if not animation.get("enabled"):
         if cache_animated_meshes:
@@ -663,6 +707,7 @@ def _write_alembic(path, mesh_shapes, particle_list, particle_shapes,
             "Alembic cache could not be written, so {0} object(s) that need "
             "one travel as a single frame.".format(len(roots))
         )
+        empty["failed"] = True
         return empty
 
     # A purely rig-deformed mesh rides the FBX as a posable armature
