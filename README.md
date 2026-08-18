@@ -663,6 +663,15 @@ frame 1 in one application and frame 1001 in another is a conversation nobody
 can have. If the sequence starts at 1001, that is the scene's start frame, not
 an offset.
 
+### The installer and a development checkout
+
+A project whose `Plugins/mLender` is a **junction to a checkout** is left alone.
+That link is the development setup — the editor loads whatever the repository
+currently holds — and extracting over it would delete the link and leave a copy
+that silently stops tracking. The installer says which projects it skipped and
+why. `os.path.islink` does not answer this for junctions on Windows, so the
+reparse attribute is read directly.
+
 ### Simulation
 
 A rigid body simulation carries. Measured with a Bullet sim: the solver drives

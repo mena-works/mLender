@@ -4,6 +4,7 @@ import os
 import sys
 import glob
 import shutil
+import stat
 import zipfile
 import threading
 import tkinter
@@ -36,6 +37,23 @@ def bundled_version(path):
     name = os.path.basename(path or "")
     parts = name.split("-")
     return parts[1] if len(parts) > 2 else "?"
+
+def is_development_link(path):
+    """Whether a folder is a junction or symlink rather than a real folder.
+
+    A development install links the project's Plugins folder at the checkout,
+    which is the setup CLAUDE.md describes. Extracting over that would delete
+    the link and leave a copy that stops tracking the repository -- an
+    installer quietly undoing somebody's working setup. os.path.islink does
+    not answer this for junctions on Windows, so the reparse attribute is read
+    directly.
+    """
+    try:
+        attributes = os.lstat(path).st_file_attributes
+    except (OSError, AttributeError):
+        return False
+    return bool(attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+
 
 def replace_folder(path):
     """Delete a previous install before writing the new one.
@@ -432,8 +450,14 @@ class InstallerApp(ctk.CTk):
             plugins_dir = os.path.join(root, "Engine", "Plugins")
             self.after(0, lambda d=plugins_dir: self.status_lbl.configure(
                 text="Installing to {0}...".format(d)))
+            target = os.path.join(plugins_dir, "mLender")
+            if is_development_link(target):
+                self.after(0, lambda v=version: self.status_lbl.configure(
+                    text="Unreal {0} is linked to a checkout - left "
+                         "alone.".format(v), text_color="orange"))
+                continue
             try:
-                replace_folder(os.path.join(plugins_dir, "mLender"))
+                replace_folder(target)
                 with zipfile.ZipFile(self.unreal_z, "r") as archive:
                     archive.extractall(plugins_dir)
             except PermissionError:
@@ -462,7 +486,13 @@ class InstallerApp(ctk.CTk):
             # The project file is left alone. mLender enables itself, so
             # there is nothing to add to it -- and a project file carries
             # settings nobody wants an installer rewriting.
-            replace_folder(os.path.join(plugins_dir, "mLender"))
+            target = os.path.join(plugins_dir, "mLender")
+            if is_development_link(target):
+                self.after(0, lambda n=name: self.status_lbl.configure(
+                    text="{0} is linked to a checkout - left alone.".format(n),
+                    text_color="orange"))
+                continue
+            replace_folder(target)
             with zipfile.ZipFile(self.unreal_z, "r") as archive:
                 archive.extractall(plugins_dir)
 
@@ -492,6 +522,12 @@ def selftest(report_path):
         ),
         "unreal_engines": sorted(
             InstallerApp.detect_unreal_engines(None)
+        ),
+        "unreal_linked": sorted(
+            name for name, uproject in
+            InstallerApp.detect_unreal_projects(None).items()
+            if is_development_link(
+                os.path.join(os.path.dirname(uproject), "Plugins", "mLender"))
         ),
     }
     with open(report_path, "w", encoding="utf-8") as handle:
