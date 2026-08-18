@@ -125,7 +125,7 @@ mlender_unreal/       # Unreal plugin (klasörün kendisi plugin'dir)
 
 packaging/               # kurulabilir çıktılar
   build_release.py       # Blender add-on .zip + Maya modülü + Unreal plugin .zip
-  verify_release.py      # ikisini de gerçek host'lara kurup dener
+  verify_release.py      # üçünü de gerçek host'lara kurup dener
 
 tests/                   # amaca göre ayrılmış, ayrıntı tests/README.md
   check_contracts.py     # host gerekmez, saniyeler — en sık çalıştırılan
@@ -589,12 +589,22 @@ bir tanesi elle yazılabilir. **Python çıktısı stdout'a değil
 `<proje>/Saved/Logs/<proje>.log` içine düşer** — sonucu oradan `MLPASS` /
 `MLFAIL` ile ara. Bu, headless Unreal'da ilk saati yiyen ayrıntıdır.
 
-`verify_release.py` formalite değildir: modülü **repoya erişilemeyen** bir
-çalışma dizininden gerçek mayapy'ye, add-on'u tek kullanımlık bir Blender
-home'una kurar. İki artefakt da bir kez yanlıştı ve yalnız kurunca ortaya
-çıktı. Bir kez de **testin kendisi** yalan söyledi: mayapy çalışma dizinini
-`sys.path`'e koyduğu için repo kopyası import ediliyor, modül hiç denenmiyor
-ve "ok" yazıyordu.
+`verify_release.py` formalite değildir: **üç** artefaktı da gerçek host'a
+kurar — modülü repoya erişilemeyen bir çalışma dizininden mayapy'ye, add-on'u
+tek kullanımlık bir Blender home'una, plugin'i burada yaratılıp silinen bir
+Unreal projesinin `Plugins/`'ine. Üçü de bir kez yanlıştı ve yalnız kurunca
+ortaya çıktı. Bir kez de **testin kendisi** yalan söyledi: mayapy çalışma
+dizinini `sys.path`'e koyduğu için repo kopyası import ediliyor, modül hiç
+denenmiyor ve "ok" yazıyordu — Unreal ayağı da bu yüzden import'un **kurulu
+kopyadan** geldiğini ayrıca kontrol ediyor.
+
+Unreal ayağının iki ayrıntısı: plugin `EnabledByDefault: false` taşıyor, yani
+`Plugins/`'e koymak yetmez, `.uproject`'te etkinleştirilmesi gerekir (INSTALL.md
+zaten böyle söylüyor; kontrolün ilk sürümü bu adımı atlayıp paketi bozuk
+sanmıştı — bozuk olan kontroldü). Ve `Tools > mLender` menüsü commandlet'te
+**doğrulanamaz**: headless editörde menü asılacak yer yok, plugin bunu zaten
+açıkça bildiriyor. Kontrol menüyü değil, `register()`'ın cevap verdiğini ve
+açılış satırının log'a düştüğünü sınıyor.
 
 Kurulu tek Blender sürümü **5.2** (2026-08-18'de kontrol edildi; 4.1/4.3/4.5
 bir zamanlar kuruluydu, artık değil). Kullanıcının hedefi de 5.2.

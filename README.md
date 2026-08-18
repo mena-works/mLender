@@ -72,7 +72,7 @@ have drifted apart:
 
 ```bash
 python packaging/build_release.py     # writes dist/
-python packaging/verify_release.py    # installs them into the real hosts
+python packaging/verify_release.py    # installs all three into the real hosts
 ```
 
 ```text
@@ -92,11 +92,21 @@ dropped anywhere on `MAYA_MODULE_PATH` — for example
 itself, so nothing shared has to be edited and removing the tool is deleting
 two things.
 
-`verify_release.py` is not a formality. It installs the module into a real
-mayapy with a working directory the repository cannot be reached from, and the
-add-on into a throwaway Blender home, then checks the import came from the
-artefact rather than from somewhere else. Both artefacts were wrong once while
-this was being written and only installing them showed it.
+`verify_release.py` is not a formality. It installs all three artefacts into
+their real hosts: the module into a mayapy with a working directory the
+repository cannot be reached from, the add-on into a throwaway Blender home,
+and the plugin into the `Plugins/` folder of an Unreal project made there and
+deleted afterwards. Each time it checks the import came from the artefact
+rather than from somewhere else. All three were wrong once while this was being
+written and only installing them showed it.
+
+Two things about the Unreal leg are worth knowing. The plugin ships
+`EnabledByDefault: false`, so dropping it into `Plugins/` is not enough — it
+has to be enabled, which is what the install notes say and what the check now
+does. And `Tools > mLender` cannot be verified headlessly: a commandlet has no
+editor UI to hang a menu on, which the plugin says out loud rather than
+failing. The check asks for what is checkable — that `register()` answered, and
+that the startup line reached the log.
 
 > The zip keeps `mlender_importer` as its top folder because that folder name
 > **is** the add-on's module name. Rename it and Blender treats the result as
@@ -1082,7 +1092,7 @@ mlender_importer/        # Blender side (multi-file add-on)
 
 packaging/
   build_release.py          # the two installable artefacts
-  verify_release.py         # installs them into the real hosts
+  verify_release.py         # installs all three into the real hosts
 
 tests/
   check_contracts.py        # no host needed, runs in seconds

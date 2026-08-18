@@ -1565,3 +1565,29 @@ hiçbir şey taşımayacaktı. Gerçek PNG'lere çevrildi.
 
 Ve iki uyarı artık yanlış olduğu için susturuldu: yığın kurulduğunda
 "flat value'ya düştü" ve "taban katman kullanıldı" cümleleri doğru değil.
+
+
+## Release doğrulaması Unreal'i kapsıyor (2.60.0)
+
+`build_release.py` üç artefakt üretiyordu, `verify_release.py` ikisini
+deniyordu — ve denenmeyen, üçünün **en yenisi ve en büyüğü** olan Unreal
+plugin'iydi. Bu tam olarak deponun kendi dersinin tekrarı: "iki artefakt da bir
+kez yanlıştı ve yalnız kurunca ortaya çıktı."
+
+Şimdi zip, burada yaratılıp silinen bir Unreal projesinin `Plugins/`'ine
+açılıyor ve editör headless başlatılıp import ediliyor. Kontrol edilenler:
+arşivin tek bir plugin klasörü taşıdığı, `.uplugin`'in kökte olduğu (Unreal
+plugin'i klasör adından değil ondan tanır), Python'un yalnız Unreal'in baktığı
+`Content/Python` altında olduğu, paketin **kurulu kopyadan** import edildiği
+(Maya ayağının bir kez düştüğü tuzak), bildirilen bağımlılıkların geldiği ve
+public API'nin yerinde olduğu.
+
+İki şey ölçülünce ortaya çıktı:
+
+1. **Kontrolün ilk sürümü yanlıştı, paket değil.** Plugin
+   `EnabledByDefault: false` taşıyor; `Plugins/`'e koymak yetmiyor,
+   etkinleştirmek gerekiyor. INSTALL.md bunu zaten söylüyordu — atlayan bendim.
+2. **`Tools > mLender` headless doğrulanamaz.** Commandlet'te menü asılacak yer
+   yok ve plugin bunu zaten açıkça bildiriyor. Kontrol menüyü istemek yerine
+   `register()`'ın cevap verdiğini ve açılış satırının log'a düştüğünü sınıyor
+   — veremeyeceği şeyi isteyen bir test, sınırı yazmayan bir testten kötüdür.
