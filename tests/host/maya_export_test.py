@@ -1015,6 +1015,12 @@ def build_scene():
     cmds.setAttr(rider + ".translateX", 2.0)
     sim_group = cmds.group(rider, name="simGroup")
     cmds.setAttr(sim_group + ".translateX", -22)
+    # A static group above the moving one, holding an offset nothing else in
+    # this scene has. A cache root records its own matrix and nothing above
+    # it, so without world space this height is dropped and the object lands
+    # thirty units low -- measured, a cube at world x=100 arrived at x=0.
+    sim_yard = cmds.group(sim_group, name="simYard")
+    cmds.setAttr(sim_yard + ".translateY", 30)
     cmds.setKeyframe(sim_group + ".translateZ", time=1, value=0.0)
     cmds.setKeyframe(sim_group + ".translateZ", time=25, value=9.0)
     rider_shader = cmds.shadingNode(

@@ -170,8 +170,8 @@ def main():
           ungrouped is not None
           and scene_collections(ungrouped) == [result["root_collection"]],
           [c.name for c in ungrouped.users_collection] if ungrouped else None)
-    check("eleven collections were reported",
-          result["group_collection_count"] == 11,
+    check("twelve collections were reported",
+          result["group_collection_count"] == 12,
           result["group_collection_count"])
 
     print("\ninstances")

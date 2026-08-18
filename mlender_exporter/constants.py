@@ -703,8 +703,16 @@ DEFORMER_NODE_TYPE = "geometryFilter"
 ALEMBIC_FILE_SUFFIX = "_cache.abc"
 
 # uvWrite and writeUVSets so a cached mesh keeps the UVs the FBX would have
-# carried; worldSpace is deliberately absent, so the transform stays on the
-# object rather than being folded into the points.
+# carried.
+#
+# worldSpace puts each root's own matrix in world space, which is not the same
+# as folding the motion into the points: the transform still travels on the
+# object. Without it a root's local matrix is all that is written and anything
+# above it is lost. Measured: a cube at world x=100 through a static parent
+# group arrived at x=0, geometry, animation and all -- so an object sitting
+# inside any transformed group came in somewhere else entirely. Roots are
+# chosen at the top of the *moving* hierarchy, which is routinely still inside
+# a static one, so this is the common case rather than the corner.
 #
 # writeFaceSets is what carries the material assignment. Measured in Unreal:
 # without it every material slot on the imported cache is called
@@ -713,6 +721,7 @@ ALEMBIC_FILE_SUFFIX = "_cache.abc"
 # checker. With it the slots are named after the shading group, and a mesh
 # split between two shaders arrives as two slots rather than one.
 ALEMBIC_EXPORT_FLAGS = (
+    "-worldSpace",
     "-uvWrite",
     "-writeUVSets",
     "-writeVisibility",

@@ -1640,6 +1640,20 @@ def main():
             check("and the prop inside the moving group got its own",
                   any("simRider_shd" in str(name) for name in names), names)
 
+            # Where the cache sits, not just that it is there. The prop in
+            # the moving group hangs under a static group thirty units up,
+            # and that group is above the cache root: if the export wrote
+            # only the root's own matrix, everything in the cache would sit
+            # near the floor and still look like a working transfer.
+            bounds = cache_actors[0].get_actor_bounds(False)
+            top = bounds[0].z + bounds[1].z
+            # Thirty Maya units up, in Unreal centimetres. Everything else in
+            # the cache tops out around twelve, so the threshold sits between
+            # the two rather than at either.
+            unit = float(cache_data.get("meters_per_maya_unit") or 0.01) * 100.0
+            check("the offset of a static parent above the root survives",
+                  top > 20.0 * unit, (top, unit))
+
         labels = set()
         for actor in actors:
             try:
