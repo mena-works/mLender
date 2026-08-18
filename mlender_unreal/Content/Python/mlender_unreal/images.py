@@ -8,10 +8,13 @@ receiver learned to copy a shared texture once and the same applies here.
 """
 
 import os
+import struct
+import tempfile
+import zlib
 
 import unreal
 
-from .constants import TEXTURE_CONTENT_PATH
+from .constants import ASSET_PREFIX, TEXTURE_CONTENT_PATH
 from .utils import resolve_recorded_path, safe_asset_name
 
 
@@ -122,6 +125,95 @@ def _check_udim(asset, path, channel, warnings):
             'tile, so the channel "{1}" is not tiled. The other tiles have to '
             "sit beside the first one.".format(os.path.basename(path), channel)
         )
+
+
+def _png_bytes(values):
+    """A 16 bit greyscale PNG, one row, written by hand.
+
+    Written rather than imported because the receiver may only use the
+    standard library, and 8 bits would put visible steps in a curve that a
+    roughness reads straight off.
+    """
+    width = len(values)
+    raw = bytearray()
+    raw.append(0)  # filter: none, one row
+    for value in values:
+        clamped = 0 if value < 0.0 else (65535 if value > 1.0
+                                         else int(round(value * 65535.0)))
+        raw.append((clamped >> 8) & 0xFF)
+        raw.append(clamped & 0xFF)
+
+    def chunk(kind, payload):
+        return (struct.pack(">I", len(payload)) + kind + payload
+                + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF))
+
+    header = struct.pack(">IIBBBBB", width, 1, 16, 0, 0, 0, 0)
+    return (b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", header)
+            + chunk(b"IDAT", zlib.compress(bytes(raw), 9))
+            + chunk(b"IEND", b""))
+
+
+def ramp_lut_texture(label, values, warnings):
+    """A ramp as a one row lookup texture Unreal can sample.
+
+    The whole of remapValue folds in here: its input range, its curve and its
+    output range are all evaluated into the row, so the material needs one
+    sample and no arithmetic around it. A curve cannot be approximated by a
+    number, and this is the one correction where the curve *is* the node.
+    """
+    if not values:
+        return None
+    name = safe_asset_name("{0}LUT_{1}".format(ASSET_PREFIX, label), "LUT")
+    destination = "{0}/{1}".format(TEXTURE_CONTENT_PATH, name)
+    if unreal.EditorAssetLibrary.does_asset_exist(destination):
+        existing = unreal.EditorAssetLibrary.load_asset(destination)
+        if existing is not None:
+            return existing
+
+    folder = os.path.join(tempfile.gettempdir(), "mlender_luts")
+    try:
+        if not os.path.isdir(folder):
+            os.makedirs(folder)
+        path = os.path.join(folder, name + ".png")
+        with open(path, "wb") as handle:
+            handle.write(_png_bytes(values))
+    except Exception as exc:
+        warnings.append(
+            'A remap curve for "{0}" could not be written: {1}'.format(
+                label, exc
+            )
+        )
+        return None
+
+    asset = _import_texture_asset(path, warnings)
+    if asset is None:
+        return None
+    for name_, value in (
+        ("srgb", False),
+        ("compression_settings",
+         getattr(unreal.TextureCompressionSettings, "TC_GRAYSCALE", None)),
+        ("filter", getattr(unreal.TextureFilter, "TF_BILINEAR", None)),
+    ):
+        if value is None:
+            continue
+        try:
+            asset.set_editor_property(name_, value)
+        except Exception:
+            pass
+    # A curve that wraps would read its own far end at the edges.
+    for axis in ("address_x", "address_y"):
+        try:
+            asset.set_editor_property(
+                axis, unreal.TextureAddress.TA_CLAMP
+            )
+        except Exception:
+            pass
+    try:
+        unreal.EditorAssetLibrary.save_loaded_asset(asset, False)
+    except Exception:
+        pass
+    return asset
 
 
 def _configure_texture(asset, channel, colour_data):

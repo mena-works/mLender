@@ -114,9 +114,9 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("59 meshes imported", result["mesh_count"] == 59,
+    check("60 meshes imported", result["mesh_count"] == 60,
           result["mesh_count"])
-    check("45 materials built", result["material_count"] == 45,
+    check("46 materials built", result["material_count"] == 46,
           result["material_count"])
     # Four of the eight cubes asked for subdivision in Maya, the displaced one
     # among them; the rest must arrive unmodified.

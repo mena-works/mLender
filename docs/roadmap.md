@@ -1458,3 +1458,23 @@ yığına altı değil **iki** node ekliyor.
 
 HSV'de çalışan `saturation`/`hueShift` ve kanal başına farklı `multiply`/`add`
 katlanmıyor; kırmızı kanala kırpmak yerine adıyla bildiriliyorlar.
+
+
+## remapValue (2.57.0) — eğri sayıya katlanmaz, dokuya katlanır
+
+Zincirin geri kalanı afin olduğu için tek çarpan/toplama katlanıyordu;
+`remapValue`'nun **rampası asıl işi**, o yüzden katlanamaz. Çözüm: rampayı tek
+satırlık 16 bit bir lookup dokusuna yazmak ve materyalde kanalın kendi
+değeriyle örneklemek. Giriş aralığı ve çıkış aralığı da satıra katlanıyor,
+yani materyalde örnekleme dışında aritmetik kalmıyor.
+
+PNG elle yazılıyor (zlib + struct, standart kütüphane) çünkü alıcı üçüncü parti
+kullanmıyor; 8 bit bir roughness eğrisinde görünür basamak bırakırdı.
+
+Eğri matematiği `utils.py`'de, yani **host'suz** doğrulanıyor: sözleşme testi
+knee'yi kontrol ediyor. Ayırt edici olduğu için değerli — stop'ları yok sayıp
+düz çizgi çizen bir alıcı knee'de 0.9 yerine 0.4 okur.
+
+Fixture'da `remapValue` texture slot'u olmayan bir kanaldaydı (coat), yani
+eğrinin ineceği yer yoktu ve rebuild sınanamıyordu; slot'u olan bir vaka
+eklendi (`remapTexCube`, roughness).

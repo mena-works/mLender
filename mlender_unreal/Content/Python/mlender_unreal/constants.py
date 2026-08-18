@@ -10,7 +10,7 @@ Everything under "measured" was read off a live Unreal 5.8.1 session or solved
 from a probe, never guessed. tests/docs/unreal_calibration.md records how.
 """
 
-BUILD_VERSION = "2.56.0"
+BUILD_VERSION = "2.57.0"
 
 TOOL_NAME = "mLender"
 
@@ -208,6 +208,15 @@ CORRECTION_GAMMA_SUFFIX = "Gamma"
 #   B = pivot * (1 - contrast) * 2^exposure * multiply + add
 CORRECTION_SCALE_SUFFIX = "CorrScale"
 CORRECTION_OFFSET_SUFFIX = "CorrOffset"
+# remapValue is the one correction whose curve cannot be a number, so
+# it rides as a one row lookup texture. Its input range, curve and
+# output range are all evaluated into the row.
+CORRECTION_REMAP_SUFFIX = "RemapCurve"
+CORRECTION_REMAP_SWITCH_SUFFIX = "RemapUse"
+# How many samples the row holds. 256 is enough for a curve a
+# roughness reads; the texture is 16 bit so the steps are the
+# sampling, not the precision.
+REMAP_LUT_SAMPLES = 256
 CORRECTION_CLAMP_MIN_SUFFIX = "ClampMin"
 CORRECTION_CLAMP_MAX_SUFFIX = "ClampMax"
 CORRECTION_CLAMP_SWITCH_SUFFIX = "ClampUse"
@@ -215,7 +224,7 @@ CORRECTION_CLAMP_SWITCH_SUFFIX = "ClampUse"
 # What this build can rebuild. Anything else in a chain is reported, and so is
 # a chain that puts these in an order the fixed stack cannot express.
 REBUILT_CORRECTIONS = ("gammaCorrect", "clamp",
-                       "aiColorCorrect")
+                       "aiColorCorrect", "remapValue")
 
 MASTER_SWITCH_SUFFIX = "Use"
 

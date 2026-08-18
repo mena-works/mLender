@@ -452,8 +452,16 @@ full table is in `tests/docs/color_correct.md`.
 
 `saturation` and `hueShift` work in HSV, not on channels, and a gain that
 differs per channel cannot ride a one-scalar stack; both are named in a warning
-rather than truncated to the red channel. So is `remapValue`, whose ramp is the
-whole point of it.
+rather than truncated to the red channel. 
+
+`remapValue` is the one correction whose curve cannot fold into a number, so it
+arrives as an asset: its stops are evaluated into a one-row 16-bit lookup
+texture that the material samples with the channel's own value. Its input range
+and output range fold into the row as well, so the material needs the sample
+and no arithmetic around it. The curve maths lives in `utils.py`, which imports
+no engine, so the contract test checks the knee without opening Unreal — a
+receiver that ignored the stops and drew a straight line would read 0.4 where
+this reads 0.9.
 
 The clamp is switched rather than always on: clamping to 0..1 is not identity
 for a channel that legitimately goes past one, and emission does.

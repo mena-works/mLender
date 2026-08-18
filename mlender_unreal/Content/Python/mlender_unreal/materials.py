@@ -28,6 +28,9 @@ from .constants import (
     CORRECTION_CLAMP_MIN_SUFFIX,
     CORRECTION_CLAMP_SWITCH_SUFFIX,
     CORRECTION_GAMMA_SUFFIX,
+    CORRECTION_REMAP_SUFFIX,
+    CORRECTION_REMAP_SWITCH_SUFFIX,
+    REMAP_LUT_SAMPLES,
     CORRECTION_OFFSET_SUFFIX,
     CORRECTION_SCALE_SUFFIX,
     ASSET_PREFIX,
@@ -44,11 +47,12 @@ from .constants import (
     SPECULAR_WEIGHT_TO_LEVEL,
     UNREAL_METADATA_CHANNELS,
 )
-from .images import load_texture
+from .images import load_texture, ramp_lut_texture
 from .utils import (
     channel_texture_path,
     colour,
     is_colour_data,
+    remap_curve_samples,
     safe_asset_name,
     scalar,
 )
@@ -260,13 +264,41 @@ def _correction_stack(material, parameter, sampler, x, y):
     if sampler is None:
         return None
 
+    # remapValue first, because in Maya it sits on the raw input. It is a
+    # curve, and a curve cannot fold into a number the way the rest of the
+    # chain does, so it rides as a one row texture sampled by the value.
+    source = sampler
+    curve = _texture_parameter(
+        material, parameter + CORRECTION_REMAP_SUFFIX, x - 400, y + 300,
+        unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_GRAYSCALE,
+    )
+    coordinate = _expression(
+        material, "MaterialExpressionAppendVector", x - 260, y + 300
+    )
+    half = _expression(material, "MaterialExpressionConstant", x - 400, y + 360)
+    remap_use = _scalar_parameter(
+        material, parameter + CORRECTION_REMAP_SWITCH_SUFFIX, 0.0,
+        x - 400, y + 420
+    )
+    if None not in (curve, coordinate, half, remap_use):
+        try:
+            half.set_editor_property("r", 0.5)
+        except Exception:
+            pass
+        library.connect_material_expressions(sampler, "", coordinate, "A")
+        library.connect_material_expressions(half, "", coordinate, "B")
+        library.connect_material_expressions(coordinate, "", curve, "UVs")
+        remapped = _lerp(material, sampler, curve, remap_use, x - 120, y + 300)
+        if remapped is not None:
+            source = remapped
+
     exponent = _scalar_parameter(
         material, parameter + CORRECTION_GAMMA_SUFFIX, 1.0, x - 200, y + 60
     )
     power = _expression(material, "MaterialExpressionPower", x, y)
     if exponent is None or power is None:
-        return sampler
-    library.connect_material_expressions(sampler, "", power, "Base")
+        return source
+    library.connect_material_expressions(source, "", power, "Base")
     library.connect_material_expressions(exponent, "", power, "Exponent")
 
     # Everything a colour correct node does after its gamma -- contrast,
@@ -723,8 +755,11 @@ def apply_corrections(instance, channel_record, parameter):
     gamma = 1.0
     scale = 1.0
     shift = 0.0
+    remap = None
     clamp_low = None
     clamp_high = None
+    # A one item list so the closures below can read it without rebinding.
+    identity_so_far = [True]
 
     def affine_is_identity():
         return abs(scale - 1.0) < 1e-6 and abs(shift) < 1e-6
@@ -732,6 +767,10 @@ def apply_corrections(instance, channel_record, parameter):
     for entry in chain:
         kind = str((entry or {}).get("type") or "")
         parameters = (entry or {}).get("parameters") or {}
+
+        identity_so_far[0] = (affine_is_identity()
+                              and abs(gamma - 1.0) < 1e-6
+                              and remap is None)
 
         if kind == "gammaCorrect":
             value = _first(parameters.get("gamma"), 1.0)
@@ -741,6 +780,16 @@ def apply_corrections(instance, channel_record, parameter):
                 unhandled.append("gammaCorrect after another correction")
                 continue
             gamma = gamma * value
+
+        elif kind == "remapValue":
+            if not identity_so_far[0]:
+                unhandled.append("remapValue after another correction")
+                continue
+            curve_values = remap_curve_samples(parameters, REMAP_LUT_SAMPLES)
+            if curve_values is None:
+                unhandled.append("remapValue with no usable curve")
+            else:
+                remap = curve_values
 
         elif kind == "clamp":
             clamp_low = _first(parameters.get("clamp_min"), 0.0)
@@ -798,6 +847,14 @@ def apply_corrections(instance, channel_record, parameter):
         _set_scalar(instance, parameter + CORRECTION_SCALE_SUFFIX, scale)
     if abs(shift) > 1e-6:
         _set_scalar(instance, parameter + CORRECTION_OFFSET_SUFFIX, shift)
+    if remap is not None:
+        curve = ramp_lut_texture(parameter, remap, [])
+        if curve is None:
+            unhandled.append("remapValue curve could not be built")
+        elif _set_texture(instance, parameter + CORRECTION_REMAP_SUFFIX,
+                          curve):
+            _set_scalar(instance,
+                        parameter + CORRECTION_REMAP_SWITCH_SUFFIX, 1.0)
     if clamp_low is not None:
         _set_scalar(instance, parameter + CORRECTION_CLAMP_MIN_SUFFIX,
                     clamp_low)

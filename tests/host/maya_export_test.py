@@ -260,6 +260,32 @@ def build_scene():
     cmds.connectAttr(fold_cc + ".outColor", fold_shader + ".baseColor",
                      force=True)
 
+    # A remapValue on a channel that has a texture slot. The scene already
+    # had one on a coat weight, which no receiver has a texture slot for, so
+    # the curve had nowhere to land and the rebuild could not be checked.
+    remap_transform, remap_shader = shaded_cube("remapTexCube",
+                                                "aiStandardSurface")
+    remap_png = os.path.join(OUT, "remap_rough.png").replace("\\", "/")
+    _write_png(remap_png)
+    remap_file = cmds.shadingNode("file", asTexture=True, name="remapRoughTex")
+    cmds.setAttr(remap_file + ".fileTextureName", remap_png, type="string")
+    remap_node = cmds.shadingNode("remapValue", asUtility=True,
+                                  name="remapRough")
+    cmds.connectAttr(remap_file + ".outColorR", remap_node + ".inputValue",
+                     force=True)
+    # A curve with a knee in it, so a receiver that ignores the ramp and keeps
+    # a straight line reads a different number in the middle.
+    for index, (position, value) in enumerate(
+            ((0.0, 0.0), (0.4, 0.9), (1.0, 1.0))):
+        cmds.setAttr("{0}.value[{1}].value_Position".format(
+            remap_node, index), position)
+        cmds.setAttr("{0}.value[{1}].value_FloatValue".format(
+            remap_node, index), value)
+        cmds.setAttr("{0}.value[{1}].value_Interp".format(
+            remap_node, index), 1)
+    cmds.connectAttr(remap_node + ".outValue",
+                     remap_shader + ".specularRoughness", force=True)
+
     # A UDIM set, driven through Maya's own tiling mode rather than a token in
     # the path, which is the case a naive path scan gets wrong.
     #
@@ -1448,7 +1474,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("59 meshes exported", payload["mesh_count"] == 59,
+    check("60 meshes exported", payload["mesh_count"] == 60,
           payload["mesh_count"])
     # The locator, the empty null, the nested locator, the group holding
     # only a curve, and the two shapeless FKIK switchers (root and NSRig:).

@@ -455,6 +455,34 @@ def main():
         overlap == conditional,
         "overlap {0} declared {1}".format(sorted(overlap), sorted(conditional)),
     )
+    # The remap curve is arithmetic, so it can be checked without an engine.
+    # A ramp with a knee is the discriminating case: a receiver that ignores
+    # the stops and draws a straight line reads 0.4 where this reads 0.9.
+    curve = receiver.utils.remap_curve_samples({
+        "input_min": 0.0, "input_max": 1.0,
+        "output_min": 0.0, "output_max": 1.0,
+        "ramp": [{"position": 0.0, "value": 0.0},
+                 {"position": 0.4, "value": 0.9},
+                 {"position": 1.0, "value": 1.0}],
+    }, 256)
+    check("the remap curve has one sample per step", len(curve) == 256,
+          len(curve))
+    check("it starts and ends on its stops",
+          abs(curve[0]) < 0.001 and abs(curve[-1] - 1.0) < 0.001,
+          (curve[0], curve[-1]))
+    check("and it follows the knee rather than a straight line",
+          abs(curve[102] - 0.9) < 0.01, round(curve[102], 4))
+    # Output range folds in as well, so the material needs no arithmetic.
+    scaled = receiver.utils.remap_curve_samples({
+        "input_min": 0.0, "input_max": 1.0,
+        "output_min": 0.25, "output_max": 0.75,
+        "ramp": [{"position": 0.0, "value": 0.0},
+                 {"position": 1.0, "value": 1.0}],
+    }, 16)
+    check("the output range folds into the curve",
+          abs(scaled[0] - 0.25) < 0.001 and abs(scaled[-1] - 0.75) < 0.001,
+          (scaled[0], scaled[-1]))
+
     check(
         "every conditional channel really is in both tables",
         conditional <= wired

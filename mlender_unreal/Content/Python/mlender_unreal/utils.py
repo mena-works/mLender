@@ -132,3 +132,52 @@ def is_colour_data(channel, record, colour_channels):
     if (record or {}).get("baked_from"):
         return False
     return channel in colour_channels
+
+
+def remap_curve_samples(parameters, count=256):
+    """A remapValue evaluated into a row of samples, ranges and all.
+
+    Lives here rather than beside the material builder so the contract
+    test can check the curve without an engine: this is arithmetic, and
+    the knee in a ramp is exactly the kind of thing worth pinning.
+
+    The node maps its input range onto the ramp and the ramp onto its output
+    range; all three are folded here so the material needs one texture sample
+    and no arithmetic around it. Stops are read in position order because Maya
+    stores them in the order they were created.
+    """
+    stops = []
+    for stop in parameters.get("ramp") or []:
+        position = scalar((stop or {}).get("position"), None)
+        value = scalar((stop or {}).get("value"), None)
+        if position is None or value is None:
+            continue
+        stops.append((position, value))
+    if len(stops) < 2:
+        return None
+    stops.sort()
+
+    low = scalar(parameters.get("input_min"), 0.0)
+    high = scalar(parameters.get("input_max"), 1.0)
+    out_low = scalar(parameters.get("output_min"), 0.0)
+    out_high = scalar(parameters.get("output_max"), 1.0)
+    span = (high - low) or 1.0
+
+    values = []
+    for index in range(count):
+        u = index / float(count - 1)
+        t = (u - low) / span
+        t = 0.0 if t < 0.0 else (1.0 if t > 1.0 else t)
+        if t <= stops[0][0]:
+            value = stops[0][1]
+        elif t >= stops[-1][0]:
+            value = stops[-1][1]
+        else:
+            value = stops[-1][1]
+            for (p0, v0), (p1, v1) in zip(stops, stops[1:]):
+                if p0 <= t <= p1:
+                    width = (p1 - p0) or 1.0
+                    value = v0 + (v1 - v0) * ((t - p0) / width)
+                    break
+        values.append(out_low + (out_high - out_low) * value)
+    return values

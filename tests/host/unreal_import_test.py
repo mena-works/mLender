@@ -409,6 +409,58 @@ def main():
           any("per-channel" in w for w in result.get("warnings") or []),
           [w for w in result.get("warnings") or [] if "per-channel" in w][:1])
 
+    # remapValue, as a one row lookup texture. A curve cannot fold into a
+    # number the way the rest of the chain does, so this is the one correction
+    # that arrives as an asset.
+    remap = None
+    for mesh_record in package_data.get("meshes") or []:
+        for material_record in mesh_record.get("materials") or []:
+            for channel, channel_record in (
+                    material_record.get("channels") or {}).items():
+                texture = (channel_record or {}).get("texture") or {}
+                kinds = [str(entry.get("type")) for entry
+                         in texture.get("corrections") or []]
+                if kinds == ["remapValue"] and texture.get("path"):
+                    remap = (material_record, channel)
+                    break
+            if remap:
+                break
+        if remap:
+            break
+    if remap is not None:
+        material_record, channel = remap
+        instance = unreal.EditorAssetLibrary.load_asset(
+            "/Game/mLender/Materials/ML_{0}".format(
+                material_record.get("material"))
+        )
+        parameter = {
+            "base_color": "BaseColorMap", "roughness": "RoughnessMap",
+            "metallic": "MetallicMap", "specular": "SpecularMap",
+            "opacity": "OpacityMap", "normal": "NormalMap",
+            "emission": "EmissiveMap",
+        }.get(channel)
+        check("the remapped material was built",
+              instance is not None and parameter is not None,
+              (material_record.get("material"), channel))
+        if instance is not None and parameter:
+            library = unreal.MaterialEditingLibrary
+            curve = library.get_material_instance_texture_parameter_value(
+                instance, parameter + "RemapCurve")
+            check("its curve arrived as a lookup texture",
+                  curve is not None, parameter)
+            if curve is not None:
+                check("one row, and not colour managed",
+                      curve.blueprint_get_size_y() == 1
+                      and not curve.get_editor_property("srgb"),
+                      (curve.blueprint_get_size_x(),
+                       curve.blueprint_get_size_y(),
+                       curve.get_editor_property("srgb")))
+            check("and the material is told to use it",
+                  library.get_material_instance_scalar_parameter_value(
+                      instance, parameter + "RemapUse") == 1.0,
+                  library.get_material_instance_scalar_parameter_value(
+                      instance, parameter + "RemapUse"))
+
     # AOVs, as a Movie Render Queue config. Render passes are not level
     # contents in Unreal, so what has to exist is the config the user renders
     # with -- and the mapping has to be by quantity, not by name: Unreal has a
