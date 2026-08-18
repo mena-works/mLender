@@ -150,6 +150,34 @@ def mesh_transforms(mesh_shapes):
     return [item for item in transforms if item]
 
 
+def color_sets(mesh_shape):
+    """Every colour set on a shape, and which one Maya has current.
+
+    Recorded so a receiver can say what a mesh carries. The data itself rides
+    the FBX -- measured, a painted set arrives in Blender as a corner colour
+    attribute under its Maya name -- but nothing downstream knows the set
+    exists unless a shader happens to read it, and an unread set is exactly
+    the kind of thing a user assumes travelled.
+    """
+    try:
+        names = cmds.polyColorSet(
+            mesh_shape, query=True, allColorSets=True
+        ) or []
+    except Exception:
+        return {}
+    if not names:
+        return {}
+    current = ""
+    try:
+        found = cmds.polyColorSet(
+            mesh_shape, query=True, currentColorSet=True
+        ) or []
+        current = str(found[0]) if found else ""
+    except Exception:
+        current = ""
+    return {"names": [str(name) for name in names], "current": current}
+
+
 def mesh_records(mesh_shape, bake_context=None, cache=None):
     """One record per transform the shape hangs under.
 
@@ -162,6 +190,7 @@ def mesh_records(mesh_shape, bake_context=None, cache=None):
     transforms = parents_of(mesh_shape) or [""]
     materials = mesh_materials(mesh_shape, bake_context, cache)
     subdivision = subdivision_info(mesh_shape)
+    sets = color_sets(mesh_shape)
     shape_label = node_label(mesh_shape)
     records = []
     for transform in transforms:
@@ -175,6 +204,7 @@ def mesh_records(mesh_shape, bake_context=None, cache=None):
             "groups": group_path(transform),
             "visibility": visibility_info(mesh_shape, transform),
             "subdivision": subdivision,
+            "color_sets": sets,
             "materials": materials,
             # Shape attributes first so a transform of the same name
             # wins; the transform is the one users mean.

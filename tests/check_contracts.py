@@ -11,6 +11,7 @@ channel keys the importer cannot map.
 It does NOT verify that the Maya or Blender APIs are used correctly. For that
 see maya_export_test.py and blender_import_test.py.
 """
+import json
 import math
 import os
 import re
@@ -100,6 +101,7 @@ def install_stubs():
     bpy.types.Operator = type("Operator", (object,), {})
     bpy.types.Panel = type("Panel", (object,), {})
     bpy.types.Menu = type("Menu", (object,), {})
+    bpy.types.PropertyGroup = type("PropertyGroup", (object,), {})
     bpy.types.Scene = _Any()
     for name in ("props", "data", "context", "ops", "utils", "app", "path"):
         setattr(bpy, name, _Any())
@@ -146,6 +148,87 @@ def install_stubs():
     for name in ("position", "size", "draw", "color", "dimensions"):
         setattr(blf, name, _Any())
 
+    _install_unreal_stub()
+
+
+class _Enum(object):
+    """Stand-in for an unreal enum whose members must compare distinctly.
+
+    _Any is no good here: every member would be a fresh _Any and therefore
+    unequal to itself, which would make the light unit branches untestable.
+    """
+
+    def __init__(self, *names):
+        for index, name in enumerate(names):
+            setattr(self, name, "{0}:{1}".format(id(self), index))
+
+
+def _install_unreal_stub():
+    """Enough of the unreal module for the receiver to import and compute.
+
+    Only the numeric paths are exercised here -- the axis swap, the position
+    scale and the light energy -- so the classes just need identity. The real
+    API is checked by tests/host/unreal_import_test.py against a live editor,
+    which is the only place it can be.
+    """
+    unreal = _module("unreal")
+
+    class Vector(object):
+        def __init__(self, x=0.0, y=0.0, z=0.0):
+            self.x, self.y, self.z = x, y, z
+
+    class Rotator(object):
+        def __init__(self, roll=0.0, pitch=0.0, yaw=0.0):
+            self.roll, self.pitch, self.yaw = roll, pitch, yaw
+
+    class LinearColor(object):
+        def __init__(self, r=0.0, g=0.0, b=0.0, a=1.0):
+            self.r, self.g, self.b, self.a = r, g, b, a
+
+    unreal.Vector = Vector
+    unreal.Rotator = Rotator
+    unreal.LinearColor = LinearColor
+    unreal.LightUnits = _Enum("UNITLESS", "CANDELAS", "LUMENS", "NITS", "EV")
+    unreal.BlendMode = _Enum(
+        "BLEND_OPAQUE", "BLEND_MASKED", "BLEND_TRANSLUCENT"
+    )
+    unreal.MaterialShadingModel = _Enum("MSM_DEFAULT_LIT", "MSM_UNLIT")
+    unreal.MaterialSamplerType = _Enum(
+        "SAMPLERTYPE_COLOR", "SAMPLERTYPE_LINEAR_GRAYSCALE",
+        "SAMPLERTYPE_NORMAL",
+    )
+    unreal.MaterialProperty = _Enum(
+        "MP_BASE_COLOR", "MP_ROUGHNESS", "MP_METALLIC", "MP_SPECULAR",
+        "MP_NORMAL", "MP_EMISSIVE_COLOR", "MP_OPACITY", "MP_OPACITY_MASK",
+        "MP_ANISOTROPY", "MP_SUBSURFACE_COLOR",
+    )
+    unreal.TextureCompressionSettings = _Enum("TC_NORMALMAP", "TC_MASKS")
+    unreal.CameraFocusMethod = _Enum("DISABLE", "MANUAL")
+    unreal.MultiBlockType = _Enum("MENU_ENTRY")
+    unreal.ToolMenuStringCommandType = _Enum("PYTHON")
+
+    # Actor and component classes only need to be distinct objects: the
+    # receiver branches on identity, never on behaviour.
+    for name in (
+        "StaticMeshActor", "PointLight", "SpotLight", "RectLight",
+        "DirectionalLight", "SkyLight", "CineCameraActor", "CameraActor",
+        "Material", "MaterialInstanceConstant", "Texture", "Texture2D",
+        "MaterialFactoryNew", "MaterialInstanceConstantFactoryNew",
+        "AssetImportTask", "ImportAssetParameters", "EditorActorSubsystem",
+        "StaticMeshEditorSubsystem", "ToolMenuEntry",
+    ):
+        setattr(unreal, name, type(name, (object,), {}))
+
+    for name in (
+        "EditorAssetLibrary", "EditorLevelLibrary", "AssetToolsHelpers",
+        "MaterialEditingLibrary", "InterchangeManager", "MathLibrary",
+        "SystemLibrary", "ToolMenus", "get_editor_subsystem",
+        "get_default_object", "register_slate_post_tick_callback",
+        "unregister_slate_post_tick_callback", "log", "log_warning",
+        "log_error",
+    ):
+        setattr(unreal, name, _Any())
+
 
 # ------------------------------------------------------------------- checks
 def main():
@@ -156,13 +239,29 @@ def main():
     print("import graph")
     import mlender_exporter as exporter
     import mlender_importer as importer
+    # The Unreal receiver lives inside a plugin layout, because Unreal puts a
+    # plugin's Python on sys.path from <Plugin>/Content/Python and nowhere
+    # else. The folder is the plugin; the package is inside it.
+    unreal_root = os.path.join(TOOL_ROOT, "mlender_unreal", "Content", "Python")
+    if unreal_root not in sys.path:
+        sys.path.insert(0, unreal_root)
+    import mlender_unreal as receiver
     check("exporter package imports", True)
     check("importer package imports", True)
+    check("unreal receiver package imports", True)
 
     for attr in ("show_ui", "show", "export_scene", "reload_package"):
         check("exporter exposes {0}".format(attr), hasattr(exporter, attr))
     for attr in ("register", "unregister", "import_scene_package", "bl_info"):
         check("importer exposes {0}".format(attr), hasattr(importer, attr))
+    for attr in (
+        "register", "unregister", "import_scene_package", "start_listener",
+        "stop_listener", "reload_package",
+    ):
+        check(
+            "unreal receiver exposes {0}".format(attr),
+            hasattr(receiver, attr),
+        )
 
     print("\nevery module is in its reload list")
     # A module left out of a reload list keeps running its old code through a
@@ -196,19 +295,170 @@ def main():
               importer_modules <= names,
               "missing {0}".format(sorted(importer_modules - names)))
 
+    print("\nunreal receiver reload list")
+    unreal_modules = package_modules(
+        os.path.join(unreal_root, "mlender_unreal")
+    )
+    listed = set(receiver.SUBMODULES)
+    check("unreal SUBMODULES covers every module",
+          unreal_modules <= listed,
+          "missing {0}".format(sorted(unreal_modules - listed)))
+    check("and names nothing that is not there",
+          listed <= unreal_modules,
+          "stale {0}".format(sorted(listed - unreal_modules)))
+
     print("\ncross-package contracts")
+    # Three receivers now, so the protocol is checked pairwise against the
+    # exporter rather than "on both sides". A constant that drifts in only the
+    # newest package is exactly the kind of thing one comparison would miss.
     for field in (
         "LIVELINK_HOST",
         "LIVELINK_PORT",
         "LIVELINK_PROTOCOL",
         "LIVELINK_VERSION",
     ):
+        for label, package in (("importer", importer), ("unreal", receiver)):
+            check(
+                "{0} matches exporter in the {1}".format(field, label),
+                getattr(exporter, field) == getattr(package, field),
+                "{0!r} vs {1!r}".format(
+                    getattr(exporter, field), getattr(package, field)
+                ),
+            )
+
+    check(
+        "the unreal receiver accepts the exporter's schema version",
+        exporter.EXPORT_SCHEMA_VERSION in receiver.SUPPORTED_SCHEMA_VERSIONS,
+        "{0} not in {1}".format(
+            exporter.EXPORT_SCHEMA_VERSION,
+            receiver.SUPPORTED_SCHEMA_VERSIONS,
+        ),
+    )
+    check(
+        "the two receivers support the same schema versions",
+        tuple(importer.constants.SUPPORTED_SCHEMA_VERSIONS)
+        == tuple(receiver.SUPPORTED_SCHEMA_VERSIONS),
+        "blender {0} vs unreal {1}".format(
+            len(importer.constants.SUPPORTED_SCHEMA_VERSIONS),
+            len(receiver.SUPPORTED_SCHEMA_VERSIONS),
+        ),
+    )
+    check(
+        "the unreal build version is in step",
+        exporter.BUILD_VERSION == receiver.BUILD_VERSION,
+        "{0} vs {1}".format(exporter.BUILD_VERSION, receiver.BUILD_VERSION),
+    )
+    # The .uplugin's VersionName is what an artist reads in the plugin browser,
+    # so it is the Unreal equivalent of bl_info["version"] and drifts the same
+    # way if nothing checks it.
+    with open(
+        os.path.join(TOOL_ROOT, "mlender_unreal", "mLender.uplugin"),
+        encoding="utf-8",
+    ) as handle:
+        uplugin = json.load(handle)
+    check(
+        "uplugin VersionName matches BUILD_VERSION",
+        uplugin.get("VersionName") == receiver.BUILD_VERSION,
+        "{0!r} vs {1!r}".format(
+            uplugin.get("VersionName"), receiver.BUILD_VERSION
+        ),
+    )
+
+    print("\nunreal measured conversions")
+    # The Y/Z swap is the receiver's foundation and it is NOT the Blender rule.
+    # Both directions are asserted, because a swap that also flipped a sign
+    # would pass a one-axis check.
+    swap = receiver.transforms.maya_vector_to_unreal
+    check("maya Y becomes unreal Z",
+          swap((0.0, 40.0, 0.0)) == (0.0, 0.0, 40.0), str(swap((0, 40, 0))))
+    check("maya Z becomes unreal Y",
+          swap((0.0, 0.0, 50.0)) == (0.0, 50.0, 0.0), str(swap((0, 0, 50))))
+    check("maya X is untouched",
+          swap((30.0, 0.0, 0.0)) == (30.0, 0.0, 0.0), str(swap((30, 0, 0))))
+    check(
+        "the unreal swap is not the blender conversion",
+        swap((0.0, 0.0, 1.0)) != (0.0, -1.0, 0.0),
+        "the two hosts differ and both were measured",
+    )
+    # Unreal is in centimetres where Blender is in metres, so the same scene
+    # gives two different scales. Confusing them is a factor of 100.
+    close(
+        "unreal position scale, centimetre scene",
+        receiver.transforms.position_scale({"meters_per_maya_unit": 0.01}, 1.0),
+        1.0,
+    )
+    close(
+        "unreal position scale, metre scene",
+        receiver.transforms.position_scale({"meters_per_maya_unit": 1.0}, 1.0),
+        100.0,
+    )
+    # The energy chain: the measured pi anchor, then lumens.
+    arnold = {
+        "intensity": 1.0, "exposure": 0.0, "node_type": "aiAreaLight",
+        "parameters": {"normalize": True}, "area_shape": "RECTANGLE",
+    }
+    lumens, units = receiver.lights.light_intensity_for_unreal(
+        arnold, sys.modules["unreal"].RectLight, 0.01, 1.0
+    )
+    close("arnold intensity 1 in a cm scene, in lumens",
+          lumens, math.pi * 0.0001 * 683.0, 1e-9)
+    check("a rect light is asked for lumens",
+          units == sys.modules["unreal"].LightUnits.LUMENS, str(units))
+    # Dropping the squared scene unit is a 10,000x error in a centimetre
+    # scene, which is the same trap the Blender receiver documents.
+    metre_lumens, _u = receiver.lights.light_intensity_for_unreal(
+        arnold, sys.modules["unreal"].RectLight, 1.0, 1.0
+    )
+    close("the squared unit term is present",
+          metre_lumens / lumens, 10000.0, 1e-6)
+    sun_lux, sun_units = receiver.lights.light_intensity_for_unreal(
+        {"intensity": 2.0, "exposure": 0.0, "node_type": "aiSkyDomeLight",
+         "parameters": {}},
+        sys.modules["unreal"].DirectionalLight, 0.01, 1.0,
+    )
+    close("a sun states lux, with no unit square", sun_lux, 2.0 * 683.0, 1e-9)
+    check("a directional light is given no unit enum", sun_units is None,
+          str(sun_units))
+
+    print("\nunreal channel coverage")
+    # Every channel the exporter can emit must be wired, or explicitly listed
+    # as metadata. A channel in neither group is one that silently vanishes,
+    # which is the failure this project fears most.
+    wired = (
+        set(receiver.constants.MASTER_SCALAR_PARAMETERS)
+        | set(receiver.constants.MASTER_VECTOR_PARAMETERS)
+        | set(receiver.constants.MASTER_TEXTURE_PARAMETERS)
+    )
+    accounted = wired | set(receiver.constants.UNREAL_METADATA_CHANNELS)
+    exported_channels = set()
+    for table in (
+        exporter.constants.REDSHIFT_STANDARD_CHANNELS,
+        exporter.constants.REDSHIFT_LEGACY_CHANNELS,
+        exporter.constants.ARNOLD_STANDARD_CHANNELS,
+        exporter.constants.ARNOLD_OPENPBR_CHANNELS,
+        exporter.constants.ARNOLD_LAMBERT_CHANNELS,
+    ):
+        exported_channels.update(table.keys())
+    check(
+        "the unreal receiver accounts for every exported channel",
+        exported_channels <= accounted,
+        "unaccounted {0}".format(sorted(exported_channels - accounted)),
+    )
+    check(
+        "no channel is both wired and metadata",
+        not (wired & set(receiver.constants.UNREAL_METADATA_CHANNELS)),
+        "both {0}".format(
+            sorted(wired & set(receiver.constants.UNREAL_METADATA_CHANNELS))
+        ),
+    )
+    # Every channel the material builder claims to wire must name a real
+    # Unreal material input. The names were probed on 5.8.1; this is what
+    # catches a typo or an input removed by a future engine version.
+    for channel, prop in sorted(receiver.materials.CHANNEL_TO_PROPERTY.items()):
         check(
-            "{0} matches on both sides".format(field),
-            getattr(exporter, field) == getattr(importer, field),
-            "{0!r} vs {1!r}".format(
-                getattr(exporter, field), getattr(importer, field)
-            ),
+            "{0} names a real MaterialProperty ({1})".format(channel, prop),
+            hasattr(sys.modules["unreal"].MaterialProperty, prop),
+            "not on the probed 5.8.1 enum",
         )
 
     check(
@@ -232,6 +482,36 @@ def main():
     )
 
     print("\nchannel contract")
+    presets = exporter.presets
+    # Every key a preset carries must be one export_scene takes, or one of the
+    # tool's own. A key in neither would reach export_scene as a keyword
+    # argument and raise.
+    extra = set(presets.DEFAULT_SETTINGS) - set(presets.EXPORT_KEYS)
+    check("preset keys are export arguments plus the tool's own",
+          extra == {"output_folder", "livelink_host", "livelink_port"},
+          sorted(extra))
+    check("every export key has a default",
+          set(presets.EXPORT_KEYS) <= set(presets.DEFAULT_SETTINGS),
+          sorted(set(presets.EXPORT_KEYS) - set(presets.DEFAULT_SETTINGS)))
+    cleaned = presets.normalize({"bake_procedurals": False,
+                                 "something_new": 12})
+    check("an unknown preset key is dropped, not passed on",
+          "something_new" not in cleaned, sorted(cleaned))
+    check("and the known one survives",
+          cleaned["bake_procedurals"] is False, cleaned["bake_procedurals"])
+    merged = presets.merge({"bake_resolution": 2048, "archive_package": True},
+                           {"bake_resolution": None, "archive_package": False})
+    check("a None override keeps the preset's value",
+          merged["bake_resolution"] == 2048, merged["bake_resolution"])
+    check("but a real override wins",
+          merged["archive_package"] is False, merged["archive_package"])
+    kwargs = presets.export_kwargs(presets.DEFAULT_SETTINGS)
+    check("export_kwargs passes nothing export_scene cannot take",
+          set(kwargs) == set(presets.EXPORT_KEYS), sorted(kwargs))
+    for attr in ("export_file", "main", "open_scene"):
+        check("batch exposes {0}".format(attr),
+              hasattr(exporter.batch, attr))
+
     exporter_constants = exporter.constants
     exported = set()
     for table in (

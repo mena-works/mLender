@@ -17,6 +17,11 @@ from .constants import (
 from .livelink import send_package
 from .posebridge import send_pose, start_timeline_sync, stop_timeline_sync
 from .package import default_export_folder, export_scene
+from .presets import (
+    load_preset,
+    normalize as normalize_settings,
+    save_preset,
+)
 
 
 def show_ui():
@@ -154,6 +159,24 @@ def show_ui():
             alembic_field,
         ),
     )
+    controls = (
+        export_folder, host_field, port_field, bake_field,
+        bake_resolution_field, animation_field, frame_range_field,
+        collect_field, archive_field, selection_field, alembic_field,
+    )
+    cmds.rowLayout(numberOfColumns=2, columnWidth2=(260, 260),
+                   adjustableColumn=1)
+    cmds.button(
+        label="Save Preset",
+        annotation="Keep these settings for next time, and for batch exports",
+        command=lambda *_: save_settings_from_ui(*controls),
+    )
+    cmds.button(
+        label="Load Preset",
+        annotation="Put the saved settings back",
+        command=lambda *_: load_settings_into_ui(*controls),
+    )
+    cmds.setParent("..")
     cmds.rowLayout(numberOfColumns=2, columnWidth2=(260, 260),
                    adjustableColumn=1)
     cmds.button(
@@ -242,6 +265,104 @@ def parse_frame_range(text):
         return float(match.group(1)), float(match.group(2)), step
     except ValueError:
         return None, None, None
+
+
+def ui_settings(export_folder, host_field, port_field, bake_field,
+                bake_resolution_field, animation_field, frame_range_field,
+                collect_field, archive_field, selection_field, alembic_field):
+    """The window's controls as a settings dict.
+
+    The same shape presets and the batch entry use, so what an artist clicks
+    and what a farm job runs cannot mean different things.
+    """
+    start, end, step = (None, None, None)
+    if frame_range_field is not None:
+        start, end, step = parse_frame_range(
+            cmds.textFieldGrp(frame_range_field, query=True, text=True)
+        )
+    return {
+        "output_folder": cmds.textFieldButtonGrp(
+            export_folder, query=True, text=True) or "",
+        "livelink_host": cmds.textFieldGrp(
+            host_field, query=True, text=True) or "",
+        "livelink_port": cmds.intFieldGrp(
+            port_field, query=True, value1=True),
+        "bake_procedurals": bool(cmds.checkBoxGrp(
+            bake_field, query=True, value1=True)),
+        "bake_resolution": cmds.intFieldGrp(
+            bake_resolution_field, query=True, value1=True),
+        "export_animation": bool(cmds.checkBoxGrp(
+            animation_field, query=True, value1=True)),
+        "frame_start": start,
+        "frame_end": end,
+        "frame_step": step,
+        "collect_textures_into_package": bool(cmds.checkBoxGrp(
+            collect_field, query=True, value1=True)),
+        "archive_package": bool(cmds.checkBoxGrp(
+            archive_field, query=True, value1=True)),
+        "selected_only": bool(cmds.checkBoxGrp(
+            selection_field, query=True, value1=True)),
+        "export_alembic_cache": bool(cmds.checkBoxGrp(
+            alembic_field, query=True, value1=True)),
+    }
+
+
+def apply_settings(settings, export_folder, host_field, port_field, bake_field,
+                   bake_resolution_field, animation_field, frame_range_field,
+                   collect_field, archive_field, selection_field,
+                   alembic_field):
+    """Put a settings dict back into the window's controls."""
+    settings = normalize_settings(settings)
+    pairs = (
+        (export_folder, "output_folder", "textFieldButtonGrp"),
+        (host_field, "livelink_host", "textFieldGrp"),
+    )
+    for control, key, kind in pairs:
+        value = settings.get(key) or ""
+        if control is None or not value:
+            continue
+        getattr(cmds, kind)(control, edit=True, text=value)
+    if port_field is not None and settings.get("livelink_port"):
+        cmds.intFieldGrp(port_field, edit=True,
+                         value1=int(settings["livelink_port"]))
+    if bake_resolution_field is not None:
+        cmds.intFieldGrp(bake_resolution_field, edit=True,
+                         value1=int(settings.get("bake_resolution") or 1024))
+    for control, key in (
+        (bake_field, "bake_procedurals"),
+        (animation_field, "export_animation"),
+        (collect_field, "collect_textures_into_package"),
+        (archive_field, "archive_package"),
+        (selection_field, "selected_only"),
+        (alembic_field, "export_alembic_cache"),
+    ):
+        if control is not None:
+            cmds.checkBoxGrp(control, edit=True, value1=bool(settings.get(key)))
+    if frame_range_field is not None and settings.get("frame_start") is not None:
+        cmds.textFieldGrp(
+            frame_range_field, edit=True,
+            text="{0}-{1}".format(
+                int(settings.get("frame_start") or 0),
+                int(settings.get("frame_end") or 0),
+            ),
+        )
+
+
+def save_settings_from_ui(*controls):
+    path = save_preset(ui_settings(*controls))
+    if path:
+        cmds.inViewMessage(
+            amg="mLender preset saved", pos="midCenter", fade=True
+        )
+    else:
+        cmds.warning("mLender could not write the preset.")
+
+
+def load_settings_into_ui(*controls):
+    apply_settings(load_preset(), *controls)
+    cmds.inViewMessage(
+        amg="mLender preset loaded", pos="midCenter", fade=True
+    )
 
 
 def export_from_ui(

@@ -30,6 +30,7 @@ from .merge import (
     normalize_mode,
 )
 from .render import apply_render_settings
+from .report import write_report
 from .sets import import_sets
 from .particles import import_particles
 from .instancers import import_instancers
@@ -367,12 +368,12 @@ def import_scene_package(
     view_transform = apply_color_management(package_data, warnings)
     render_applied = apply_render_settings(package_data, warnings)
     
-    rebuild_aovs(package_data.get("aovs") or [])
+    aov_result = rebuild_aovs(package_data.get("aovs") or [], warnings)
 
     _remove_fbx_placeholder_materials(before_materials)
     purge_orphans()
 
-    return {
+    result = {
         "package_folder": package_folder,
         "fbx_path": fbx_path,
         "root_collection": root_collection.name,
@@ -386,6 +387,8 @@ def import_scene_package(
         "group_collection_count": len(group_cache),
         "visibility_count": visibility_count,
         "visibility_animation_count": visibility_animation_count,
+        "aov_mapped": aov_result["mapped"],
+        "aov_custom": aov_result["custom"],
         "view_transform": view_transform,
         "grouped_mesh_count": grouped_count,
         "subdivision_count": subdivision_count,
@@ -419,6 +422,9 @@ def import_scene_package(
         "assignments": assignments,
         "warnings": warnings,
     }
+    # Last: one file the user can hand over instead of copying console lines.
+    result["report_path"] = write_report(result, bpy.app.version_string)
+    return result
 
 
 def assign_mesh_materials(obj, mesh_record, material_cache, warnings):

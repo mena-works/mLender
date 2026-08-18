@@ -679,6 +679,435 @@ Object'in alanı), ebeveyn koleksiyonlar taranarak bulunuyor; ve zaten
 bağlı objeyi yeniden saymak "iki kez sorunca üst üste kuruyor" gibi
 görünüyordu — `attach_to_empty` artık gerçekten taşınanı sayıyor.
 
+## Unreal alıcısı (2.41.0) — yapıldı, ölçüldü
+
+Kullanıcı kararı: **Maya → Unreal, üçüncü alıcı**; kapsam lookdev çekirdeği;
+materyaller melez (instance varsayılan, gerekirse grafik); plugin hem proje hem
+engine'e kurulabilir.
+
+Mimarinin bedava çıkan kısmı: exporter zaten host-agnostik. Paket yazıp TCP
+mesajı atıyor, kimin dinlediğini bilmiyor. Yani **exporter'a tek satır
+dokunulmadı** ve Blender alıcısı hiç etkilenmedi. Üçüncü package `mlender_unreal`.
+
+Ölçülenler (ayrıntı `tests/docs/unreal_calibration.md`):
+
+- **Eksen:** `(x, y, z) → (x, z, y)` — düz Y/Z takası, işaret yok. Blender'ın
+  `(x, -z, y)`'siyle **aynı değil**; el değişimi takasa gömülü. Üç eksende
+  farklı mesafeli küplerle ölçüldü.
+- **Birim:** 1 Maya cm = 1 Unreal birimi. JSON kayıtları için
+  `position_scale = mpu × 100` (Blender'da `× 1`).
+- **Mesh yolu:** `InterchangeManager.import_scene` headless çalışıyor, Maya
+  transform adlarını koruyor, hiyerarşiyi ve birimi kendisi getiriyor. Bizim
+  tarafta mesh transform matematiği **yok** — çift uygulama olurdu.
+- **Rotasyon:** ışık/kamera JSON'dan geldiği için dönüşüm bizim. Maya −Z'ye,
+  Unreal +X'e bakar. Doğrulama döngüsel değil: beklenen Maya matrisinden
+  hesaplandı, gerçek Unreal actor'üne soruldu → üç eksende **1e-8**.
+- **Enerji:** yeni sabit icat edilmedi. Ölçülmüş π çapası → watt → lümen
+  (×683). Kare birim terimi **metre** cinsinden; Unreal konumları santimetre,
+  bu yüzden kodda iki ayrı ölçek var.
+
+Üç tuzak ölçümle çıktı, üçü de yasak listesinde:
+
+1. `ImportAssetParameters.import_level` bool değil **Level objesi**.
+2. Rect light `LUMENS` isteğini sessizce **`CANDELAS`**'a çeviriyor, değeri
+   çevirmiyor → yazıp geçmek 4π hata. Çözüm: geri oku, motorun kendi
+   çarpanıyla çevir.
+3. Light component property'leri setter istiyor. İlk sürüm çıplak
+   `try/except` ile atıyordu, yazma başarısız oldu, exception yutuldu, **bütün
+   ışıklar varsayılan 8 candela'da kaldı** — ve "intensity pozitif mi" diye
+   soran test geçti. Ders ikili: setter kullan, ve testte *doğru* olduğunu sor.
+
+Rig dersi bir kez daha, bu sefer testin kendisinde: düzeltmeden sonra assertion
+yine düştü (10.2994 okundu, 0.214571 bekleniyordu — tam 48×). **Kod doğruydu,
+testin elle yazılmış beklentisi yanlıştı**: fixture'ın alan ışığı intensity 12
++ exposure 2 = 48. Beklenti artık kaydın kendisinden türetiliyor, fizik ayrı
+bir assertion'da elle hesaplanmış `π × mpu² × 683`'e karşı duruyor.
+
+Materyal mimarisi ölçümle şekillendi: **blend mode ve shading model Material'e
+ait, instance'a değil**, yani tek master cam + cutout + unlit içeren sahneyi
+karşılayamaz. Yüzey sınıfı başına bir master (Opaque/Masked/Translucent/Unlit),
+Python'dan üretiliyor (binary `.uasset` incelenemez ve her sürümde yeniden
+kurulur). Opsiyonel texture'lar static switch yerine skaler lerp — permütasyon
+yok.
+
+`MaterialProperty` probe edildi: **coat ve sheen girdisi yok**. Metadata olarak
+tutuluyor ve uyarı yazılıyor.
+
+Durum: `tests/host/unreal_import_test.py` gerçek 5.8.1'de **24 assertion yeşil**
+(uçtan uca import dahil). Sözleşme testi üçlü protokol eşitliğini, üç sürüm
+numarasını (`.uplugin` dahil), eksen takasını, iki ölçeği, enerji zincirini ve
+kanal kapsamını zorluyor; kanal kapsamı kontrolünün dişi negatif testle
+doğrulandı. Kurulmuş artefakt gerçek bir projeye kurulup denendi (repo
+`sys.path`'te değilken).
+
+**Kapatılmayan, açıkça borç:**
+
+- **Menü GUI'de doğrulanmadı.** Commandlet'te Slate yok, `find_menu` boş
+  dönüyor; kod bunu algılıyor, logluyor ve Python'dan çalışmaya devam ediyor.
+  `Tools > mLender`'ı gerçekten görmek insan işi.
+
+## Render karşılaştırması — yapıldı, yarısı kapandı, yarısı rig'e çarptı
+
+Kullanıcı istedi, çalıştırıldı. Rig `render_match_maya.py`'ın **aynı**
+`arnold.exr`'ini kullanıyor; dört dosya `tests/calibration/render_match_unreal_*`.
+
+**Kapanan:**
+
+- **Lümen formülü tam.** `683 × π × 0.01² × 80 × 2¹ = 34.331325`, component'e
+  ulaşan `34.331326` → **%0.000003**. Enerji zinciri uçtan uca doğrulandı.
+- **Geometri, kamera, ışık yönü doğru.** Render edilmiş level'den okundu:
+  zemin orijinde ±200, ışık `(0,0,-1)`, kamera forward'ı Maya'nın −14°'sini
+  geri veriyor, ufuk geometrinin dediği yerde (%41.7 ölçülen / %42.6 hesap).
+
+**Kapanmayan — ve sebebi rig:** oran ortalama **260×**, yayılım **%45**, ve
+rig kendi **simetri kontrolünü geçemiyor**: sahne sol-sağ simetrik, Arnold
+bunu beş hanede üretiyor, Unreal ikisini %14 farklı veriyor. Simetrik sahnenin
+simetrik render edilmemesi "ölçtüğüm şey ışık değil rig" demektir — materyal
+chart'ının iki kontrol hücresiyle aynı ders. Bu yüzden 260 **kalibrasyon
+sabiti değil**. Ek iki sınır: GI cvar'ı scene capture'a geçmiyor (iki geçiş
+birebir aynı), ve 260'ın içinde Unreal'in çözülmemiş scene-color ölçeği var.
+
+**Yol üstünde üç şey öğrenildi:**
+
+1. **Headless render'ın iki yolu kapalı.** Commandlet render komutlarını
+   işletmiyor (kontrol: temizlenen target `(1,0,0)` okuyor,
+   `export_render_target` dosya yazmıyor) ve **MRQ bu engine'de kurulu değil**.
+   `-game` harita yükledi ama SM5 shader derlemesi 3746 CPU-s yedi.
+   Çalışan yol: **editör + proje startup script'i + tick callback**.
+   `-ExecutePythonScript` işe yaramıyor — script dönünce editör kapanıyor.
+2. **Rig'de gerçek bir hata.** İlk tur üç zemin örneğini tam 0.0 verdi:
+   **Blender'ın piksel dizisi alttan yukarı, Unreal'in render target'ı
+   yukarıdan aşağı**. Blender formülü kopyalanınca kare dikey aynalandı ve
+   örnekler gökyüzüne düştü. 12×12 ızgara + `BaseColor`/`Normal` geçişleri
+   bunu bir turda gösterdi; tek patch'e bakıp "sahne siyah" demek yanlış
+   sonuca götürecekti.
+3. **Önceki oturumun bir iddiası çürütüldü.** "Rect light `LUMENS`'i sessizce
+   `CANDELAS`'a çeviriyor" **yanlıştı**. Gerçek: `intensity` ve
+   `intensity_units` Python'a read-only, atama **fırlatıyor**; okunan
+   `CANDELAS` ışığın dokunulmamış varsayılanıydı (8.0 cd — CDO'nun dediği
+   5000 UNITLESS değil). Setter ile üç ışık tipi de `LUMENS`'i koruyor.
+   README, CLAUDE.md ve kalibrasyon belgesi düzeltildi; `apply_intensity`'nin
+   geri-okuması koruma olarak kaldı, gerekçesi dürüstleştirildi.
+
+## Render karşılaştırması, ikinci tur — hipotez çürütüldü, rig'in tavanı bulundu
+
+Kullanıcı "yap bakalım" dedi; iki iş yapıldı ve ikisi de sonuç verdi.
+
+**1. Çok kare biriktirme → "temporal gürültü" hipotezi çürütüldü.** 8 ayrı
+kare, ayrı tick'lerde: **kare-kare yayılım %0.000**. Render deterministik,
+gürültü yok. Asimetri gerçek ve kararlı.
+
+**2. Simetri kontrolü assertion oldu.** Tolerans %2; düşünce karşılaştırma
+hüküm vermeyi **reddediyor** ve exit 2 veriyor. Çalıştı: Arnold %0.0025,
+Unreal %13.42 → "RIG NOT TRUSTWORTHY, no verdict".
+
+**Ve asıl bulgu: capture hiçbir kontrole cevap vermiyor.** GI'ı kapatmanın üç
+yolu denendi — console cvar, capture component'in `show_flag_settings`'i (16
+flag, "16 of 16 accepted"), proje `DefaultEngine.ini` — ve üçü de sonucu
+**bit-bit** değiştirmedi. Bütün turlarda aynı dört sayı:
+`0.23611752 / 0.28615112 / 0.32732422 / 0.30765015`. Tutarlı tek okuma:
+`capture_scene()` her çağrıda yeniden render etmiyor.
+
+Sonuç: **SceneCapture2D Python'dan kontrol edilebilir bir ölçüm aracı değil.**
+Değiştiremediğin bir render'da asimetrinin sebebi (Lumen? ekran-uzayı etki?)
+elenmez ve "direct-only" iddia edilemez. Kalan tek yol MRQ + Path Tracer, ve
+`MovieRenderPipelineCore` bu kurulumda yok. Bu, belgeye "bir sonraki tur aynı
+duvara üç kez çarpmasın" diye yazıldı.
+
+## Unreal parite turu (2.42.0) — yedi alan daha taşınıyor
+
+Kullanıcı "hepsi taşınsın" dedi. Probe önce, tablo sonra: Unreal karşılıkları
+ölçüldü, sonra yazıldı.
+
+**Taşınanlar (host testinde assert'li):**
+
+| alan | Unreal karşılığı | durum |
+|---|---|---|
+| locator / boş null | `Actor` (DefaultSceneRoot'lu), parent zinciriyle | 6/6 |
+| NURBS/bezier eğri | üretilen Blueprint üstünde `SplineComponent` | **11/11 spline** |
+| aiVolume (.vdb) | `SparseVolumeTexture` + `HeterogeneousVolume` | 1/1 |
+| aiStandIn / gpuCache | `.abc` → `GeometryCache` + `GeometryCacheActor` | 4/4, 1 yüklü |
+| particle instancer | nokta başına `StaticMeshActor`, mesh paylaşımlı | 1/1 |
+| particle sistemi | çapa + instancer'a nokta kaynağı | 3/3 |
+| selection set / display layer | **Unreal Layer** (tam karşılık) | çalışıyor |
+
+`objects.py` ortak yerleştirmeyi tek yere koyuyor (spawn, matris, klasör, tag),
+yoksa volume ile locator iki konvansiyona ayrılırdı.
+
+**Ölçülen dört mimari gerçek:**
+
+1. **Level actor'üne component eklenemiyor** — `add_component_by_class` bu
+   build'de yok. Çözüm: bileşeni zaten taşıyan actor sınıfını spawn et
+   (`GeometryCacheActor.geometry_cache_component`, `HeterogeneousVolume`) veya
+   `SubobjectDataSubsystem` ile Blueprint üret. Eğriler ikinci yoldan geçiyor.
+2. **Yeni Blueprint derlenmeden spawn edilemiyor** — `generated_class` yok ve
+   spawn `None` dönüyor, sebep söylemeden. Önce derle, sonra `generated_class()`.
+   Bu bulunmadan 11 eğrinin 11'i sessizce çapaya düşüyordu.
+3. **Obje rotasyonu ışık rotasyonundan farklı** — ışık/kamera bakışını +X'e
+   taşır; obje kendi eksen adlarını korur (`+X=S·mx, +Y=S·mz, +Z=S·my`). Her
+   ekseni aynı ada eşlemek sol el çerçevesi, yani ayna verirdi.
+4. **`positions` düz float listesi**, üçlü değil → doğrudan iterasyon
+   `'float' object is not iterable`. Instancer bu yüzden 0 kuruyordu.
+
+**Testin kendisi bir kez yanlıştı, yine:** "VDB sparse volume texture ekledi"
+assertion'ı koşulsuzdu, ama fixture'ın `smoke.vdb`'si **diskte yok** ve çapa
+doğru davranış. Artık dosya varsa yüklemeyi, yoksa çapalamayı şart koşuyor.
+
+## Alembic cache (2.42.0) — kapandı, ve gerçek bir delikti
+
+Kullanıcı "alembic cache de önemli" dedi; haklıydı ve düşündüğümden daha
+önemliydi: export cache'lediğinde deforme meshler ve emitter parçacıklar FBX'e
+**değil** `.abc`'ye gidiyor, yani import edilmezse o objeler level'da **hiç
+yok**. Fixture'da 1 mesh + 1 particle tam bu durumdaydı.
+
+`alembic.py`: `.abc` → `GeometryCache` → `GeometryCacheActor` (bileşeni zaten
+taşıyor). Eksen/ölçek sorusunun cevabı motorda hazır çıktı:
+`AbcConversionPreset.MAYA` = scale (1,−1,1), rotation (90,0,0), flip_v. Sayıları
+elle yazmak yerine preset **adıyla** isteniyor (otorite tek kalsın), ama açıkça
+set ediliyor — sürümler arası değişen varsayılan, aynı paketin farklı
+görünmesinin yoludur. Cache dünya uzayında yazıldığı için actor orijinde:
+transform uygulamak geometriyi iki kez taşırdı.
+
+Ölçülen ayrıntı: `imported_object_paths` aynı asset'i **iki kez** bildiriyor,
+tekilleştiriliyor. Cache mesh'i FBX'ten geçmediği için materyal eşleşmesine
+girmiyor; slotlar Maya adlarını taşıdığından bizim materyallerimiz isimle
+aranıyor, bulunmazsa uyarı.
+
+Host testinde iki assertion: cache geldi mi, ve level'da cache taşıyan bir
+`GeometryCacheActor` var mı. 38/38.
+
+## Headless/batch export + preset (2.46.0) — roadmap maddesi 6, kapandı
+
+Kullanıcının sırasındaki son madde. İki parça, tek cevap: UI'ın ayarları her
+oturum elle yeniden kuruluyordu, ve batch export'a "sanatçının kullandığı
+ayarlar" denemiyordu.
+
+`presets.py` — ayarlar `export_scene`'in aldığı keyword argümanların **birebir
+aynısı** artı çıktı klasörü ve LiveLink adresi. Maya tercihleri altında JSON.
+Sahnede değil: ayarlar sahnenin ne olduğunu değil kişinin nasıl çalıştığını
+anlatır, ve başkasının açtığı sahne gönderenin alışkanlıklarını taşımamalı.
+
+`batch.py` — `--scene/--out/--preset/--send` + her export bayrağı. Üç katman,
+sonraki kazanır: varsayılan → preset → komut satırı. **Adı geçmeyen bayrak
+hiçbir şeyi sıfırlamıyor** (`None` = "söylenmedi"), yoksa `--out` vermek
+diğerlerini varsayılana döndürürdü ve preset'in anlamı kalmazdı.
+
+**Ölçüldü:** iki çağırma biçimi de `PYTHONPATH` olmadan çalışıyor. Düz script
+olarak çalıştırınca relative import kırılıyordu (`attempted relative import with
+no known parent package`); `__main__` bootstrap'ı paketi yola geri koyuyor —
+farm işi `-m` yerine dosya yolunu yazıyor.
+
+Preset round-trip gerçek Maya'da doğrulandı: kaydedilen preset (bake kapalı,
+archive açık, 512) geri okundu ve `--out` verilmeden batch export'u sürdü —
+arşiv yazıldı, bake sayısı 0.
+
+Sözleşme testinde iki kural: bilinmeyen preset anahtarı **düşürülüyor** (yeni
+build'in yazdığı preset eskisinde `export_scene`'e bilinmeyen argüman geçirip
+export'u düşürmesin), ve bozuk JSON varsayılanlara düşüyor.
+
+## Vertex colour / colorSet (2.45.0) — roadmap maddesi 3, kapandı
+
+Ölçüm önce, ve iki ayrı şey olduğu ortaya çıktı:
+
+- **Boya zaten geliyordu.** FBX renk setlerini taşıyor; Blender'da corner
+  colour attribute olarak, Maya adlarıyla, ve **hepsi** — yalnız current olan
+  değil.
+- **Okuyan yoktu.** `aiUserDataColor` desteklenmeyen ağ sayılıyordu, yani bake
+  kapalıyken kanal düz değere düşüyordu — renk için **siyah**. Ölçüldü:
+  `value: [0,0,0]`, `unsupported_network: true`, ve **hiçbir uyarı yok**.
+
+Şema 44: kanal okuduğu seti (`color_set`) kaydediyor, mesh taşıdığı setleri
+(`color_sets`) kaydediyor. Blender **Color Attribute** node'u kuruyor ve
+kanala bağlıyor.
+
+**Fixture ismin önemli olduğunu kanıtlıyor:** küpte iki set var, shader
+birincisini okuyor, ve Maya bilerek **ikincisi** current bırakılmış. "Current
+olanı al" diyen bir alıcı yanlış rengi okur ve gayet makul görünür.
+
+**Yolda iki hata daha:**
+
+1. `plug_value` string'i **düşürüyor** (sayısal niçin yazılmış); ilk sürüm set
+   adını `None` okuyup sessizce hiçbir şey bulmadı. `raw_attr_value` doğrusu.
+2. **`unsupported_network` başından beri yazılıyor ve kimse okumuyormuş.**
+   Exporter'ın ifade edemediği her ağ kanalı sessizce düz değerde bırakıyordu.
+   Artık iki alıcı da adıyla bildiriyor. (Roadmap 1. bölümdeki "sessiz" madde.)
+
+Unreal aynı kaydı alıyor ama master material'a vertex colour bağlamıyor — kanal
+başına uyarı yazıyor.
+
+## Uyarı okunabilirliği (2.44.0) — roadmap maddesi 4, kapandı
+
+Kullanıcının kendi sırasında bekleyen madde ("pakete report.txt, N-panel'de
+liste"). Yazıldığından daha değerli hale gelmişti: Unreal alıcısı fixture'da
+**67 uyarı** üretiyor ve tek okuma yolu Output Log'du.
+
+Üç rapor, hepsi **paket klasörünün içine**:
+
+```text
+mLender_01_report.txt          Maya ne gönderdi + uyarıları
+mLender_01_import_blender.txt  Blender ne yaptı
+mLender_01_import_unreal.txt   Unreal ne yaptı
+```
+
+Paket artık kendi hikayesini taşıyor: ne gönderildi, iki alıcı ne anladı.
+Kullanıcıya "konsoldaki satırları kopyala" demek yerine tek dosya isteniyor.
+
+Blender'da ayrıca N-panel'de **Last Import Warnings** alt paneli: ilk 25 uyarı
+listeleniyor (yüzlerce satırlık panel UI'ı durdurur) ve bir buton raporu
+açıyor. Uyarılar `ml_warnings` collection property'sinde duruyor, yani
+import'tan sonra da okunabiliyor.
+
+**Kural:** rapor hiçbir zaman asıl işi düşürmez. Paket klasörü salt okunur
+olabilir (başkasının diski, ağ paylaşımı) ve iyi bir export'u log dosyası
+yüzünden kaybetmek saçma olurdu.
+
+**Yol üstünde bir tutarsızlık giderildi:** exporter'ın `BUILD_VERSION`'ı
+`__init__.py`'deydi, importer'ınki `constants.py`'da. `package.py` raporu
+yazarken sürümü gerektirdi ve kökü import edemezdi (döngü), o yüzden exporter'ın
+ki de `constants.py`'a taşındı; `build_release.py` artık oradan okuyor.
+
+## AOV'lar (2.43.0) — hiç çalıştırılmamış kod, ilk kez koştu ve iki hata verdi
+
+Kullanıcı "AOV'lardan hangileri yok" diye sordu. Cevabı ararken asıl bulgu çıktı:
+**AOV yolu iki tarafta da hiç test edilmemişti.** `tests/` içinde tek AOV
+geçmiyordu, fixture 0 AOV üretiyordu. Yani exporter'daki ve importer'daki AOV
+kodu bugüne kadar gerçek veriyle **bir kez bile çalışmamıştı**.
+
+Fixture'a on bir `aiAOV` eklendi ve her biri **başka bir yere düşsün** diye
+seçildi: Z, N, motionvector, crypto_object, emission, diffuse, specular
+(eşleşen dallar), sss + opacity (eşleşmeyen yol), ve iki tuzak: **fuzz** ile
+**albedo**.
+
+**İki gerçek hata çıktı:**
+
+1. **`"z" in name` çok gevşekti.** OpenPBR sheen'e **fuzz** diyor → içinde z var
+   → sessizce derinlik pass'i açılıyor, sheen hiçbir yere gitmiyordu. Artık
+   Arnold'ın `Z`'sine tam eşleşme. Negatif testle doğrulandı: eski substring
+   geri konunca assertion düşüyor.
+2. **Bare `albedo` diffuse direct+indirect açıyordu.** Albedo renk pass'idir;
+   öbür ikisi kimsenin istemediği ışık taşıması.
+
+**Bir tahmin de ölçümle düzeldi:** exporter Arnold'ın AOV `type`'ını ham int
+kaydediyor ve yorumda `# 5=RGBA usually` yazıyordu. Canlı oturumdan okundu:
+**4=FLOAT** (Z), **5=RGB** (çoğu), **6=RGBA** (tanınmayan adın varsayılanı),
+**7=VECTOR** (N). Yani yorum yanlıştı.
+
+**Üçüncü düzeltme:** eşleşmeyen AOV Blender'da custom slot oluyordu ve bu
+**sessizdi**. Blender'da custom AOV'a shader yazmadıkça siyah render eder, yani
+"pass geldi ama boş" — hiç gelmemesinden daha iyi saklanır. Artık uyarı
+yazılıyor ve `cryptomatte_asset` de açılıyor (eskiden yalnız object+material).
+
+Unreal tarafı değişmedi: render pass'ler orada MRQ konfigürasyonu ve MRQ bu
+kurulumda yok — sayısıyla bildiriliyor.
+
+## Skinli mesh / AS — kapandı, ve önceki turun teşhisi yanlışmış
+
+Önceki turda "skinli meshler static geliyor, Interchange pipeline override'ı
+gerekiyor, çekirdek yola dokunmak riskli" yazmıştım. **Yanlıştı**, ve ölçüm
+bunu bir turda çürüttü. Hiçbir override olmadan, alıcının zaten kullandığı
+çağrı:
+
+```text
+baseline assets = {'SkeletalMesh': 4, 'Skeleton': 4, 'PhysicsAsset': 4,
+                   'StaticMesh': 47, 'AnimSequence': 1, ...}
+```
+
+Interchange skinli meshi **kendiliğinden** getiriyormuş. Hata benim
+`imported_mesh_actors()`'ımdaydı: `isinstance(actor, StaticMeshActor)` ile
+filtreliyordu, yani dört skeletal actor level'a giriyor ve **sahipsiz
+bırakılıyordu** — kaydına eşleşmiyor, adlandırılmıyor, FBX'in placeholder
+materyalini taşıyor.
+
+Düzeltme küçüktü: mesh actor'ü static **veya** skeletal; bileşen
+`static_mesh_component` ya da `skeletal_mesh_component`; slot sayısı
+`get_num_materials()` (skeletal'da `static_materials` yok).
+
+**Ders:** "çekirdek yola dokunmak riskli" diye ertelediğim iş, aslında
+**dokunulmaması gereken** işti. Riski doğru tahmin ettim, sebebi yanlış.
+
+**İki yanlış yol da ölçüldü ve ikisi de sessiz:**
+
+1. `FbxImportUI.import_as_skeletal` → her statik küp tek kemikli skeletal mesh,
+   **50 Skeleton**.
+2. `override_pipelines`'a soft path → **kabul ediliyor**, `import_scene` True
+   dönüyor, üretilen asset **{}**. Sonucu saymasaydım "çalıştı" diye yazacaktım.
+   Ayrıca `auto_detect_mesh_type` 5.8'de deprecated.
+
+`asrig.py` manifesti skeletal actor'lere `ml_as_*` tag'i olarak bağlıyor ve her
+zinciri tek tek uyarıya yazıyor (start/middle/end + ik/pole/switch/blend), yani
+bir sonraki tur manifesti yeniden çıkarmıyor.
+
+**Kalan tek şey kontrol katmanı:** Unreal'de karşılığı **Control Rig** asset'i,
+Python'dan üretmek rig grafiği kurmak demek — modül değil proje. Blender'daki
+`asrig.py`'ın karşılığı ve tek başına bir tur.
+
+**Taşınmayan dördü, gerekçesiyle** (hepsi sayısı ve sebebiyle uyarıya yazılıyor):
+AS rigleri (FBX skinli mesh getiriyor ama bu build static mesh olarak import
+ediyor, skeleton/control rig kurmuyor), skeleton root motion (sürecek armature
+yok), Maya constraint'leri (Unreal'de karşılığı yok, hareketi FBX bake'i zaten
+taşıyor), AOV'lar (Unreal'de render pass MRQ konfigürasyonu ve MRQ bu build'de
+kurulu değil). Ayrıca ışık/kamera/görünürlük animasyonu (Level Sequence ister)
+ve Alembic cache import edilmiyor.
+
+## Mutlak parlaklık — kapandı, analitik fiziğe karşı
+
+Kullanıcı "doğrulamak için rig yap" dedi. Kilit karar: referansı **Arnold'dan
+analitik fiziğe çevirmek**. Arnold'ın piksel değerleri kendi keyfi ölçeğinde
+olduğu için ona karşı bir oran zaten hiçbir zaman mutlak olamazdı — bir önceki
+turun çözemediği şey buydu, ve daha fazla render tekniği denemek çözmezdi.
+
+Rig `light_absolute_maya.py` + `light_absolute_unreal.py`. Arnold render'ı
+kullanılmıyor. Beklenti kapalı formda, lümen değeri alıcının **kendi**
+`light_intensity_for_unreal()`'inden, beklenti örneklenen bütün piksellerin
+kendi d ve cosθ'sı üzerinden ortalanıyor.
+
+**Rig'i güvenilir yapan geometri:** kamera tam tepeden dik aşağı → görüntü
+dönel simetrik → sol/sağ ve üst/alt birer simetri kontrolü; ışık küçük (150
+cm'de 20 cm) ve kameraya görünmez; yama 40×40 px. **Simetri %13.42'den %0.29'a
+düştü**, yani önceki turun asimetrisi eğik kompozisyon + küçük yamaydı — rig
+kusuru, transfer kusuru değil.
+
+**Sonuç:** nokta kaynak yaklaşımının geçerli olduğu varyantlarda oran
+**0.9529, yayılım %0.034**.
+
+| varyant | oran | boyut/mesafe |
+|---|---|---|
+| 2× mesafe (300 cm) | 0.9532 | 0.067 |
+| base (150 cm) | 0.9528 | 0.133 |
+| 2× yoğunluk | 0.9528 | 0.133 |
+| +1 stop | 0.9528 | 0.133 |
+| yarım mesafe (75 cm) | 0.9070 | 0.267 |
+
+Ters kare, doğrusallık ve `2^exposure` ayrı ayrı doğrulandı; +1 stop ile 2×
+yoğunluk **birebir aynı** ölçümü verdi. Kalan %4.7 modelin nokta-kaynak
+varsayımının: oran boyut/mesafe oranıyla birlikte hareket ediyor, yani ışık
+yaklaştıkça beklenti bozuluyor. Pratik sonuç: `SCS_SCENE_COLOR_HDR` **nit**
+cinsinden ve zincir mutlak doğru.
+
+**İki tuzak kayda geçti, ikisi de "dönüş değerine bakmayan yazma" sınıfı:**
+
+1. Tick callback **kendini çağırıyor** — `import_scene_package` Slate tick'i
+   pompalıyor; ilk koşu 21 import derinliğine inip `RecursionError` ile editörü
+   götürdü. Guard eklendi.
+2. **Material Instance parametresi render'a ulaşmıyor** — albedo 0.4'e
+   çekildi, geri okuma 0.4 dedi, setter `False` döndü, ölçülen piksel önceki
+   albedoyla birebir aynı kaldı. Işık değişiklikleri aynı rig'de ulaşıyor.
+   Albedo varyantı çıkarıldı ve sebebi dosyada yazılı; transfer hatası gibi
+   okunan şey rig sınırıydı.
+
+**Yolda gerçek bir ürün hatası çıktı ve düzeltildi.** Rig'i tekrar koşarken
+import "2 mesh, **0 materyal**, 0 uyarı" dedi. Zincir: host testi aynı projede
+koşup `/Game/mLender`'ı sildi → kaydedilmiş level'in actor'leri null mesh'e
+düştü (`mesh_valid: false`) → `assign_materials` mesh yokken **boş liste
+dönüyordu**, yani sessiz kayıp. Artık mesh'i olmayan actor uyarı yazıyor ve
+düzeltmeyi söylüyor. Taze content root'ta aynı paket 2 materyal veriyor;
+tetikleyici "silinen content root'a kaydedilmiş bir level referans veriyor".
+Host testi bunu yakalamıyor çünkü untitled level'e import ediyor — koşul yok.
+- Düzeltme node zincirleri ve `layeredTexture` grafiği kurulmuyor (uyarı
+  yazılıyor, bake taşıyor). "Melez"in grafik yarısı burada eksik kalan kısım.
+- UDIM, IES, dome HDR cubemap yok. Lookdev çekirdeği dışındaki her tip
+  `_report_uncarried` ile sayısıyla bildiriliyor.
+
 ## Sıradakiler — kararlaştırılan sıra
 
 Kullanıcı sırayı verdi: **2 → 7 → 4 → 3 → 6**. Numaralar bu oturumdaki

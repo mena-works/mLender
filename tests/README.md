@@ -67,6 +67,133 @@ ağaçlarına, ışık data'sına assert eder. Önce 2. adımı çalıştır.
 Birden fazla Blender sürümünde çalıştırmak sürüm uyum kodunu sınar; bu araç
 3.6'dan 5.2'ye kadar iddia ediyor.
 
+## 4b. Unreal import testi (gerçek Unreal, ~2 dk)
+
+```bash
+"C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" ^
+    <bir .uproject> -run=pythonscript ^
+    -script="tests/host/unreal_import_test.py" -unattended -nosplash -nullrhi
+```
+
+2. adımın yazdığı **aynı** paketi gerçek Unreal'a import eder. Önce 2. adımı
+çalıştır.
+
+Bir `.uproject` gerekir; `PythonScriptPlugin` etkin minimal bir tanesi yeter.
+Test package'ı depodan import eder, kurulum gerektirmez.
+
+**Çıktı stdout'ta değil** `<proje>/Saved/Logs/<proje>.log` içindedir; sonucu
+`MLPASS` / `MLFAIL` ile ara. Headless Unreal'da bu ayrıntı ilk saati yer.
+
+Doğruladıkları: eksen takasının iki yönü, santimetre/metre ölçek ayrımı, enerji
+zincirinin lümen çıktısı ve kare birim teriminin varlığı, sun'ın lüks olduğu,
+uçtan uca import (mesh eşleşmesi, materyal sayısı, actor tipleri), meshlerin
+**bizim** materyallerimizi taşıdığı, rect ışığın akısının Unreal'in birim
+çevriminden **sağ çıktığı**, ve kameranın Maya focal length'i ile sensor
+genişliğini koruduğu.
+
+Son üçü bilerek böyle yazıldı: "ışık var mı" ve "yoğunluk pozitif mi" soran
+kontroller, bütün ışıkları Unreal'in varsayılanında bırakan bir hatayı
+**geçirdi**.
+
+## Render eşleşmesi, Unreal (gerçek Arnold + gerçek Unreal, ~5 dk)
+
+Dört adım, sırayla. Blender yarısıyla **aynı** `arnold.exr`'i kullanır.
+
+```bash
+# 1. Arnold referansi (Blender yarisiyla ayni rig)
+"C:\Program Files\Autodesk\Maya2023\bin\mayapy.exe" ^
+    tests/calibration/render_match_maya.py
+
+# 2. Paketi import et ve level'i kaydet
+"...\UnrealEditor-Cmd.exe" <proje>.uproject -run=pythonscript ^
+    -script="tests/calibration/render_match_unreal_import.py" ^
+    -unattended -nosplash -nullrhi
+
+# 3. render_match_unreal_capture.py'yi <proje>/Content/Python/init_unreal.py
+#    olarak kopyala, editoru o level'de ac. Kendisi capture edip cikiyor.
+#    SONRA DOSYAYI SIL, yoksa her editor acilisi capture etmeye calisir.
+
+# 4. Karsilastir
+"...\blender.exe" --background --factory-startup ^
+    --python tests/calibration/render_match_unreal_compare.py
+```
+
+3. adım neden ayrı ve neden editörde: **commandlet render etmiyor** (ölçüldü,
+temizlenen render target `(1,0,0)` okuyor) ve `-ExecutePythonScript` script
+döner dönmez editörü kapatıyor. Çalışan tek yol startup script + tick.
+
+Simetri kontrolü **assertion**: sahne sol-sağ simetrik, Arnold bunu %0.0025'te
+üretiyor. Unreal %2'yi aşarsa karşılaştırma hüküm vermeyi reddedip **exit 2**
+veriyor. Bugün %13.42 ile düşüyor, yani bu adım şu an ışığın **dağılımını**
+doğruluyor, mutlak parlaklığını doğrulamıyor.
+
+**Önemli iki koşul:**
+
+- Bu rig'i host testiyle **aynı projede** koşma. Host testi import ederken
+  `/Game/mLender`'ı siliyor ve kaydedilmiş MatchLevel'in mesh referansları
+  null'a düşüyor; import "2 mesh, 0 materyal" veriyor (artık uyarı yazıyor).
+  2. adımdan önce projenin `Content/mLender` ve `Content/RenderMatch`
+  klasörlerini sil.
+- Capture'ın render ayarlarına cevap vermediği ölçüldü (cvar, show flag ve
+  proje ini üçü de bit-bit aynı sonuç). "GI kapalı" bir iddia değil; ayrıntı
+  `docs/unreal_calibration.md` bölüm 7.4.2.
+
+## LiveLink uçtan uca, Unreal (gerçek Maya + gerçek Unreal, ~3 dk)
+
+**Kullanıcının gerçekten yaptığı yol.** Diğer bütün testler
+`import_scene_package()`'i doğrudan çağırıyor; bu ise Maya'da Send'e basmayı
+sınıyor: listener thread'i, game-thread pompası ve mesaj doğrulayıcı ancak
+burada çalışıyor. Commandlet olmaz — pompa bir Slate tick callback'i.
+
+```bash
+# 1. unreal_livelink_test.py'yi <proje>/Content/Python/init_unreal.py olarak
+#    kopyala ve editoru ac. Soketi baglar ve bekler.
+# 2. Maya'dan gonder:
+"C:\Program Files\Autodesk\Maya2023\bin\mayapy.exe" ^
+    tests/host/maya_livelink_send.py
+# 3. Sonra init_unreal.py kopyasini SIL.
+```
+
+Sıra önemli değil: Maya, listener'ın soketi bağladığını bildirmesini bekliyor,
+yani test yarış koşuluyla geçmiyor veya düşmüyor. Doğrulanan çıktı:
+
+```text
+MLE2E status = Imported 1 mesh(es), 1 material(s), 1 light(s), 1 camera(s).
+MLE2E level  = {StaticMeshActor: 1, RectLight: 1, CineCameraActor: 1}
+MLE2E meshes carrying our materials = 1
+```
+
+## Mutlak parlaklık (gerçek Maya + gerçek Unreal, ~3 dk)
+
+Işık enerjisi zincirini **analitik fiziğe** karşı doğrular. Arnold render'ı
+kullanmaz — Arnold'ın pikselleri keyfi ölçekte olduğu için ona karşı bir oran
+mutlak olamaz, render eşleşmesinin çözemediği şey buydu.
+
+```bash
+# 1. Kapali formda cevabi olan sahneyi export et
+"C:\Program Files\Autodesk\Maya2023\bin\mayapy.exe" ^
+    tests/calibration/light_absolute_maya.py
+
+# 2. light_absolute_unreal.py'yi <proje>/Content/Python/init_unreal.py olarak
+#    kopyala ve editoru ac. Import eder, olcer, hukum yazar, cikar.
+#    SONRA DOSYAYI SIL.
+```
+
+Öncesinde projenin `Content/mLender` klasörünü sil (yeniden import hatası,
+yukarıdaki nota bak).
+
+Beş varyant her biri dönüşümün tek bir terimini oynatır. Beklenen çıktı:
+
+```text
+ratio over the variants where a point source is a fair approximation
+    = 0.9529, spread 0.034%
+VERDICT = ABSOLUTE BRIGHTNESS VERIFIED
+```
+
+Simetri kontrolü %5'i aşarsa rig güvenilmez sayılır ve hüküm verilmez. Kalan
+%4.7 modelin nokta-kaynak varsayımıdır, transferin değil; `size/distance`
+kolonu bunu görünür kılar. Ayrıntı `docs/unreal_calibration.md` bölüm 8.
+
 ## Referanslı sahne (gerçek Maya + gerçek Blender, ~1 dk)
 
 ```bash

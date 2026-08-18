@@ -21,13 +21,16 @@ from .constants import (
     LIVELINK_PROTOCOL,
     LIVELINK_VERSION,
     TOOL_NAME,
+    BUILD_VERSION,
 )
 from .package import export_scene
+# Bound here so `mlender_exporter.batch` works from a farm job without
+# a second import line, and so the contract checks can see it. Its Maya
+# imports are all inside functions, so this costs nothing at load.
+from . import batch  # noqa: F401
 from .posebridge import send_pose
 from .ui import show_ui
 
-
-BUILD_VERSION = "2.40.0"
 
 # Dependency order; reloading follows this list so each module re-imports
 # already refreshed dependencies.
@@ -58,6 +61,9 @@ SUBMODULES = (
     "alembic",
     "livelink",
     "posebridge",
+    "presets",
+    "batch",
+    "report",
     "package",
     "shelf",
     "ui",
@@ -71,6 +77,7 @@ __all__ = [
     "LIVELINK_PROTOCOL",
     "LIVELINK_VERSION",
     "TOOL_NAME",
+    "batch",
     "export_scene",
     "reload_package",
     "send_pose",

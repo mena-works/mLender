@@ -1,0 +1,282 @@
+# -*- coding: utf-8 -*-
+"""FBX import and material assignment.
+
+Interchange brings the meshes, their hierarchy, their transforms and the unit
+conversion, all measured correct: a cube exported at Maya (0, 40, 0) arrives at
+Unreal (0, 0, 40) with no help from this package. So there is deliberately no
+transform code here -- doing the conversion again on top of a correct one is
+the double-application mistake this project has already made once with light
+energy.
+
+What the FBX cannot bring is the materials, which is the same division of
+labour the Blender receiver uses.
+"""
+
+import os
+
+import unreal
+
+from .constants import GENERATED_TAG, MESH_CONTENT_PATH
+from .utils import safe_asset_name
+
+
+def resolve_fbx_path(package_folder, package_data):
+    """The package's FBX, found inside the package before it is given up on.
+
+    A package records the absolute path its exporting machine wrote, so a
+    package that has moved resolves nothing unless it is looked for here.
+    """
+    recorded = str((package_data or {}).get("fbx_file") or "").strip()
+    if recorded and os.path.isfile(recorded):
+        return recorded
+    if package_folder and os.path.isdir(package_folder):
+        name = str((package_data or {}).get("package_name") or "").strip()
+        if name:
+            candidate = os.path.join(package_folder, name + ".fbx")
+            if os.path.isfile(candidate):
+                return candidate
+        for entry in sorted(os.listdir(package_folder)):
+            if entry.lower().endswith(".fbx"):
+                return os.path.join(package_folder, entry)
+    raise RuntimeError(
+        "The package has no FBX this build can find: {0}".format(
+            recorded or package_folder
+        )
+    )
+
+
+def import_fbx_scene(fbx_path, warnings):
+    """Import the FBX into the open level, hierarchy and all.
+
+    Uses Interchange's scene import, which was measured to spawn one
+    StaticMeshActor per Maya transform under a single RootNode actor, carrying
+    the Maya transform names. import_level is a Level object rather than a
+    flag -- the engine rejects a bool -- so it is left unset and the open world
+    is the target.
+    """
+    manager = unreal.InterchangeManager.get_interchange_manager_scripted()
+    source = manager.create_source_data(fbx_path)
+    parameters = unreal.ImportAssetParameters()
+    parameters.is_automated = True
+    if not manager.import_scene(MESH_CONTENT_PATH, source, parameters):
+        raise RuntimeError(
+            "Interchange refused to import {0}".format(fbx_path)
+        )
+    return True
+
+
+def mesh_component(actor):
+    """The mesh component of a static or a skeletal mesh actor.
+
+    Both kinds arrive from one scene import and everything downstream -- record
+    matching, material assignment, counting -- wants to treat them alike.
+    """
+    for name in ("static_mesh_component", "skeletal_mesh_component"):
+        component = getattr(actor, name, None)
+        if component is not None:
+            return component
+    for cls_name in ("StaticMeshComponent", "SkeletalMeshComponent"):
+        cls = getattr(unreal, cls_name, None)
+        if cls is None:
+            continue
+        try:
+            component = actor.get_component_by_class(cls)
+        except Exception:
+            component = None
+        if component is not None:
+            return component
+    return None
+
+
+def is_mesh_actor(actor):
+    static = getattr(unreal, "StaticMeshActor", None)
+    skeletal = getattr(unreal, "SkeletalMeshActor", None)
+    kinds = tuple(cls for cls in (static, skeletal) if cls is not None)
+    return bool(kinds) and isinstance(actor, kinds)
+
+
+def imported_mesh_actors(before_labels):
+    """Mesh actors that were not in the level before the import.
+
+    **Skeletal actors count too.** Interchange's scene import already brings
+    skinned meshes in as SkeletalMesh with a Skeleton and a PhysicsAsset --
+    measured on this fixture: 4 skeletal meshes beside 47 static ones, with no
+    pipeline override of any kind. An earlier version of this function filtered
+    on StaticMeshActor alone, so those four arrived in the level and were then
+    ignored: unmatched to their Maya record, unnamed, and left holding the
+    FBX's placeholder materials.
+    """
+    subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+    actors = []
+    for actor in subsystem.get_all_level_actors() or []:
+        if not is_mesh_actor(actor):
+            continue
+        if id(actor) in before_labels:
+            continue
+        actors.append(actor)
+    return actors
+
+
+def skeletal_actors(actors):
+    cls = getattr(unreal, "SkeletalMeshActor", None)
+    if cls is None:
+        return []
+    return [actor for actor in actors if isinstance(actor, cls)]
+
+
+def build_record_index(mesh_records):
+    """Maya mesh records keyed by every name an actor might arrive under.
+
+    Indexed once rather than scanned per actor: on the Blender side the same
+    per-object scan was quadratic and cost sixty seconds on 1600 meshes.
+
+    Both the short name and the namespace-qualified one are keys, because a
+    referenced asset arrives with its namespace and two references of one asset
+    are otherwise indistinguishable.
+    """
+    index = {}
+    for record in mesh_records:
+        for key in (
+            record.get("mesh"),
+            record.get("mesh_full_name"),
+            safe_asset_name(record.get("mesh") or ""),
+            safe_asset_name(record.get("mesh_full_name") or ""),
+        ):
+            if not key:
+                continue
+            index.setdefault(str(key), []).append(record)
+    return index
+
+
+def find_mesh_record(actor, record_index, used):
+    """The Maya record for an actor, by label.
+
+    Unreal strips the namespace colon from an actor label, so the sanitised
+    forms are in the index as well. A record is only used once, which is what
+    keeps two meshes of the same short name in different groups apart.
+    """
+    label = actor.get_actor_label()
+    for key in (label, safe_asset_name(label)):
+        for record in record_index.get(str(key), []):
+            if id(record) in used:
+                continue
+            return record
+    return None
+
+
+def assign_materials(actor, record, material_cache, package_folder,
+                     build_material, warnings):
+    """Replace the FBX's placeholder materials with the rebuilt ones.
+
+    Slots are matched by the material's own name rather than by index: the FBX
+    importer names each material asset after the Maya shader that produced it,
+    and an index is only right while nothing reorders.
+    """
+    component = mesh_component(actor)
+    mesh = None
+    if component is not None:
+        # A skeletal component names it differently; both are asked for rather
+        # than branching on the actor's class, which a future kind would break.
+        for name in ("static_mesh", "skeletal_mesh"):
+            mesh = getattr(component, name, None)
+            if mesh is not None:
+                break
+    records = [
+        item for item in (record.get("materials") or [])
+        if item.get("material")
+    ]
+    if mesh is None:
+        # Silence here was a real defect: a re-import into a content root that
+        # already held a previous send left the actors with no static mesh, and
+        # this returned an empty list, so the import reported zero materials
+        # and no warning at all. A mesh actor with no mesh is exactly the kind
+        # of thing the user has to be told about.
+        if records:
+            warnings.append(
+                'Mesh "{0}" arrived with no static mesh asset, so its {1} Maya '
+                "material(s) could not be assigned. Re-importing into a "
+                "content root that already held a previous send is the known "
+                "cause; delete {2} and send again.".format(
+                    actor.get_actor_label(), len(records), MESH_CONTENT_PATH
+                )
+            )
+        return []
+    if not records:
+        return []
+    by_name = {}
+    for item in records:
+        for key in (item.get("material"), item.get("material_full_name")):
+            if key:
+                by_name[safe_asset_name(str(key))] = item
+
+    assigned = []
+    # A skeletal mesh has no static_materials, so the component's own count is
+    # the answer that works for both kinds.
+    try:
+        count = component.get_num_materials() if component else 0
+    except Exception:
+        count = 0
+    if not count:
+        try:
+            count = len(mesh.static_materials)
+        except Exception:
+            count = 0
+
+    for index in range(max(count, 1)):
+        existing = None
+        try:
+            existing = component.get_material(index)
+        except Exception:
+            existing = None
+        slot_label = safe_asset_name(
+            existing.get_name() if existing is not None else ""
+        )
+        item = by_name.get(slot_label)
+        if item is None:
+            # One slot and one Maya material is the unambiguous case even when
+            # the names disagree, which happens when the FBX renamed a
+            # material for uniqueness.
+            if len(records) == 1 and max(count, 1) == 1:
+                item = records[0]
+            else:
+                warnings.append(
+                    'Mesh "{0}" slot {1} ("{2}") matched no Maya material; '
+                    "the placeholder was left in place.".format(
+                        actor.get_actor_label(), index, slot_label
+                    )
+                )
+                continue
+        key = (
+            item.get("material_full_name") or item.get("material") or ""
+        )
+        material = material_cache.get(key)
+        if material is None:
+            material = build_material(item, package_folder, warnings)
+            material_cache[key] = material
+        try:
+            component.set_material(index, material)
+            assigned.append(material.get_name())
+        except Exception as exc:
+            warnings.append(
+                'Mesh "{0}" slot {1} could not take its material: {2}'.format(
+                    actor.get_actor_label(), index, exc
+                )
+            )
+    return assigned
+
+
+def organise_actor(actor, record, folder_root):
+    """Put an actor in a folder mirroring its Maya group trail."""
+    groups = [
+        str(part) for part in (record.get("groups") or []) if str(part).strip()
+    ]
+    path = "/".join([folder_root] + groups) if groups else folder_root
+    try:
+        actor.set_folder_path(path)
+    except Exception:
+        pass
+    try:
+        actor.tags = [GENERATED_TAG]
+    except Exception:
+        pass
+    return path

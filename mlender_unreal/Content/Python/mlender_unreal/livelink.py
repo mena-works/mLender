@@ -1,51 +1,46 @@
 # -*- coding: utf-8 -*-
-"""LiveLink listener.
+"""LiveLink listener for Unreal.
 
-bpy is not thread safe. The socket thread does nothing but read bytes and push
-them onto a queue; every bpy call happens in :func:`process_messages`, which
-runs on the main thread through bpy.app.timers. Never add a bpy call to the
-listener thread.
+The unreal module is no more thread safe than bpy is. The socket thread does
+nothing but read bytes and push them onto a queue; every unreal call happens in
+:func:`process_messages`, which the editor calls on the game thread through a
+Slate post-tick callback. Never add an unreal call to the listener thread.
+
+The Blender receiver uses bpy.app.timers for the same job. The hook differs,
+the rule does not.
 """
 
 import json
+import queue
 import socket
 import threading
 
-try:
-    import queue
-except ImportError:
-    import Queue as queue
-
-import bpy
+import unreal
 
 from .constants import (
-    LIVELINK_EVENT,
-    LIVELINK_POSE_EVENT,
     LIVELINK_HOST,
+    LIVELINK_PACKAGE_EVENT,
+    LIVELINK_POSE_EVENT,
     LIVELINK_PORT,
     LIVELINK_PROTOCOL,
     LIVELINK_VERSION,
     MAX_MESSAGE_BYTES,
     SOCKET_POLL_SECONDS,
-    TIMER_INTERVAL_SECONDS,
 )
 from .importer import import_scene_package
-from .posebridge import apply_pose
 
 
 _server = None
 _server_thread = None
 _stop_event = None
+_tick_handle = None
 _messages = queue.Queue()
 _status = "Listener is stopped."
+_settings = {"import_scale": 1.0, "power_scale": 1.0}
 
 
 def get_status():
-    """Current listener status text.
-
-    A function, not a module attribute read: the UI must see the live value
-    rather than a name bound at import time.
-    """
+    """Current listener status. A function, so callers see the live value."""
     return _status
 
 
@@ -53,19 +48,26 @@ def is_running():
     return _server is not None
 
 
-def start_listener(host, port):
-    global _server, _server_thread, _stop_event, _status
+def configure(import_scale=None, power_scale=None):
+    if import_scale is not None:
+        _settings["import_scale"] = float(import_scale)
+    if power_scale is not None:
+        _settings["power_scale"] = float(power_scale)
+    return dict(_settings)
+
+
+def start_listener(host=None, port=None):
+    global _server, _server_thread, _stop_event, _tick_handle, _status
     if _server is not None:
         _status = "Listener is already running."
-        return
+        return _status
 
     host = str(host or LIVELINK_HOST)
-    port = int(port)
+    port = int(port or LIVELINK_PORT)
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind((host, port))
     server.listen(4)
-    # A short timeout lets the accept loop notice the stop event.
     server.settimeout(SOCKET_POLL_SECONDS)
 
     _drain_messages()
@@ -75,24 +77,19 @@ def start_listener(host, port):
     _server_thread = threading.Thread(
         target=_listener_loop,
         args=(server, stop_event),
-        name="ZALookdevLiveLink",
+        name="mLenderLiveLink",
     )
     _server_thread.daemon = True
     _server_thread.start()
-    _status = "Listening on {0}:{1}".format(host, port)
 
-    if not bpy.app.timers.is_registered(process_messages):
-        bpy.app.timers.register(
-            process_messages,
-            first_interval=TIMER_INTERVAL_SECONDS,
-        )
+    _tick_handle = unreal.register_slate_post_tick_callback(_on_tick)
+    _status = "Listening on {0}:{1}".format(host, port)
+    return _status
 
 
 def stop_listener():
-    global _server, _server_thread, _stop_event, _status
-    server = _server
-    server_thread = _server_thread
-    stop_event = _stop_event
+    global _server, _server_thread, _stop_event, _tick_handle, _status
+    server, server_thread, stop_event = _server, _server_thread, _stop_event
 
     if stop_event:
         stop_event.set()
@@ -105,11 +102,12 @@ def stop_listener():
     _server_thread = None
     _stop_event = None
 
-    try:
-        if bpy.app.timers.is_registered(process_messages):
-            bpy.app.timers.unregister(process_messages)
-    except Exception:
-        pass
+    if _tick_handle is not None:
+        try:
+            unreal.unregister_slate_post_tick_callback(_tick_handle)
+        except Exception:
+            pass
+        _tick_handle = None
 
     if (
         server_thread
@@ -120,6 +118,7 @@ def stop_listener():
 
     _drain_messages()
     _status = "Listener is stopped."
+    return _status
 
 
 def _drain_messages():
@@ -162,75 +161,56 @@ def _listener_loop(server, stop_event):
                 pass
 
 
+def _on_tick(_delta_seconds):
+    """Slate post-tick, so this runs on the game thread."""
+    process_messages()
+
+
 def process_messages():
-    """Main thread pump. Returns the next timer interval, or None to stop."""
+    """Game thread pump. One message per call, so a tick is never long."""
     global _status
     try:
         kind, payload = _messages.get_nowait()
     except queue.Empty:
-        return TIMER_INTERVAL_SECONDS if _server else None
+        return
 
     if kind == "error":
         _status = "Message rejected: {0}".format(payload)
-        return TIMER_INTERVAL_SECONDS
+        unreal.log_warning("mLender: {0}".format(_status))
+        return
 
     try:
         validate_message(payload)
-        scene = bpy.context.scene
         if payload.get("event") == LIVELINK_POSE_EVENT:
-            pose_warnings = []
-            result = apply_pose(
-                payload.get("pose"), scene=scene, warnings=pose_warnings
-            )
+            # Rejected explicitly rather than ignored: a pose that silently
+            # does nothing looks like a broken rig on the Maya side.
             _status = (
-                "Pose applied: {0} bone(s) on {1} armature(s)"
-                "{2}.".format(
-                    result["applied"],
-                    result["armatures"],
-                    ", {0} unmatched".format(result["unmatched"])
-                    if result["unmatched"] else "",
-                )
+                "A pose update arrived; this build's Unreal receiver does not "
+                "apply poses."
             )
-            for warning in pose_warnings:
-                print("mLender warning: {0}".format(warning))
-            return TIMER_INTERVAL_SECONDS
+            unreal.log_warning("mLender: {0}".format(_status))
+            return
         result = import_scene_package(
             payload.get("package_folder") or "",
             package_data=payload.get("package_json"),
-            import_scale=scene.ml_import_scale,
-            import_mode=scene.ml_import_mode,
-            power_scale=scene.ml_light_power_scale,
+            import_scale=_settings["import_scale"],
+            power_scale=_settings["power_scale"],
         )
         _status = (
-            "Imported {0} mesh(es), {1} material(s), "
-            "{2} subdivision modifier(s), {3} light(s), {4} camera(s), "
-            "{5} collection(s), {6} instance(s), {7} empty(ies), "
-            "{8} curve(s), {9} set(s), {10} layer(s), {11} volume(s), "
-            "{12} particle object(s) ({13} baked), {14} cached object(s)."
+            "Imported {0} mesh(es), {1} material(s), {2} light(s), "
+            "{3} camera(s)."
         ).format(
             result["mesh_count"],
             result["material_count"],
-            result["subdivision_count"],
             result["light_count"],
             result["camera_count"],
-            result["group_collection_count"],
-            result["instanced_count"],
-            result["transform_count"],
-            result["curve_count"],
-            result["set_count"],
-            result["layer_count"],
-            result["volume_count"],
-            result["particle_count"],
-            result["particle_baked_count"],
-            result["alembic_count"],
         )
-        _publish_warnings(scene, result)
+        unreal.log("mLender: {0}".format(_status))
         for warning in result.get("warnings") or []:
-            print("mLender warning: {0}".format(warning))
+            unreal.log_warning("mLender warning: {0}".format(warning))
     except Exception as exc:
         _status = "Import failed: {0}".format(exc)
-        print("mLender: {0}".format(_status))
-    return TIMER_INTERVAL_SECONDS
+        unreal.log_error("mLender: {0}".format(_status))
 
 
 def validate_message(message):
@@ -241,38 +221,14 @@ def validate_message(message):
     if message.get("protocol_version") != LIVELINK_VERSION:
         raise ValueError("Unsupported LiveLink protocol version.")
     event = message.get("event")
-    if event not in (LIVELINK_EVENT, LIVELINK_POSE_EVENT):
+    if event not in (LIVELINK_PACKAGE_EVENT, LIVELINK_POSE_EVENT):
         raise ValueError("Unsupported LiveLink event.")
-    # A pose message carries its skeleton inline and nothing else; the
-    # package fields below belong to the other event.
     if event == LIVELINK_POSE_EVENT:
         if not isinstance(message.get("pose"), dict):
             raise ValueError("LiveLink pose payload is missing.")
         return
-    # Protocol 2 carries the package location rather than a copy of its JSON,
-    # which the importer reads from disk. An embedded package_json is still
-    # accepted and used when present, so a sender that wants to avoid the disk
-    # read can still send one.
     if not str(message.get("package_folder") or "").strip():
         raise ValueError("LiveLink package folder is missing.")
     embedded = message.get("package_json")
     if embedded is not None and not isinstance(embedded, dict):
         raise ValueError("LiveLink package JSON must be an object.")
-
-
-def _publish_warnings(scene, result):
-    """Put the import's warnings where the sidebar can read them.
-
-    The console print stays: it is what a user watching a long import sees.
-    This is for afterwards, when the console has scrolled and the question is
-    "what did not come through".
-    """
-    try:
-        scene.ml_warnings.clear()
-        for warning in result.get("warnings") or []:
-            item = scene.ml_warnings.add()
-            item.text = str(warning)
-        scene.ml_report_path = result.get("report_path") or ""
-    except Exception:
-        # A sidebar that cannot be filled must not fail an import that worked.
-        pass

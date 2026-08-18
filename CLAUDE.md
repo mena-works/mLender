@@ -1,17 +1,20 @@
 # CLAUDE.md — mLender (Lookdev)
 
 > Bu dosya bu repo için geçerlidir ve üst klasördeki (`Downloads/CLAUDE.md`)
-> Unreal Engine kurallarının **yerine geçer**. Buradaki hiçbir şey Unreal,
-> Blueprint veya it-is-unreal MCP ile ilgili değildir.
+> Unreal Engine kurallarının **yerine geçer**. Bu repoda Unreal **alıcı bir
+> hedef**tir (`mlender_unreal`, editör Python'u); Blueprint, C++ modülü veya
+> it-is-unreal MCP ile ilgili hiçbir şey yoktur.
 
 ---
 
 ## Proje Bilgisi
 
-- **Ne yapar:** Maya sahnesini FBX + JSON paketi olarak Blender'a canlı gönderir;
-  Blender tarafında materialleri Principled BSDF olarak, ışıkları native Blender
-  light olarak yeniden kurar.
-- **Hedef sürümler:** Maya 2022+ (Redshift), Blender 3.6+ (4.x dahil)
+- **Ne yapar:** Maya sahnesini FBX + JSON paketi olarak Blender'a **ve Unreal'a**
+  canlı gönderir; Blender tarafında materialleri Principled BSDF olarak,
+  ışıkları native Blender light olarak, Unreal tarafında materialleri Material
+  Instance olarak, ışıkları Unreal light actor olarak yeniden kurar.
+- **Hedef sürümler:** Maya 2022+ (Redshift), Blender 3.6+ (4.x dahil),
+  Unreal 5.8 (5.8.1'de doğrulandı)
 - **Dil:** Promptlar ve açıklamalar Türkçe; kod, değişken, fonksiyon,
   yorumlar, commit mesajları **ve README** İngilizce. Depo `mena-works`
   altında public olduğu için README dış dokümantasyondur.
@@ -22,7 +25,7 @@
 
 ## 1. Dosya Yapısı
 
-İki bağımsız Python package. Bağımlılık yönü tek yönlüdür ve döngü yoktur;
+**Üç** bağımsız Python package. Bağımlılık yönü tek yönlüdür ve döngü yoktur;
 bir modül yalnızca kendinden önce listelenenleri import edebilir.
 
 ```text
@@ -51,6 +54,9 @@ mlender_exporter/     # Maya (import sırası = bağımlılık sırası)
   livelink.py            # TCP istemci
   posebridge.py          # canlı poz köprüsü (Maya değerlendirir, iskelet akar)
   asrig.py               # Advanced Skeleton manifesti (DeformSet, FKIK zincirleri)
+  presets.py             # export ayarları (UI ve batch aynı sözleşme)
+  batch.py               # UI'siz export girisi (farm, gece publish)
+  report.py              # pakete yazılan export raporu
   package.py             # paket klasörü, JSON, atomik temizlik
   ui.py                  # Maya penceresi
   __init__.py            # public API + reload_package()
@@ -86,8 +92,35 @@ mlender_importer/     # Blender multi-file add-on
   ui.py                  # operator, property, panel
   __init__.py            # bl_info, register/unregister, reload bloğu
 
+mlender_unreal/       # Unreal plugin (klasörün kendisi plugin'dir)
+  mLender.uplugin        # plugin manifesti; VersionName BUILD_VERSION ile eş
+  Content/Python/        # Unreal bir plugin'in Python'unu YALNIZ burada sys.path'e koyar
+    init_unreal.py       # editör açılışında kendiliğinden çalışır
+    mlender_unreal/      # asıl package (import sırası = bağımlılık sırası)
+      constants.py         # protokol sabitleri, ölçülmüş dönüşümler, kanal tabloları
+      utils.py             # değer/yol/isim normalizasyonu (unreal import etmez)
+      transforms.py        # Maya→Unreal matris; ışık/kamera ve obje AYRI dönüşüm
+      objects.py           # JSON'dan kurulan her şey için ortak yerleştirme
+      images.py            # texture import, sRGB/compression
+      materials.py         # master material üretimi + Material Instance
+      lights.py            # Unreal light actor'leri, lümen/lüks
+      cameras.py           # CineCameraActor, filmback ve focus
+      meshes.py            # Interchange FBX scene import, materyal slot eşleşmesi
+      empties.py           # locator ve boş null → Actor, parent zinciriyle
+      curves.py            # NURBS/bezier → Blueprint üstünde SplineComponent
+      volumes.py           # VDB → Sparse Volume Texture + Heterogeneous Volume
+      standins.py          # .abc → Geometry Cache; okunamayan → çapa
+      particles.py         # parçacık çapası + instancer'ın nokta kaynagı
+      instancers.py        # nokta başına StaticMeshActor, mesh paylaşımlı
+      sets.py              # selection set / display layer → Unreal Layer
+      scene.py             # level temizleme ve doğrulama
+      importer.py          # orkestrasyon + şema doğrulaması
+      livelink.py          # socket listener + game thread pompası
+      ui.py                # Tools menüsü
+      __init__.py          # public API + reload_package()
+
 packaging/               # kurulabilir çıktılar
-  build_release.py       # Blender add-on .zip + Maya modülü
+  build_release.py       # Blender add-on .zip + Maya modülü + Unreal plugin .zip
   verify_release.py      # ikisini de gerçek host'lara kurup dener
 
 tests/                   # amaca göre ayrılmış, ayrıntı tests/README.md
@@ -105,9 +138,16 @@ gerçek DCC ister, `calibration/` ise test değil **ölçüm rig'idir** — sabi
 doğrulamaz, onları üretir. Yeni bir dosya eklerken hangisine ait olduğuna karar
 ver; ölçüm rig'lerini `host/` içine koyma.
 
-İki package birbirini **import etmez**. Aralarındaki tek bağ, aşağıdaki
-protokol ve JSON sözleşmesidir. Ortak yardımcı modül ekleme — Maya ve Blender
-farklı Python runtime'larında çalışır, paylaşılan dosya deploy'u kırar.
+Üç package birbirini **import etmez**. Aralarındaki tek bağ, aşağıdaki
+protokol ve JSON sözleşmesidir. Ortak yardımcı modül ekleme — Maya, Blender ve
+Unreal farklı Python runtime'larında çalışır, paylaşılan dosya deploy'u kırar.
+Bu yüzden protokol sabitleri ve şema listesi üç yerde **kopyalanmıştır**;
+onları tek dosyaya toplama, `check_contracts.py` eşitliği zorluyor.
+
+`mlender_unreal`'ın iç içe yapısı tercih değil zorunluluk: Unreal bir plugin'in
+Python'unu yalnız `<Plugin>/Content/Python` altından `sys.path`'e koyar ve
+`init_unreal.py`'ı yalnız orada çalıştırır. Klasörün kendisi plugin olduğu için
+geliştirme kurulumu tek junction'dır.
 
 Bölünme öncesi tek dosyalık sürümler git geçmişinde `0dcbff4` commit'indedir.
 Oradan "mevcut davranış" çıkarma; tek doğru kaynak package'lardır.
@@ -117,6 +157,8 @@ Oradan "mevcut davranış" çıkarma; tek doğru kaynak package'lardır.
 1. Modülü bağımlılık sırasında doğru yere koy.
 2. Exporter'da `__init__.py` içindeki `SUBMODULES` tuple'ına ekle.
 3. Importer'da `__init__.py` içindeki reload bloğunun **iki listesine** de ekle.
+4. Unreal alıcısında `__init__.py` içindeki `SUBMODULES` tuple'ına **ve** import
+   bloğuna ekle.
 
 Bu listeler reload sırasını belirler. Eksik bırakılan modül, geliştirme
 sırasında sessizce eski kodla çalışmaya devam eder — ve bu, düzenlemenin
@@ -139,6 +181,21 @@ ve birinden eksik bir modül testten geçer.
   `.format()` kullanır. **f-string, walrus, type hint ekleme** — eski Maya
   sürümleriyle uyum bilinçli bir karar.
 - Blender'a özgü hiçbir şey import edilemez (`bpy`, `mathutils`).
+
+### Unreal alıcısı (`mlender_unreal/`)
+
+- Unreal'in gömülü Python'unda çalışır (5.8.1'de **3.11.8**). `unreal` dışında
+  bağımlılık yok.
+- Maya'ya veya Blender'a özgü hiçbir şey import edilemez (`maya.cmds`, `bpy`,
+  `mathutils`). Vektör matematiği `math` ile elle yazılır.
+- `utils.py` bilinçli olarak `unreal` **import etmez**; sözleşme testinin host
+  olmadan çalıştırdığı fonksiyonlar oradadır.
+- `mLender.uplugin` bir Unreal manifestidir; `VersionName` `BUILD_VERSION` ile
+  eş olmak zorunda (`check_contracts.py` ve `build_release.py` ikisi de bakar).
+  Bu, Blender'daki `bl_info["version"]`'ın karşılığıdır.
+- Klasör adı plugin adı **değildir**: Unreal plugin'i `.uplugin` dosyasının
+  adından tanır. Depoda klasör `mlender_unreal`, dağıtımda `mLender`.
+- `unreal` modülü thread-safe **değildir** (bkz. bölüm 6).
 
 ### Importer (`mlender_importer/`)
 
@@ -314,6 +371,92 @@ transform objedir. Aynı gruba düşen meshler tek collection paylaşsın diye
 
 ---
 
+## 6b. Unreal Tarafı Kritik Kurallar
+
+### Thread güvenliği
+
+`unreal` de `bpy` gibi thread-safe değildir. `livelink.py`'ın listener
+thread'i yalnız socket okur ve queue'ya koyar; her `unreal` çağrısı
+`process_messages()` içinde, `register_slate_post_tick_callback` üzerinden
+**game thread'de** yapılır. Blender'da hook `bpy.app.timers`, kural aynı.
+
+### Eksen dönüşümü Blender'ınkiyle aynı DEĞİL
+
+Maya→Unreal `(x, y, z) → (x, z, y)`: düz Y/Z takası, **işaret çevirmesi yok**.
+Blender'ınki `(x, -z, y)`. El değişimi takasın kendisi tarafından yutuluyor.
+İkisi de ölçüldü (`tests/docs/unreal_calibration.md`); birini diğerine
+benzetmeye çalışma.
+
+Mesh transform'ları **Interchange** taşıyor ve doğru taşıyor — `meshes.py`
+içinde bilinçli olarak hiç transform matematiği yok. Doğru olanın üstüne bir
+kez daha uygulamak, ışık enerjisinde bir kez yapılmış hatanın aynısıdır.
+
+### Işık/kamera ile obje dönüşümü AYRI
+
+`transforms.py` iki dönüşüm taşıyor ve karıştırılmamalı:
+
+- **Işık/kamera:** Maya local −Z'ye bakar, Unreal +X'e. Bakış yönü Unreal'in
+  forward'ına taşınır (`unreal_rotation`).
+- **Obje** (locator, volume, standin, curve, instancer): bakış yönü yok, kendi
+  eksenleri adını korur → `Unreal +X = S·maya_x`, `+Y = S·maya_z`,
+  `+Z = S·maya_y` (`unreal_object_rotation`). Her ekseni aynı adlı Unreal
+  eksenine eşlemek **sol el çerçevesi** üretir, yani sessizce ayna.
+
+Objede scale de taşınır (boyutunu başka hiçbir şey taşımıyor) ve Y/Z bileşenleri
+eksenlerle birlikte takas edilir.
+
+### İki ayrı ölçek
+
+`unreal_scale` santimetre (konumlar), `metre_scale` metre (enerji). Enerji
+çapası metreye karşı ölçüldü; ikisini karıştırmak 100× veya 10⁴× hata.
+
+### Işık enerjisi Unreal'de mutlak olarak doğrulandı
+
+`light_absolute_*` rig'i Unreal'i **analitik fiziğe** karşı ölçüyor (Arnold'a
+değil — onun pikselleri keyfi ölçekte, o yüzden mutlak olamaz):
+
+```text
+candelas = lümen/(4π) → lux = candelas·cosθ/d² → nit = lux·albedo/π
+```
+
+Nokta kaynak yaklaşımının geçerli olduğu varyantlarda oran **0.9529, yayılım
+%0.034**. Ters kare, doğrusallık ve `2^exposure` ayrı ayrı doğrulandı. Kalan
+%4.7 modelin nokta-kaynak varsayımının; oran boyut/mesafe ile hareket ediyor.
+
+Sonuç: `SCS_SCENE_COLOR_HDR` **nit** cinsinden (1.0 ≈ 1 cd/m²) ve zincir
+mutlak doğru. `ml_light_power_scale`'i 1.0'da bırak.
+
+### Motor kendi biriminin otoritesi
+
+Işık yoğunluğu lümen olarak yazılıyor; kendi çevrim sabitini yazma, motor
+çevirsin. `apply_intensity` birimi geri okuyup gerekirse motorun
+`get_units_conversion_factor`'ı ile çeviriyor — bu bir **koruma**, gözlenmiş
+bir hatanın çözümü değil (5.8.1'de point/rect/spot üçü de `LUMENS`'i
+koruyor).
+
+### Property yazımı setter ile — fırlatır, yutulursa sessiz kalır
+
+Light component'inin `intensity` ve `intensity_units`'ı Python'a
+**read-only**; düz atama `is read-only and cannot be set` fırlatıyor.
+`set_<name>()` önce, property yedek, ikisi de olmazsa **uyarı**.
+
+Çıplak `try/except` ile atama yapıp geçmek bu oturumda bütün ışıkları
+**8.0 candela**'da bıraktı (spawn edilmiş component'in varsayılanı; CDO
+5000 UNITLESS der, o başka bir sayı) ve test "pozitif mi" diye sorduğu için
+**geçti**.
+
+### Coat ve sheen için Unreal girdisi yok
+
+`unreal.MaterialProperty` probe edildi: coat ve sheen **yok**. Bu kanallar
+`UNREAL_METADATA_CHANNELS` içinde ve uyarı yazılıyor. Base color'a katmak
+ölçülmemiş bir şeyi ölçülmüş gibi göstermek olurdu.
+
+### Blend mode Material'e ait, instance'a değil
+
+Bu yüzden yüzey sınıfı başına bir master material var (Opaque, Masked,
+Translucent, Unlit). Tek master ile cam + cutout + unlit içeren bir sahne
+karşılanamaz — instance blend mode'u override edemez.
+
 ## 7. Yıkıcı Davranış — Bilinçli Tasarım
 
 `import_scene_package()` her pakette **sahnenin tamamını siler**. Bu bir hata
@@ -427,10 +570,20 @@ python tests/check_contracts.py
 "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" ^
     --background --factory-startup --python tests/host/blender_import_test.py
 
+# 4b. Gercek Unreal, ayni paketi okur (~2 dk, ilk acilis daha uzun)
+"C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" ^
+    <bir .uproject> -run=pythonscript ^
+    -script="tests/host/unreal_import_test.py" -unattended -nosplash -nullrhi
+
 # 5. Dagitilabilir ciktilar (yalniz surum cikarirken)
 python packaging/build_release.py
 python packaging/verify_release.py
 ```
+
+Unreal testi bir `.uproject` ister; yoksa `PythonScriptPlugin` etkin minimal
+bir tanesi elle yazılabilir. **Python çıktısı stdout'a değil
+`<proje>/Saved/Logs/<proje>.log` içine düşer** — sonucu oradan `MLPASS` /
+`MLFAIL` ile ara. Bu, headless Unreal'da ilk saati yiyen ayrıntıdır.
 
 `verify_release.py` formalite değildir: modülü **repoya erişilemeyen** bir
 çalışma dizininden gerçek mayapy'ye, add-on'u tek kullanımlık bir Blender
@@ -498,12 +651,91 @@ Kullanıcının elle doğrulaması gereken adımlar:
 
 ## 11. Yasak Listesi
 
-- ❌ Listener thread'inden `bpy` çağırma
+- ❌ Listener thread'inden `bpy` **veya `unreal`** çağırma
 - ❌ Exporter'a f-string / type hint / Python 3'e özgü sözdizimi ekleme
-- ❌ İki package arasında ortak modül import etme
-- ❌ Protokol sabitlerini tek tarafta değiştirme
+- ❌ Üç package arasında ortak modül import etme
+- ❌ Protokol sabitlerini tek tarafta değiştirme (artık **üç** taraf var)
 - ❌ Kanal anahtarını tek tarafta yeniden adlandırma
-- ❌ `BUILD_VERSION` ile `bl_info["version"]`'ı ayrı bırakma
+- ❌ `BUILD_VERSION` ile `bl_info["version"]`'ı **veya `.uplugin`'in
+  `VersionName`'ini** ayrı bırakma
+- ❌ Maya→Unreal dönüşümünü Blender'ınki sanma; Unreal `(x, z, y)`, Blender
+  `(x, -z, y)`, ikisi de ölçüldü
+- ❌ Unreal'de mesh transform'una dokunma; Interchange zaten doğru yapıyor,
+  ikinci kez uygulamak çift-uygulamadır
+- ❌ Unreal'de konum ölçeğiyle enerji ölçeğini karıştırma; biri santimetre
+  biri metre, karıştırmak 10⁴ hata
+- ❌ Unreal light component property'sini düz atamayla yazma; `intensity` ve
+  `intensity_units` read-only, atama **fırlatır**. Setter kullan ve
+  başarısızlığı yutma — yutulan bir yazma ışığı 8 candela'da bırakır
+- ❌ Bir Unreal varsayılanını CDO'dan okuyup "sahnedeki varsayılan" sanma;
+  spawn edilmiş ışık 8 CANDELAS, CDO 5000 UNITLESS diyor
+- ❌ Unreal'de render'ı commandlet'te ölçmeye çalışma; render komutları
+  işletilmiyor ve temizlenmiş bir target `(1,0,0)` okuyor. Ölçmeden önce
+  bilinen renkli **kontrol** koy
+- ❌ Blender'ın piksel dizisiyle Unreal'in render target'ını aynı yönlü sanma;
+  biri alttan yukarı, öteki yukarıdan aşağı — aynı formül kareyi aynalar
+- ❌ `SceneCapture2D`'yi kontrol edilebilir bir ölçüm aracı sanma; GI'ı
+  kapatmanın üç yolu (cvar, `show_flag_settings`, proje ini) sonucu **bit-bit
+  değiştirmiyor** ve 8 kare %0.000 aynı. Ayarı değiştiremediğin bir render'da
+  hiçbir hipotezi eleyemezsin
+- ❌ Bir asimetriyi ölçmeden "gürültü" diye açıklama; 8 kare alıp yayılıma
+  bakmak bu hipotezi bir turda çürüttü
+- ❌ Rapor yazımının export'u veya import'u düşürmesine izin verme; paket
+  klasörü salt okunur olabilir, rapor yazılamıyorsa yazılmaz, iş devam eder
+- ❌ Exporter'ın `BUILD_VERSION`'ını `__init__.py`'de arama; `constants.py`'a
+  taşındı (package.py kökü import edemez, döngü olurdu) ve
+  `build_release.py` oradan okuyor
+- ❌ Preset'e `export_scene`'in almadığı bir anahtar koyma; keyword argüman
+  olarak gidip export'u düşürür. Bilinmeyen anahtar **düşürülür**
+- ❌ Komut satırında adı geçmeyen ayarı varsayılana döndürme; `None` "söylenmedi"
+  demektir ve preset'in değeri kalır
+- ❌ String attribute'u `plug_value` ile okuma; o sayısal ve string'i **düşürüyor**
+  (`None` dönüyor). `raw_attr_value` kullan
+- ❌ Renk seti için "current olan" varsayımı yapma; shader başka bir seti okuyor
+  olabilir ve yanlışı okumak makul görünür
+- ❌ Exporter'ın yazdığı bir bayrağı okuyan var mı diye bakmadan bırakma; `unsupported_network`
+  başından beri yazılıyordu ve **kimse okumuyordu** — kanal sessizce siyaha çöküyordu
+- ❌ AOV'u substring ile eşleştirme; `"z" in name` OpenPBR'ın **fuzz**'ını
+  derinlik pass'i yapıyordu. Tam eşleşme kullan
+- ❌ Blender'da eşleşmeyen AOV'u sessizce custom slot yapma; shader yazmadıkça
+  **siyah render eder**, yani "geldi ama boş" olur — uyarı yaz
+- ❌ Arnold AOV `type`'ını tahmin etme; ölçüldü: 4=FLOAT, 5=RGB, 6=RGBA,
+  7=VECTOR (kodda "5=RGBA usually" yazıyordu, yanlıştı)
+- ❌ Unreal'de mesh actor'ünü yalnız `StaticMeshActor` sanma; Interchange skinli
+  meshi kendiliğinden `SkeletalMeshActor` getiriyor ve filtreleyen kod onları
+  level'da placeholder materyalle sahipsiz bırakıyor
+- ❌ `override_pipelines`'a bir şey verip çalıştığını sanma; soft path **kabul
+  ediliyor**, `import_scene` True dönüyor ve **sıfır asset** üretiyor. Sonucu
+  say
+- ❌ Unreal'de obje rotasyonunu ışık/kamera dönüşümüyle kurma; ikisi ayrı,
+  obje için her ekseni aynı adlı eksene eşlemek sol el çerçevesi (ayna) verir
+- ❌ Unreal'de bir level actor'üne component eklemeye çalışma; bu build'de
+  `add_component_by_class` **yok**. Ya bileşeni zaten taşıyan bir actor sınıfı
+  spawn et (`GeometryCacheActor`, `HeterogeneousVolume`), ya da
+  `SubobjectDataSubsystem` ile Blueprint üret
+- ❌ Yeni yapılmış bir Blueprint'ten actor spawn edip çalıştığını sanma;
+  derlenmeden `generated_class` kullanılamaz ve spawn **None** döner, sebebini
+  söylemeden. Derle, sonra `generated_class()` ile spawn et
+- ❌ Parçacık `positions`'ını üçlü liste sanma; exporter **düz** float listesi
+  yazıyor ve doğrudan iterasyon `'float' object is not iterable` verir
+- ❌ Referans verilen dosya diskte yokken testin yüklemeyi şart koşması;
+  fixture'ın `smoke.vdb`'si yok ve çapa doğru davranıştır — koşulsuz assertion
+  çalışan importer'ı düşürdü
+- ❌ Mutlak parlaklığı Arnold'a karşı ölçmeye çalışma; Arnold'ın pikselleri
+  keyfi ölçekte, referans **analitik fizik** olmalı
+- ❌ Tick callback'i re-entrancy guard'sız yazma; `import_scene_package` Slate
+  tick'lerini pompalıyor, callback kendini çağırıyor ve `RecursionError` ile
+  editörü götürüyor (21 import derinliği ölçüldü)
+- ❌ Material Instance parametresini Python'dan set edip render'a ulaştığını
+  sanma; değer saklanıyor, geri okuma doğruyu diyor, **render değişmiyor**
+- ❌ Ölçüm yamasını küçük tutma; 10 px yama blotchy indirekt ışıkta simetrik
+  sahneyi %13 asimetrik gösterdi, 40 px yama + dik kamera %0.29'a indirdi
+- ❌ Mesh'i olmayan bir mesh actor'ünde materyal atamasını sessizce atlama;
+  daha önce gönderi barındıran content root'a yeniden import bunu üretiyor ve
+  "2 mesh, 0 materyal, 0 uyarı" diye görünüyordu
+- ❌ Unreal'de coat/sheen'i bir girdiye zorlama; `MaterialProperty`'de yok
+- ❌ Tek master material ile bütün yüzey sınıflarını karşılamaya çalışma;
+  blend mode instance'a ait değil
 - ❌ Blender API'sini `hasattr`/`try` koruması olmadan doğrudan çağırma
 - ❌ Işık kalibrasyon sabitlerini gerekçesiz değiştirme
 - ❌ Sahne temizleme doğrulamasını sessize alma

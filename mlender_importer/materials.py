@@ -1504,6 +1504,48 @@ def _fill_ramp(ramp, entries, interpolation=None):
         pass
 
 
+def build_color_attribute(material, texture, channel, warnings):
+    """A Color Attribute node reading the colour set the Maya shader named.
+
+    The set itself already arrived: the FBX carries a painted colour set and
+    Blender lands it as a corner colour attribute under its Maya name. What was
+    missing was anything reading it -- an aiUserDataColor used to be an
+    unsupported network, so the channel collapsed to black with no warning.
+
+    The node is looked up by class name rather than assumed: Blender renamed
+    this node once already, so both spellings are tried before giving up.
+    """
+    name = str(texture.get("color_set") or "").strip()
+    if not name:
+        return None
+    nodes = material.node_tree.nodes
+    node = None
+    for identifier in ("ShaderNodeVertexColor", "ShaderNodeAttribute"):
+        try:
+            node = nodes.new(identifier)
+            break
+        except Exception:
+            node = None
+    if node is None:
+        warnings.append(
+            'Channel "{0}" reads the colour set "{1}", which this Blender has '
+            "no node for.".format(channel, name)
+        )
+        return None
+    node.name = "ML_ColorSet_{0}".format(name)
+    node.label = name
+    if hasattr(node, "layer_name"):
+        node.layer_name = name
+    elif hasattr(node, "attribute_name"):
+        node.attribute_name = name
+        if hasattr(node, "attribute_type"):
+            node.attribute_type = "GEOMETRY"
+    output = node.outputs.get("Color")
+    if output is None and node.outputs:
+        output = node.outputs[0]
+    return output
+
+
 def apply_record_to_socket(material, shader, target, channel, record, warnings):
     """Wire a channel record into any socket, texture first then flat value.
 
@@ -1522,6 +1564,27 @@ def apply_record_to_socket(material, shader, target, channel, record, warnings):
             return
 
     texture = record.get("texture") or {}
+    # The flag the exporter has always written and nothing ever read. A
+    # network it cannot express leaves the channel on its flat value, which
+    # for a colour is usually black -- so the user got a black material and
+    # not one word about why.
+    if texture.get("unsupported_network") and not texture.get("path"):
+        warnings.append(
+            'Channel "{0}" is driven by a "{1}" network Maya could not hand '
+            "over; the channel fell back to its flat value. Use Bake "
+            "Procedurals to carry it.".format(
+                channel, texture.get("node_type") or "procedural"
+            )
+        )
+
+    # A colour set has no path and no image; it reads geometry the mesh
+    # already carries, so it comes before anything that looks for a file.
+    if texture.get("color_set"):
+        attribute = build_color_attribute(material, texture, channel, warnings)
+        if attribute is not None:
+            material.node_tree.links.new(attribute, target)
+            return
+
     # A projected texture has no path either, and it has to come first: the
     # image behind the projection is a perfectly ordinary file, and treating
     # it as one is exactly the wrong result this exists to prevent.

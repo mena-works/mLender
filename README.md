@@ -1,11 +1,16 @@
 # mLender
 
-**Live scene transfer from Maya to Blender.**
+**Live scene transfer from Maya to Blender and Unreal.**
 
 mLender packages a Maya scene as FBX plus a JSON sidecar, streams it to Blender
 over a local socket, and rebuilds it there natively: meshes with their group
 hierarchy and per-face material assignments, materials as Principled BSDF node
 trees, lights as Blender lights, cameras as Blender cameras.
+
+The same package also goes to **Unreal**, where a plugin rebuilds it as static
+mesh actors, Material Instances, Unreal light actors and cine cameras. The
+exporter does not know or care which receiver is listening: one sender, one
+package format, two destinations. See [Unreal](#unreal).
 
 The goal is not a file format. It is that a scene built in Maya arrives in
 Blender ready to render, without anybody re-authoring it. Where the two renderers
@@ -20,6 +25,7 @@ recorded under [`tests/docs/`](tests/docs/).
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Usage](#usage)
+- [Unreal](#unreal)
 - [Scope](#scope)
 - [Import modes](#import-modes)
 - [How it works](#how-it-works)
@@ -28,6 +34,10 @@ recorded under [`tests/docs/`](tests/docs/).
 - [Cameras](#cameras)
 - [Animation](#animation)
 - [Scene structure](#scene-structure)
+- [Batch export](#batch-export)
+- [Vertex colours](#vertex-colours)
+- [Render passes](#render-passes)
+- [Reports](#reports)
 - [Colour management](#colour-management)
 - [Development](#development)
 
@@ -40,11 +50,15 @@ recorded under [`tests/docs/`](tests/docs/).
 | Maya | 2022 or newer |
 | Renderers | Arnold (MtoA), Redshift, or native Maya shaders |
 | Blender | 4.1 or newer — verified on 4.1, 4.3, 4.5 and 5.2 |
-| Dependencies | None. Standard library only on both sides. |
+| Unreal | 5.8 — verified on 5.8.1. Optional; install it only if you send there |
+| Dependencies | None. Standard library only, in all three. |
 
-The two halves never import each other and have no shared module: they run in
-different Python runtimes. Their only contract is the LiveLink protocol and the
-package JSON schema.
+The three parts never import each other and have no shared module: they run in
+three different Python runtimes. Their only contract is the LiveLink protocol
+and the package JSON schema, and `tests/check_contracts.py` compares the
+protocol constants of each receiver against the exporter's rather than checking
+one pair — a constant that drifts in only the newest package is exactly what a
+single comparison misses.
 
 ---
 
@@ -209,6 +223,378 @@ light counts) and check the System Console for lines beginning
 | Bake Procedurals | off | Bake fileless shading networks to UVs |
 | Bake Resolution | 1024 | Resolution of those bakes |
 | Light Power Scale | 1.0 | Artistic multiplier over the measured conversion |
+
+---
+
+## Unreal
+
+The Unreal receiver reads the **same package** the Blender add-on does. The
+exporter is unchanged and does not know which receiver is listening, so there is
+one sender, one package format and one schema for both destinations.
+
+### Installing
+
+The release archive holds a normal Unreal plugin folder, and it installs into
+either a project or the engine:
+
+```text
+<YourProject>/Plugins/mLender/          per project — preferred
+<Engine>/Engine/Plugins/mLender/        every project
+```
+
+A project install travels with the project and needs no administrator rights.
+The engine folder lives under `Program Files` on Windows, so it needs elevation
+and an engine update removes it.
+
+For development, link the repository folder instead so `git pull` needs no
+copying. The link's name must be `mLender`, matching the `.uplugin`:
+
+```bat
+mklink /J "<YourProject>\Plugins\mLender" "C:\path\to\mLender\mlender_unreal"
+```
+
+Restart the editor, enable **mLender** in `Edit > Plugins` if it is not already
+on, and restart once more. The plugin needs Unreal's **Python Editor Script
+Plugin** and **Interchange Editor**; the `.uplugin` asks for both, so enabling
+mLender enables them.
+
+> The plugin folder in this repository is `mlender_unreal/` and the built one is
+> `mLender/`, because Unreal names a plugin after its `.uplugin` file. The
+> Python package inside is at `Content/Python/`, which is the only place Unreal
+> puts a plugin's Python on `sys.path`.
+
+### Using it
+
+**In Unreal** — `Tools > mLender`:
+
+1. Check the build number in the section header.
+2. Press **Start LiveLink**.
+
+**In Maya** — send exactly as you would to Blender. Nothing changes on the Maya
+side, including the port.
+
+Then read the Output Log: the import prints one summary line and one
+`mLender warning:` line per thing that did not travel.
+
+From Python, without the menu:
+
+```python
+import mlender_unreal
+mlender_unreal.start_listener()
+mlender_unreal.import_scene_package(r"C:\path\to\mLender_01")   # or directly
+```
+
+> **Unreal import replaces the level's actors, and this build does not save
+> first.** The Blender receiver saves the .blend when it has a path; there is no
+> equally safe unattended equivalent here, so saving is yours to do. The
+> destructiveness is the same design decision described under
+> [Import modes](#import-modes) — the Maya scene is the source of truth.
+
+Only one receiver can hold the port at a time. Running Blender and Unreal
+listeners together means the second one to start fails to bind; stop one first.
+
+### What arrives
+
+```text
+Maya mesh + group hierarchy  -> StaticMeshActor, in folders mirroring the groups
+Maya shader                  -> Material Instance of a generated master
+Maya area / point / spot     -> Rect / Point / Spot light actor
+Maya directional             -> Directional light actor
+Maya dome                    -> Sky Light (intensity and colour)
+Maya camera                  -> CineCameraActor, renderable one first
+Maya locator / empty null    -> Actor, parented as Maya had it
+NURBS and bezier curve       -> SplineComponent on a generated Blueprint
+aiVolume (.vdb)              -> Sparse Volume Texture on a Heterogeneous Volume
+aiStandIn / gpuCache (.abc)  -> Geometry Cache on a GeometryCacheActor
+particle instancer           -> one StaticMeshActor per point, sharing the mesh
+particle system              -> anchor, and the points its instancers scatter on
+selection set, display layer -> Unreal Layer
+package Alembic cache        -> Geometry Cache on a GeometryCacheActor
+```
+
+The **Alembic cache is not an optional extra**. When the export caches, the
+deforming meshes and emitting particles are written into the `.abc` *instead of*
+the FBX, so without importing it those objects are not in the level at all. Its
+axis and scale come from Unreal's own `AbcConversionPreset.MAYA`, asked for by
+name rather than by writing the numbers again, and set explicitly rather than
+left to a default that moves between versions.
+
+Meshes, their hierarchy, their transforms and the unit conversion are brought by
+Unreal's **Interchange** FBX import, which was measured correct and is therefore
+left alone — this package contains no transform code for meshes at all. Doing a
+correct conversion twice is the mistake that once made every light 318× too
+bright here.
+
+Assets land under `/Game/mLender/`, and a re-send deletes that folder before
+rebuilding.
+
+> **Known issue: re-sending into a saved level.** If a level that was saved
+> after a previous send is open, deleting `/Game/mLender` leaves that level's
+> actors pointing at assets that no longer exist, and the meshes the new import
+> creates do not get hooked up — the import then reports meshes but no
+> materials. It is reported per mesh rather than silent, and it names the fix:
+> delete `/Game/mLender/Meshes` and send again, or send into an unsaved level.
+> Measured: a fresh content root gives 2 materials on the same package where a
+> re-import gives 0.
+
+### Coordinates, units and energy
+
+Maya Y-up right-handed becomes Unreal Z-up left-handed as a **plain Y/Z swap
+with no sign flip**, `(x, y, z)` → `(x, z, y)`. This is *not* the Blender rule
+`(x, -z, y)`: the handedness flip is absorbed by the swap. Both were measured
+and they differ because the hosts differ.
+
+Measured by exporting cubes on each axis and reading the actors Interchange
+produced:
+
+| Maya (cm) | Unreal |
+|---|---|
+| `(30, 0, 0)` | `(30, 0, 0)` |
+| `(0, 40, 0)` | `(0, 0, 40)` |
+| `(0, 0, 50)` | `(0, 50, 0)` |
+
+One Maya centimetre is one Unreal unit. Lights and cameras ride the JSON rather
+than the FBX, so their conversion is this tool's own; a Maya light aims down
+local −Z and an Unreal light down local +X, and the resulting basis was checked
+against the engine to **1e-8** on all three axes.
+
+**Light energy reuses the measured chain rather than a new constant.** Maya
+intensity becomes flux in watts through the same π anchor the Blender receiver
+uses — that number came from rendering Arnold against Cycles and solving for the
+ratio — and watts become lumens by the photopic efficacy:
+
+```text
+Unreal lumens = 683 * pi * meters_per_maya_unit^2 * intensity * 2^exposure
+```
+
+Unreal is then left to convert from lumens itself, so the engine stays the one
+authority for its own units rather than a constant here having to track it.
+
+Measured end to end: a Maya light at intensity 80 and exposure 1 in a centimetre
+scene reaches the Unreal component as **34.331326 lm** against a predicted
+34.331325 — 0.000003%.
+
+Setting that value needs the component's **setter**, not the property. Both
+`intensity` and `intensity_units` are read-only to Python and raise
+`Property 'Intensity' ... is read-only and cannot be set`. An early version of
+this receiver assigned them inside a bare `try/except`: the write raised, the
+exception was swallowed, and every light silently kept a spawned component's
+default of 8 candelas — while a test that only asked whether the intensity was
+positive passed. Both halves of that lesson are now in the test.
+
+A directional light has no unit property at all and states lux, which is what
+the sun branch already produces.
+
+### What does not travel, and says so
+
+Four things are left, each because Unreal has no equivalent this build can
+honestly fill rather than because nobody got to them. Every one is **reported
+with its count and the reason**, which is the `coverage.py` idea applied to the
+receiving end:
+
+| not carried | why |
+|---|---|
+| Advanced Skeleton **control layer** | Unreal's equivalent is a Control Rig asset, and authoring one from Python means building a rig graph. The skeletal meshes themselves do arrive — see below |
+| skeleton root motion | this build keys no skeletal animation in Unreal |
+| Maya constraints | Unreal has no equivalent, and the FBX bake already carries the motion they produced |
+| AOVs | render passes in Unreal are Movie Render Queue configuration, and this engine build does not ship MRQ |
+
+Light, camera and visibility **animation** is not rebuilt either — that needs a
+Level Sequence. It is reported.
+
+### Skinned meshes and Advanced Skeleton
+
+**Skinned meshes arrive as skeletal meshes**, with a Skeleton and a
+PhysicsAsset, matched to their Maya record and carrying the rebuilt materials.
+Interchange does this on its own — measured on the test package: four skeletal
+meshes beside forty-seven static ones, with no pipeline configuration of any
+kind.
+
+That was found by measuring rather than by reasoning, and it corrected an
+earlier diagnosis in this file. The receiver had been filtering its own results
+on `StaticMeshActor`, so those four skeletal actors landed in the level and were
+then ignored: unmatched, unnamed, still holding the FBX's placeholder materials.
+The fix was to stop ignoring them, not to reconfigure the import.
+
+Two routes that look right and are not, both tried:
+
+- `FbxImportUI.import_as_skeletal` turns *every* static cube into its own
+  one-bone skeletal mesh — 50 Skeletons from this fixture.
+- An `override_pipelines` entry is **accepted without complaint and imports
+  nothing** (`import_scene` returns true, zero assets). The property also wants
+  a soft path rather than a pipeline instance, and `auto_detect_mesh_type` is
+  deprecated in 5.8.
+
+What is still missing is the **control layer**. Unreal's equivalent of AS's FK
+controls and IK chains is a Control Rig asset, and authoring one from Python
+means building a rig graph. The manifest is attached to each skeletal actor as
+`ml_as_*` tags, and every chain is named in the warnings with everything a
+rebuild would need:
+
+```text
+mLender warning: Arm L: Shoulder_L -> Elbow_L -> Wrist_L, IK "IKArm_L",
+pole "PoleArm_L", switch "FKIKArm_L" (blend 10.0) -- not rebuilt.
+```
+
+Within the kinds that do travel, five limits are reported per item rather than
+hidden:
+
+- A **particle system** arrives as an anchor. Unreal has no point-cloud
+  primitive an add-on can fill — Niagara is the answer and authoring a Niagara
+  graph from Python is a project, while `PointCloud` and `LidarPointCloud` are
+  both absent from this build. Its points are still used by any instancer that
+  scatters onto them, which is where they become visible.
+- An **instancer** makes one StaticMeshActor per point rather than an
+  InstancedStaticMeshComponent, because a component cannot be added to a level
+  actor from Python here. The geometry still exists once; the cost is actors in
+  the outliner, and a scatter above 2000 points says so.
+- A **volume** attaches its VDB but gets no volume material, so check its
+  shading. A per-frame VDB sequence arrives as the single recorded frame.
+- A **standin** in `.usd` or `.ass` anchors rather than loading: there is no USD
+  stage actor in this build and nothing outside Arnold reads `.ass`.
+- Materials still lack coat and sheen, correction chains and layered stacks, as
+  above.
+
+Anything referencing a file that is not on disk **anchors at its transform with
+the path on it as a tag** rather than vanishing — the same decision the Blender
+receiver makes, because a package opened on another machine legitimately lands
+there and empty space explains nothing.
+
+Unreal actors have no custom properties, so the Maya originals ride along as
+`ml_*` tags on the actor. That is the job `ml_source_*` does on the Blender
+side: when a number is disputed, this is the reference.
+
+Within materials, three limits are reported per material:
+
+- **Unreal has no coat or sheen input.** `unreal.MaterialProperty` was probed on
+  5.8.1 and exposes base colour, roughness, metallic, specular, normal,
+  emissive, opacity, opacity mask, subsurface colour, anisotropy and refraction
+  — and nothing for coat or sheen. Those channels are kept as metadata and
+  named in a warning rather than folded into an input they are not.
+- **Correction node chains are not rebuilt.** The texture is wired directly and
+  the correction is reported. **Bake Procedurals** carries it.
+- **Layered texture stacks are not rebuilt**, and are reported the same way.
+
+Also not carried yet: UDIM tile sets, IES profiles, and the dome's HDR cubemap
+(the sky light gets its intensity and colour only).
+
+### Materials, and why there are four masters
+
+Unreal keeps blend mode and shading model on the **Material**, not on the
+instance. A Material Instance can override a parameter but not whether a surface
+is opaque, masked, translucent or unlit, so one master material cannot serve a
+scene holding glass, a cutout and an unlit shader.
+
+The receiver therefore generates one master per surface class — Opaque, Masked,
+Translucent, Unlit — and makes each Maya shader an instance of the right one.
+The masters are built from Python rather than shipped as `.uasset` files: a
+binary asset in the repository is one nobody can review, and it would need
+rebuilding for every engine version.
+
+Optional textures use a lerp against the flat value driven by a scalar
+parameter, rather than a static switch. It costs a texture sample that is then
+discarded and buys instances that need no shader permutation, which is the whole
+reason to use instances.
+
+### The render comparison, and what it did and did not settle
+
+The Arnold-versus-Unreal render comparison has been run, against the same
+`arnold.exr` reference the Blender half uses. It settled some things and
+explicitly failed to settle the main one.
+
+**Settled.** The energy formula is exact (0.000003%, above). Geometry, camera
+and light direction all transfer correctly — read off the rendered level, the
+ground sits at the origin spanning ±200, the light points straight down
+`(0, 0, -1)`, and the camera's forward vector gives back Maya's −14° pitch. The
+horizon lands where the geometry says it should, to within one grid cell.
+
+**Not settled by this comparison: absolute brightness.** The ratio came out at
+a mean of 260× Arnold with a 45% spread, and the rig failed its own symmetry
+control — Arnold renders the symmetric scene symmetric to five digits while this
+capture's two sides differed by 13.4%. The comparison step asserts that and
+refuses to print a verdict, because a symmetric scene that does not render
+symmetrically is measuring the rig. Worse, the capture would not respond to any
+control: global illumination off via the console variable, via the capture's own
+`show_flag_settings`, and via the project's `DefaultEngine.ini` all left the
+result bit-identical, so no hypothesis could be eliminated.
+
+The underlying problem is that **Arnold's pixel values are in its own arbitrary
+scale**, so a ratio against them can never be absolute in the first place. That
+is what the next rig fixes.
+
+### Absolute brightness — verified against physics
+
+`light_absolute_maya.py` and `light_absolute_unreal.py` settle it by comparing
+Unreal against a **closed-form answer** instead of against Arnold. A Lambertian
+plane under a small light at a known height has a luminance that can be
+computed:
+
+```text
+candelas  = lumens / (4pi)          Unreal's own conversion, measured
+lux       = candelas * cos(theta) / d^2
+luminance = lux * albedo / pi       nits, for a Lambertian surface
+```
+
+The lumens come from the receiver's own `light_intensity_for_unreal()`, so the
+production conversion is what is under test, and the prediction is averaged over
+the same pixels that are sampled rather than taken at the centre.
+
+The camera looks straight down from directly above, which makes the image
+rotationally symmetric and turns left/right *and* top/bottom into symmetry
+controls. That alone took the rig's asymmetry from 13.4% to **0.29%**, which
+identifies the earlier failure as the tilted composition sampling a blotchy
+field — a rig fault, not a transfer fault.
+
+Each variant moves exactly one term:
+
+| variant | lumens | measured | predicted | ratio | size/distance |
+|---|---|---|---|---|---|
+| base, 150 cm | 34.331 | 0.278716 | 0.292513 | **0.9528** | 0.133 |
+| twice the distance, 300 cm | 34.331 | 0.072636 | 0.076206 | **0.9532** | 0.067 |
+| twice the intensity | 68.663 | 0.557432 | 0.585027 | **0.9528** | 0.133 |
+| one more stop | 68.663 | 0.557432 | 0.585027 | **0.9528** | 0.133 |
+| half the distance, 75 cm | 17.166 | 0.458615 | 0.505630 | 0.9070 | 0.267 |
+
+**Over the variants where a point source is a fair approximation the ratio is
+0.9529 with a 0.034% spread.** That is the verification:
+
+- **Inverse square is right** — doubling the distance leaves the ratio put, so
+  the squared scene-unit term and the `1/d²` falloff are both correct.
+- **Linearity is right** — doubling intensity leaves the ratio put.
+- **Exposure is right** — one more stop and twice the intensity produce
+  *bit-identical* measurements, so `2^exposure` is exact.
+
+The residual 4.7% belongs to the prediction rather than the transfer, and the
+variants say so: the ratio tracks how far the point-source assumption is being
+stretched (0.067 → 0.9532, 0.133 → 0.9528, 0.267 → 0.9070). A 20 cm rectangle
+is not an isotropic point, and the approximation degrades as the light
+approaches — which is the direction observed.
+
+So **Unreal's `SCS_SCENE_COLOR_HDR` is luminance in nits** (1.0 ≈ 1 cd/m²), and
+the light energy chain is absolutely correct. Leaving **Light Power Scale** at
+its default of 1.0 is the physically correct choice.
+
+Getting a real headless render at all took three attempts, and the two that
+failed are worth knowing: a commandlet never executes render commands (a target
+cleared to `(0.25, 0.5, 0.75)` reads back `(1, 0, 0)`), and Movie Render Queue
+is not installed in this engine build. The working route is a project startup
+script that captures from a tick callback in the real editor.
+
+Two traps in that route are recorded because they cost a run each. Importing a
+package **pumps Slate ticks**, so a tick callback re-enters itself — the first
+version recursed twenty-one imports deep and took the editor down with
+`RecursionError`; both rigs now hold a re-entrancy guard. And setting a Material
+Instance parameter from Python stores the value (the read-back confirms it) but
+**does not reach the render**, while light changes in the same rig do; the
+albedo variant was dropped for that reason and says so in the file.
+
+The `Tools > mLender` menu is the other thing still unverified: a commandlet has
+no Slate UI, so `find_menu` finds nothing there. The plugin detects that, logs
+it and still works from Python. Confirming the menu needs the GUI editor.
+
+Measurements, the traps behind them, and one claim this file previously got
+wrong are recorded in
+[`tests/docs/unreal_calibration.md`](tests/docs/unreal_calibration.md).
 
 ---
 
@@ -2154,6 +2540,166 @@ read off a live session, the same footing as the Redshift light anchor.
 
 The frame range is not repeated here; it already travels with the animation
 record.
+
+## Batch export
+
+The exporter runs without the UI, for a farm job, an overnight publish or a
+shot list:
+
+```bash
+mayapy path/to/mlender_exporter/batch.py --scene shot.ma --out D:/packages
+mayapy -m mlender_exporter.batch --scene shot.ma --out D:/packages --send
+```
+
+Both forms work and neither needs `PYTHONPATH` set: run as a plain script the
+module puts its own package back on the path, because a farm job types the file
+path far more often than it types `-m`.
+
+```text
+--scene            the file to open; omit to export whatever is already open
+--out              where the package goes
+--preset           which saved preset to start from (default: "default")
+--send             also notify a listening Blender or Unreal
+--selected         export the selection only
+--no-bake          turn Bake Procedurals off
+--collect          copy referenced files into the package
+--archive          also write the .zip
+--animation        export a frame range
+--alembic          cache deforming meshes
+--start --end --step --bake-resolution --host --port
+```
+
+Warnings go to stdout as well as into the report, because a farm log is often
+the only thing anybody reads afterwards.
+
+### Presets
+
+**Save Preset** in the Maya window keeps the current options under the user's
+Maya preferences, and **Load Preset** puts them back. A preset holds exactly the
+arguments `export_scene` takes plus the output folder and the LiveLink address,
+so what an artist clicks and what a farm job runs cannot drift into meaning
+different things.
+
+Settings resolve in three layers, later winning: the built-in defaults, then the
+preset, then the command line. **A flag that is not named does not reset
+anything** — `--out` alone keeps every other setting the preset holds, which is
+what makes a preset worth having.
+
+Two rules the tests pin down: a key the running build does not know is
+**dropped** rather than passed on, so a preset written by a newer build cannot
+turn into a failed export by handing `export_scene` an argument it has never
+heard of; and a preset somebody hand-edited into invalid JSON falls back to the
+defaults rather than raising, because a broken settings file must not stop
+anybody exporting.
+
+## Vertex colours
+
+A Maya colour set travels twice over: the **paint** rides the FBX, and the
+**shader link** rides the JSON.
+
+The paint was already arriving — measured, a painted set lands in Blender as a
+corner colour attribute under its Maya name, and every set on the mesh comes,
+not just the current one. What was missing was anything reading it. An
+`aiUserDataColor` was an unsupported network, so with **Bake Procedurals off**
+the channel fell back to its flat value, which for a colour is black. The
+material went black and nothing said why.
+
+Now the exporter records the set the shader names, and Blender builds a
+**Color Attribute** node reading exactly that set:
+
+```text
+aiUserDataColor.attribute = "paintCol"  ->  Color Attribute node, layer paintCol
+```
+
+The name matters and the fixture makes sure of it: the test cube carries two
+sets, the shader reads the first, and Maya is deliberately left with the
+*second* one current. A receiver that took "the current set" would read the
+wrong colours and look entirely plausible doing it.
+
+The mesh also records every set it carries, so a set nothing reads is still
+visible in the package rather than only in the geometry.
+
+With **Bake Procedurals on** the network is baked to a texture instead, which
+is Maya evaluating its own node and remains the more faithful answer. The
+Color Attribute path is what happens when baking is off.
+
+Unreal receives the same record but does not wire vertex colour into its master
+materials yet, and says so per channel.
+
+> While fixing this, the flag `unsupported_network` turned out to have been
+> written by the exporter since the beginning and **read by nobody**. Any
+> network the exporter could not express left the channel on its flat value in
+> silence. Both receivers now report it by name.
+
+## Render passes
+
+Enabled Arnold `aiAOV` and Redshift `RedshiftAOV` nodes travel as name, engine
+and Arnold's raw type integer. Blender turns each name into the view layer pass
+that means the same thing:
+
+```text
+Z, depth, zdepth        -> Z
+N, normal               -> Normal
+motionvector, mv        -> Vector
+uv                      -> UV
+crypto*                 -> Cryptomatte object, material and asset
+emission, emit          -> Emission
+albedo                  -> Diffuse Colour
+diffuse*                -> Diffuse colour, direct and indirect
+specular*, reflection*  -> Glossy colour, direct and indirect
+```
+
+Everything else becomes a **named custom AOV slot and is reported**, because a
+Blender custom AOV renders black unless a shader writes into it — a pass that
+arrived and is empty hides better than one that never arrived. On the test
+fixture that is `sss` and `opacity`.
+
+Two of the old matches were wrong and the fixture now proves it:
+
+- **`"z" in name` caught every name containing a z.** OpenPBR calls its sheen
+  lobe **fuzz**, so a `fuzz` AOV quietly switched on the depth pass instead of
+  landing in a slot of its own. Depth is now an exact match on Arnold's `Z`.
+- **A bare `albedo` switched on diffuse direct and indirect** as well as colour.
+  Albedo is the colour pass; the other two are light transport nobody asked for.
+
+Arnold's type integer was a guess in a comment (`5=RGBA usually`) until it was
+read off a live session. Measured: **4 float** (`Z`), **5 RGB** (most),
+**6 RGBA** (what an unrecognised name defaults to), **7 vector** (`N`).
+
+The Unreal receiver carries none of this: render passes there are Movie Render
+Queue configuration, and this engine build does not ship MRQ. The count is
+reported.
+
+> Until this release the AOV path had never run with real data on either side —
+> nothing in the fixture created an AOV, so both halves were untested code. It
+> now creates eleven, chosen so that each one lands somewhere different.
+
+## Reports
+
+Every send and every import writes a plain text report **into the package
+folder**, so the package carries the whole story and there is one file to hand
+over instead of console lines copied by hand:
+
+```text
+mLender_01/
+  mLender_01_report.txt            what Maya exported, and its warnings
+  mLender_01_import_blender.txt    what Blender made of it
+  mLender_01_import_unreal.txt     what Unreal made of it
+```
+
+Each report opens with the build number, the host version and the scene, then
+counts what travelled, then lists **every** warning. The test fixture produces
+sixty-seven of them in Unreal, which is exactly why a scrolling console was not
+good enough.
+
+In Blender the same warnings are also in the sidebar, under
+**mLender Import > Last Import Warnings**, with a button that opens the report.
+The panel shows the first twenty-five — a panel with hundreds of rows stops the
+UI — and the report always has all of them.
+
+A report is never allowed to fail the thing it describes. A package folder can
+legitimately be read only, and losing a good export or a good import over a log
+file would be absurd, so a report that cannot be written is simply not written.
 
 ## Colour management
 

@@ -35,6 +35,12 @@ if TOOL_ROOT not in sys.path:
 failures = []
 
 
+AOV_NAMES = (
+    "Z", "N", "motionvector", "crypto_object", "emission", "diffuse",
+    "specular", "fuzz", "sss", "opacity", "albedo",
+)
+
+
 def check(label, condition, detail=""):
     if condition:
         print("  ok    {0}".format(label))
@@ -70,6 +76,37 @@ def shaded_cube(name, shader_type):
     cmds.connectAttr(shader + ".outColor", engine + ".surfaceShader", force=True)
     cmds.sets(transform, edit=True, forceElement=engine)
     return transform, shader
+
+
+def build_aovs():
+    """Enabled Arnold AOVs, chosen to exercise the importer's name matching.
+
+    Not a sample of pretty names: each one lands somewhere different. Z, N,
+    motionvector, crypto_object, emission, diffuse and specular each hit a
+    mapped branch; sss and opacity fall through to the unmapped path; and
+    two are traps the substring matching walks into -- "fuzz" contains a z,
+    and a bare "albedo" is not a diffuse pass.
+
+    Before this the AOV path had never run with real data on either side.
+    """
+    try:
+        import mtoa.aovs as mtoa_aovs
+    except Exception as exc:
+        print("  note: MtoA AOV interface unavailable: {0}".format(exc))
+        return []
+    try:
+        interface = mtoa_aovs.AOVInterface()
+    except Exception as exc:
+        print("  note: AOVInterface refused: {0}".format(exc))
+        return []
+    made = []
+    for name in AOV_NAMES:
+        try:
+            interface.addAOV(name)
+            made.append(name)
+        except Exception as exc:
+            print("  note: AOV {0} refused: {1}".format(name, exc))
+    return made
 
 
 def build_scene():
@@ -543,6 +580,40 @@ def build_scene():
         cmds.setAttr("defaultArnoldRenderOptions.motion_frames", 0.75)
     except Exception as exc:
         print("  note: Arnold render options unavailable: {0}".format(exc))
+
+    # Vertex colours. Two sets, because "which one" has to be a real question:
+    # a mesh with one set would pass against code that ignored the name. The
+    # shader reads the first through aiUserDataColor, which used to make the
+    # channel an unsupported network and collapse it to black.
+    cpv_transform, cpv_shape = shaded_cube("cpvCube", "aiStandardSurface")
+    cmds.polyColorSet(cpv_transform, create=True, colorSet="paintCol",
+                      representation="RGBA")
+    cmds.polyColorSet(cpv_transform, currentColorSet=True, colorSet="paintCol")
+    cmds.select(cpv_transform + ".vtx[0:3]")
+    cmds.polyColorPerVertex(rgb=(1.0, 0.0, 0.0), a=1.0)
+    cmds.select(cpv_transform + ".vtx[4:7]")
+    cmds.polyColorPerVertex(rgb=(0.0, 0.4, 1.0), a=1.0)
+    cmds.polyColorSet(cpv_transform, create=True, colorSet="maskCol",
+                      representation="RGBA")
+    cmds.polyColorSet(cpv_transform, currentColorSet=True, colorSet="maskCol")
+    cmds.select(cpv_transform + ".vtx[0:7]")
+    cmds.polyColorPerVertex(rgb=(0.0, 1.0, 0.0), a=1.0)
+    # Left current on the second set on purpose: the shader names the first,
+    # so a receiver that took "the current one" would read the wrong colours.
+    cmds.select(clear=True)
+    try:
+        cpv_reader = cmds.shadingNode(
+            "aiUserDataColor", asUtility=True, name="cpvReader"
+        )
+        cmds.setAttr(cpv_reader + ".attribute", "paintCol", type="string")
+        cmds.connectAttr(
+            cpv_reader + ".outColor", "cpvCube_shd.baseColor", force=True
+        )
+    except Exception as exc:
+        print("  note: aiUserDataColor unavailable: {0}".format(exc))
+
+    made_aovs = build_aovs()
+    print("  AOVs created: {0}".format(", ".join(made_aovs) or "none"))
 
     # User attributes, the kind a pipeline hangs off a node. One of every type
     # that reads back differently, plus the two traps: a compound is listed
@@ -1207,7 +1278,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("52 meshes exported", payload["mesh_count"] == 52,
+    check("53 meshes exported", payload["mesh_count"] == 53,
           payload["mesh_count"])
     # The locator, the empty null, the nested locator, the group holding
     # only a curve, and the two shapeless FKIK switchers (root and NSRig:).
@@ -1492,6 +1563,50 @@ def main():
           (by_layer.get("referenceLayer") or {}).get("display_type"))
 
     print("\nrender settings")
+    report_path = result.get("report_path") or ""
+    check("the export wrote a report", bool(report_path)
+          and os.path.isfile(report_path), report_path)
+    if report_path and os.path.isfile(report_path):
+        with open(report_path, "r") as handle:
+            report_text = handle.read()
+        check("the report names the package",
+              str(result.get("package_name")) in report_text,
+              report_text[:80])
+        check("the report lists the warning count",
+              "warnings (" in report_text,
+              [l for l in report_text.splitlines() if "warnings" in l][:1])
+        check("the report is inside the package folder",
+              os.path.dirname(report_path) == result.get("package_folder"),
+              os.path.dirname(report_path))
+
+    cpv = by_mesh.get("cpvCube") or {}
+    sets = cpv.get("color_sets") or {}
+    check("the mesh records its colour sets",
+          sorted(sets.get("names") or []) == ["maskCol", "paintCol"],
+          sets)
+    check("and which one Maya had current",
+          sets.get("current") == "maskCol", sets.get("current"))
+
+    aov_records = payload.get("aovs") or []
+    by_aov = {item.get("name"): item for item in aov_records}
+    check("AOVs exported at all", bool(aov_records), len(aov_records))
+    if aov_records:
+        check("every created AOV is in the package",
+              all(name in by_aov for name in AOV_NAMES),
+              sorted(set(AOV_NAMES) - set(by_aov)))
+        check("each AOV names its engine",
+              all(item.get("engine") == "arnold" for item in aov_records),
+              sorted({item.get("engine") for item in aov_records}))
+        # The exporter records Arnold's type as a raw integer and comments
+        # it "5=RGBA usually" -- a guess. Print the real values so the
+        # table can stop guessing.
+        print("    AOV type values: {0}".format(
+            ", ".join("{0}={1}".format(k, (v or {}).get("type"))
+                      for k, v in sorted(by_aov.items()))))
+        check("every AOV carries a type",
+              all(item.get("type") is not None for item in aov_records),
+              [k for k, v in by_aov.items() if v.get("type") is None])
+
     render = payload.get("render") or {}
     check("resolution carried", render.get("width") == 1920
           and render.get("height") == 804,
@@ -2169,6 +2284,12 @@ def main():
     for mesh in unbaked_payload["meshes"]:
         for material in mesh.get("materials") or []:
             unbaked_by_material[material["material"]] = material
+
+    cpv_unbaked = base_texture(unbaked_by_material, "cpvCube_shd") or {}
+    check("an unbaked colour set channel names its set",
+          cpv_unbaked.get("color_set") == "paintCol", cpv_unbaked)
+    check("and is no longer an unsupported network",
+          not cpv_unbaked.get("unsupported_network"), cpv_unbaked)
 
     tex_record = base_texture(unbaked_by_material, "rampTexCube_shd")
     tex_ramp = tex_record.get("ramp") or {}

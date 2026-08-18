@@ -114,9 +114,9 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("52 meshes imported", result["mesh_count"] == 52,
+    check("53 meshes imported", result["mesh_count"] == 53,
           result["mesh_count"])
-    check("40 materials built", result["material_count"] == 40,
+    check("41 materials built", result["material_count"] == 41,
           result["material_count"])
     # Four of the eight cubes asked for subdivision in Maya, the displaced one
     # among them; the rest must arrive unmodified.
@@ -295,6 +295,67 @@ def main():
     print("\nrender settings")
     # 1920x804, not 1920x1080: Blender's own default would pass against an
     # importer that ignored the record entirely.
+    import os as _os
+
+    report_path = result.get("report_path") or ""
+    check("the import wrote a report", bool(report_path)
+          and _os.path.isfile(report_path), report_path)
+    if report_path and _os.path.isfile(report_path):
+        report_text = open(report_path, encoding="utf-8").read()
+        check("the report counts what arrived",
+              "what arrived" in report_text and "meshes" in report_text,
+              report_text[:60])
+        check("the report lists every warning",
+              report_text.count("  - ") >= len(result.get("warnings") or []),
+              (report_text.count("  - "), len(result.get("warnings") or [])))
+
+    cpv_object = bpy.data.objects.get("cpvCube")
+    check("the cube with colour sets arrived", cpv_object is not None, "")
+    if cpv_object is not None:
+        names = [a.name for a in cpv_object.data.color_attributes]
+        # Both sets, not just the one the shader reads and not just the one
+        # Maya had current: the FBX carries them and dropping either would be
+        # a silent loss of paint work.
+        check("both colour sets came through the FBX",
+              sorted(names) == ["maskCol", "paintCol"], names)
+
+    view_layer = bpy.context.scene.view_layers[0]
+    slots = {slot.name for slot in view_layer.aovs}
+    check("Z became the depth pass", view_layer.use_pass_z, view_layer.use_pass_z)
+    check("N became the normal pass", view_layer.use_pass_normal,
+          view_layer.use_pass_normal)
+    check("motionvector became the vector pass", view_layer.use_pass_vector,
+          view_layer.use_pass_vector)
+    check("crypto_object turned cryptomatte on",
+          view_layer.use_pass_cryptomatte_object
+          and view_layer.use_pass_cryptomatte_material,
+          (view_layer.use_pass_cryptomatte_object,
+           view_layer.use_pass_cryptomatte_material))
+    check("emission became the emit pass", view_layer.use_pass_emit,
+          view_layer.use_pass_emit)
+    check("diffuse turned the diffuse passes on",
+          view_layer.use_pass_diffuse_color
+          and view_layer.use_pass_diffuse_direct,
+          (view_layer.use_pass_diffuse_color,
+           view_layer.use_pass_diffuse_direct))
+    check("specular turned the glossy passes on",
+          view_layer.use_pass_glossy_color
+          and view_layer.use_pass_glossy_direct,
+          (view_layer.use_pass_glossy_color,
+           view_layer.use_pass_glossy_direct))
+    # The trap: OpenPBR calls sheen "fuzz", and the old substring test made
+    # every name containing a z into the depth pass. fuzz must land in a
+    # custom slot, not in depth.
+    check("fuzz did not masquerade as depth", "fuzz" in slots, sorted(slots))
+    # The other trap: albedo is the colour pass, not light transport.
+    check("albedo did not turn on diffuse_indirect by itself",
+          "albedo" not in slots, sorted(slots))
+    check("unmapped AOVs became custom slots",
+          {"sss", "opacity"} <= slots, sorted(slots))
+    check("the empty custom slots are reported",
+          any("custom slots" in str(w) for w in result.get("warnings") or []),
+          [w for w in (result.get("warnings") or []) if "AOV" in str(w)][:2])
+
     render = bpy.context.scene.render
     check("resolution came from Maya",
           render.resolution_x == 1920 and render.resolution_y == 804,

@@ -14,6 +14,7 @@ import maya.cmds as cmds
 
 from .bake import BakeContext
 from .constants import (
+    BUILD_VERSION,
     ALEMBIC_FILE_SUFFIX,
     BAKE_FOLDER_NAME,
     DEFAULT_BAKE_RESOLUTION,
@@ -24,6 +25,7 @@ from .constants import (
 from .animation import animation_info, sample_records
 from .cameras import camera_record, camera_sample, scene_camera_shapes
 from .curves import curve_records, scene_curve_shapes
+from .report import write_report
 from .render import render_record
 from .particles import (
     particle_records,
@@ -89,6 +91,21 @@ PACKAGE_PATTERN = re.compile(
     r"^" + re.escape(PACKAGE_PREFIX) + r"(\d+)$",
     re.IGNORECASE,
 )
+
+
+def maya_version():
+    try:
+        return str(cmds.about(version=True))
+    except Exception:
+        return ""
+
+
+def renderer_name():
+    """Which renderer the scene is set to, for the report header."""
+    try:
+        return str(cmds.getAttr("defaultRenderGlobals.currentRenderer") or "")
+    except Exception:
+        return ""
 
 
 def export_scene(
@@ -430,7 +447,10 @@ def export_scene(
             pass
         raise
 
-    return {
+    # Last, and never allowed to fail the export: the report is a
+    # convenience, and losing a good package because its report could not be
+    # written would be the tail wagging the dog.
+    result = {
         "package_name": package_name,
         "package_folder": package_folder,
         "fbx_path": fbx_path,
@@ -447,6 +467,10 @@ def export_scene(
         "animated": animation["enabled"],
         "warnings": warnings,
     }
+    result["report_path"] = write_report(
+        result, BUILD_VERSION, maya_version(), renderer_name()
+    )
+    return result
 
 
 def disambiguate_names(records, name_key, full_key):

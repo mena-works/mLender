@@ -9,6 +9,12 @@ support a new version instead of adding branching logic elsewhere.
 from __future__ import absolute_import
 
 
+# The build number the UI shows and the package report carries. It lives
+# here rather than in __init__ so package.py can reach it without
+# importing the package root, which would be circular. The importer keeps
+# its own in constants.py for the same reason.
+BUILD_VERSION = "2.46.0"
+
 TOOL_NAME = "mLender"
 WINDOW_NAME = "mLenderWindow"
 PACKAGE_PREFIX = "mLender_"
@@ -17,9 +23,12 @@ LIVELINK_HOST = "127.0.0.1"
 LIVELINK_PORT = 50505
 LIVELINK_PROTOCOL = "mlender_livelink"
 LIVELINK_VERSION = 3
+# 44: colour sets. A mesh records the sets it carries, and a channel driven
+# by an aiUserDataColor records the set it reads instead of being marked an
+# unsupported network and collapsing to black.
 # 43: as_rig became as_rigs, a list with one namespace-qualified record per
 # Advanced Skeleton rig in the scene (referenced rigs live in namespaces).
-EXPORT_SCHEMA_VERSION = 43
+EXPORT_SCHEMA_VERSION = 44
 # LiveLink events. Adding an event is backwards compatible: the importer's
 # validator rejects an unknown one with an explicit error rather than acting
 # on it, so an old add-on meeting a pose message says so instead of guessing.
@@ -273,6 +282,19 @@ RAMP_TEXTURE_INTERPOLATIONS = (
 # the reverse of the first guess: a sweep that varied index 1 produced the
 # same colour thirty-four times running, because an opaque Over sitting on top
 # hides everything below it including the blend mode of what is below.
+# Nodes that read a per-vertex colour set into a shading network. Arnold's
+# user data nodes name the set in a plain string attribute; the attribute is
+# called "attribute" on all of them, read off a live MtoA 5.4.8 session.
+#
+# Without this a colour-set network is unrepresentable and the channel
+# collapses to black: measured, an aiUserDataColor on baseColor exported as
+# value [0, 0, 0] with unsupported_network set and no warning anywhere.
+COLOR_SET_READER_TYPES = (
+    "aiUserDataColor",
+    "aiUserDataRgb",
+)
+COLOR_SET_ATTRIBUTE_NAMES = ("attribute", "colorAttrName")
+
 LAYERED_TEXTURE_TYPE = "layeredTexture"
 LAYERED_TEXTURE_ENTRIES = "inputs"
 LAYERED_BLEND_MODES = (

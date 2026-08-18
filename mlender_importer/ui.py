@@ -10,7 +10,20 @@ from .constants import (
     DEFAULT_LIGHT_POWER_SCALE,
 )
 from .asrig import as_armatures, select_chain, select_fk_bones
+import os
+import webbrowser
+
 from .livelink import get_status, start_listener, stop_listener
+
+
+# A panel with hundreds of rows stops the UI; the report file has
+# all of them.
+PANEL_WARNING_LIMIT = 25
+
+
+class ML_WarningItem(bpy.types.PropertyGroup):
+    text: bpy.props.StringProperty(name="Warning", default="")
+
 from .merge import count_stale_objects, remove_stale_objects
 from .outliner import (
     MAX_ROWS,
@@ -47,6 +60,8 @@ SCENE_PROPERTIES = (
     "ml_livelink_host",
     "ml_livelink_port",
     "ml_outliner_search",
+    "ml_warnings",
+    "ml_report_path",
 )
 
 
@@ -518,7 +533,67 @@ class ML_PT_lookdev(bpy.types.Panel):
             layout.label(text="collection and nothing is updated.")
 
 
+class ML_OT_open_report(bpy.types.Operator):
+    """Open the import report the last package wrote."""
+
+    bl_idname = "mlender.open_report"
+    bl_label = "Open Report"
+    bl_description = "Open the import report written beside the package"
+
+    def execute(self, context):
+        path = context.scene.ml_report_path
+        if not path or not os.path.isfile(path):
+            self.report({"WARNING"}, "No report file from the last import.")
+            return {"CANCELLED"}
+        try:
+            webbrowser.open(path)
+        except Exception as exc:
+            self.report({"ERROR"}, "Could not open it: {0}".format(exc))
+            return {"CANCELLED"}
+        return {"FINISHED"}
+
+
+class ML_PT_warnings(bpy.types.Panel):
+    """What the last import did not carry.
+
+    A count in a status line is not readable and the System Console scrolls,
+    so the warnings live here where they can be scrolled and read. The list is
+    capped because a panel with six hundred rows stops the UI; the full set is
+    always in the report file, which is what the button opens.
+    """
+
+    bl_label = "Last Import Warnings"
+    bl_idname = "ML_PT_warnings"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "mLender"
+    bl_parent_id = "ML_PT_lookdev"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+        warnings = list(scene.ml_warnings)
+        if not warnings:
+            layout.label(text="No warnings from the last import.",
+                         icon="CHECKMARK")
+        else:
+            layout.label(
+                text="{0} warning(s)".format(len(warnings)), icon="ERROR"
+            )
+            box = layout.box()
+            column = box.column(align=True)
+            for item in warnings[:PANEL_WARNING_LIMIT]:
+                column.label(text=item.text[:90])
+            if len(warnings) > PANEL_WARNING_LIMIT:
+                column.label(text="... and {0} more, in the report".format(
+                    len(warnings) - PANEL_WARNING_LIMIT))
+        if scene.ml_report_path:
+            layout.operator(ML_OT_open_report.bl_idname, icon="TEXT")
+
+
 CLASSES = (
+    ML_WarningItem,
     ML_OT_start_listener,
     ML_OT_remove_stale,
     ML_OT_stop_listener,
@@ -533,7 +608,9 @@ CLASSES = (
     ML_OT_outliner_delete,
     ML_OT_outliner_reset_order,
     ML_MT_outliner,
+    ML_OT_open_report,
     ML_PT_lookdev,
+    ML_PT_warnings,
     ML_PT_as_rig,
     ML_PT_outliner,
 ) + OVERLAY_CLASSES + GROUPING_CLASSES
@@ -547,6 +624,15 @@ def register_ui():
     unregister_menus()
     register_menus()
     unregister_properties()
+    # The last import's warnings, so the panel can list them and the user
+    # never has to read the System Console to find out what did not travel.
+    bpy.types.Scene.ml_warnings = bpy.props.CollectionProperty(
+        type=ML_WarningItem
+    )
+    bpy.types.Scene.ml_report_path = bpy.props.StringProperty(
+        name="Report", default="",
+        description="The import report written beside the package",
+    )
     bpy.types.Scene.ml_import_mode = bpy.props.EnumProperty(
         name="Import Mode",
         description="What a new package does to the current scene",

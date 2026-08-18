@@ -38,6 +38,8 @@ from .constants import (
     LAYERED_BLEND_MODES,
     LAYERED_DEFAULT_BLEND_MODE,
     LAYERED_TEXTURE_ENTRIES,
+    COLOR_SET_READER_TYPES,
+    COLOR_SET_ATTRIBUTE_NAMES,
     LAYERED_TEXTURE_TYPE,
     MAX_LAYERED_DEPTH,
     PLACEMENT_NODE_TYPE,
@@ -62,6 +64,30 @@ from .mayautils import (
     unique,
     world_matrix,
 )
+
+
+def color_set_from_node(node):
+    """The colour set a per-vertex colour reader names, or "".
+
+    Returns the set name rather than a boolean because the receivers need it:
+    a mesh can carry several sets and reading the wrong one is the same class
+    of silent error as reading the wrong UV set.
+    """
+    if node_type(node) not in COLOR_SET_READER_TYPES:
+        return ""
+    for name in COLOR_SET_ATTRIBUTE_NAMES:
+        if not attr_exists(node, name):
+            continue
+        # raw_attr_value, not plug_value: plug_value is numeric and drops
+        # strings, so it returns None for a colour set name. Measured -- the
+        # first version of this read None and silently found nothing.
+        value = raw_attr_value("{0}.{1}".format(node, name))
+        if isinstance(value, (list, tuple)):
+            value = value[0] if value else ""
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
 
 
 def texture_from_plug(plug, depth=0):
@@ -173,6 +199,17 @@ def texture_from_plug(plug, depth=0):
             if unsupported:
                 record["unsupported_corrections"] = unsupported
             return record
+    # A colour set reader is not an unsupported network: it names a set the
+    # mesh already carries, and every receiver has a node for reading one.
+    color_set = color_set_from_node(source_node)
+    if color_set:
+        return {
+            "path": "",
+            "node": node_label(source_node),
+            "node_type": node_type(source_node),
+            "source_plug": source_plug,
+            "color_set": color_set,
+        }
     record = {
         "path": "",
         "node": node_label(source_node),
