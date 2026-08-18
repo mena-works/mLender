@@ -230,6 +230,7 @@ light counts) and check the System Console for lines beginning
 | Export Scope | off | Send only the selected objects |
 | Export Animation | off | Send a frame range instead of a single frame |
 | Alembic Cache | off | Cache deforming meshes and emitting particles |
+| Cache everything that moves | off | Also cache every object whose transform moves, simulations included |
 | Bake Procedurals | off | Bake fileless shading networks to UVs |
 | Bake Resolution | 1024 | Resolution of those bakes |
 | Light Power Scale | 1.0 | Artistic multiplier over the measured conversion |
@@ -2582,6 +2583,57 @@ stays in the FBX, and a particle object with a constant count still travels as
 a vertex bake. Only the objects that need a cache get one, so turning the
 option on does not turn every package into a cache.
 
+#### Cache everything that moves
+
+The second box widens the cache to **every object whose world transform moves
+over the exported range** — which is how a simulation travels.
+
+A rigid body sim is not lost by the FBX so much as by being a sim: Bullet
+solves the transform each frame and writes the answer, with no animation curve
+behind it. So whether the motion survives depends on whether somebody
+remembered to bake the sim to keys first, and when they did not, the objects
+arrive at their first-frame pose and hold still. Nothing reports it, because
+from the exporter's side there was never any animation to carry.
+
+So this option does not ask what is keyed. It **steps the timeline and reads
+the world matrix**, at twelve frames spread across the range, and anything
+whose matrix changed is cached. That catches Bullet, expressions, constraints,
+IK, and a prop parented under something that moves — all of which report "not
+animated" to any test that walks connections.
+
+Materials come with them. A cached object is still described in the JSON, so
+the receiver still builds its Maya materials and assigns them; the geometry is
+what moved into the cache, not the look. Two measurements make that work in
+Unreal:
+
+- the cache is written with **face sets**, so each material slot is named
+  after the shading group it came from. Without them every slot on the
+  imported cache is called `NoFaceSetName` and nothing can tell which slot
+  belongs to which shader — a cache of ten objects arrived as ten slots of
+  grey checker.
+- the cache is imported with **one track per object** rather than Unreal's
+  default, which flattens the whole file into a single track with a single
+  material slot. Measured: six objects, one slot.
+
+What it costs is worth knowing before turning it on:
+
+- a cached object arrives as **geometry per frame**. In Unreal that is a
+  Geometry Cache, not a static mesh, so it is not instanced and cannot be
+  re-timed; in Blender it is a Mesh Sequence Cache modifier reading the `.abc`
+  from disk.
+- the file is larger than the same motion carried as keys.
+- an object inside a moving group is cached **with the group**, because the
+  root of a cache records its own matrix and nothing above it. Rooting at the
+  prop would deliver it in the wrong place, holding still.
+
+The export says how many objects took this route:
+
+```text
+mLender warning: 12 moving object(s) travel as an Alembic cache rather than
+as keyed geometry, simulations included. They arrive as cached geometry, so
+they are not instanced and cannot be re-animated.
+```
+
 Blender receives these objects with a **Mesh Sequence Cache** modifier pointing
 at the `.abc`, which means:
 
@@ -3020,6 +3072,7 @@ path far more often than it types `-m`.
 --archive          also write the .zip
 --animation        export a frame range
 --alembic          cache deforming meshes
+--cache-animation  also cache everything whose transform moves
 --start --end --step --bake-resolution --host --port
 ```
 

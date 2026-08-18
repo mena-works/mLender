@@ -114,9 +114,9 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("61 meshes imported", result["mesh_count"] == 61,
+    check("63 meshes imported", result["mesh_count"] == 63,
           result["mesh_count"])
-    check("46 materials built", result["material_count"] == 46,
+    check("48 materials built", result["material_count"] == 48,
           result["material_count"])
     # Four of the eight cubes asked for subdivision in Maya, the displaced one
     # among them; the rest must arrive unmodified.
@@ -170,8 +170,8 @@ def main():
           ungrouped is not None
           and scene_collections(ungrouped) == [result["root_collection"]],
           [c.name for c in ungrouped.users_collection] if ungrouped else None)
-    check("ten collections were reported",
-          result["group_collection_count"] == 10,
+    check("eleven collections were reported",
+          result["group_collection_count"] == 11,
           result["group_collection_count"])
 
     print("\ninstances")

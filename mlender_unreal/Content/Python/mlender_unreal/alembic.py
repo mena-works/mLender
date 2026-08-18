@@ -28,6 +28,11 @@ from .utils import resolve_recorded_path, safe_asset_name
 FOLDER = "mLender Import/mLender Cache"
 CACHE_CONTENT_PATH = CONTENT_ROOT + "/Caches"
 
+# What the importer calls a slot the Alembic gave no face set name. Measured:
+# a mesh with a single shading group produces exactly one of these, and a mesh
+# split between shaders produces named slots instead.
+NO_FACE_SET = "NoFaceSetName"
+
 
 def _conversion(settings, warnings):
     """Ask for Maya's conversion by name rather than writing the numbers.
@@ -70,6 +75,19 @@ def _import_cache(path, warnings):
         )
         return []
     _conversion(settings, warnings)
+    # One track per object rather than the default, which flattens the whole
+    # file into a single track with a single material slot. Measured: a cache
+    # of six objects arrived as one slot, so every object in it would wear
+    # whichever material happened to be assigned to that slot.
+    try:
+        geometry = settings.get_editor_property("geometry_cache_settings")
+        geometry.set_editor_property("flatten_tracks", False)
+        settings.set_editor_property("geometry_cache_settings", geometry)
+    except Exception as exc:
+        warnings.append(
+            "The Alembic cache could not be kept as one track per object "
+            "({0}); its objects share a single material slot.".format(exc)
+        )
 
     task = unreal.AssetImportTask()
     task.filename = path
@@ -96,53 +114,151 @@ def _import_cache(path, warnings):
     return caches
 
 
-def _assign_materials(actor, material_cache, warnings, label):
-    """Give the cache our rebuilt materials where the names line up.
+def cache_component(actor):
+    """The component holding the cache, however this engine exposes it."""
+    component = getattr(actor, "geometry_cache_component", None)
+    if component is not None:
+        return component
+    try:
+        return actor.get_component_by_class(unreal.GeometryCacheComponent)
+    except Exception:
+        return None
+
+
+def track_key(name):
+    """A track name reduced to the Maya shape it came from.
+
+    Measured: ``simCubeShape`` arrives as ``simCubeShape_0``. The trailing
+    index is the importer's, not Maya's.
+    """
+    text = str(name or "")
+    parts = text.rsplit("_", 1)
+    if len(parts) == 2 and parts[1].isdigit():
+        text = parts[0]
+    return safe_asset_name(text)
+
+
+def cached_records(package_data):
+    """The mesh records the cache carries, keyed by the shape name it uses."""
+    index = {}
+    for record in (package_data or {}).get("meshes") or []:
+        if not record.get("alembic"):
+            continue
+        for key in (record.get("shape"), record.get("mesh"),
+                    record.get("mesh_full_name")):
+            if key:
+                index.setdefault(safe_asset_name(str(key)), record)
+    return index
+
+
+def _slot_names(cache, component):
+    try:
+        return [str(name) for name in
+                (cache.get_editor_property("material_slot_names") or [])]
+    except Exception:
+        pass
+    try:
+        return [""] * component.get_num_materials()
+    except Exception:
+        return []
+
+
+def _track_keys(cache):
+    try:
+        return [track_key(track.get_name())
+                for track in (cache.get_editor_property("tracks") or [])]
+    except Exception:
+        return []
+
+
+def _material_for(item, material_cache, package_folder, build_material,
+                  warnings):
+    key = item.get("material_full_name") or item.get("material") or ""
+    material = material_cache.get(key)
+    if material is None:
+        material = build_material(item, package_folder, warnings)
+        material_cache[key] = material
+    return material
+
+
+def assign_cache_materials(actor, cache, package_data, material_cache,
+                           package_folder, build_material, warnings):
+    """Give a cache the materials the JSON says its objects had.
 
     A cached mesh never went through the FBX, so nothing has matched it to a
-    Maya material record. Its slots carry the names Maya gave them, which is
-    enough to look ours up.
+    Maya material record and its slots hold the world grid checker. Two things
+    were measured to make this possible: the slot of a mesh split between
+    shaders is named after the shading group, and the slots run in track
+    order. So a named slot is looked up by name -- position independent -- and
+    an unnamed one, which only a single-material object produces, is resolved
+    by walking the tracks alongside the slots.
     """
-    component = getattr(actor, "geometry_cache_component", None)
-    if component is None:
-        try:
-            component = actor.get_component_by_class(
-                unreal.GeometryCacheComponent
-            )
-        except Exception:
-            component = None
+    component = cache_component(actor)
     if component is None:
         return 0
+    slots = _slot_names(cache, component)
+    tracks = _track_keys(cache)
+    records = cached_records(package_data)
+    by_shading_engine = {}
+    for record in records.values():
+        for item in record.get("materials") or []:
+            engine = item.get("shading_engine")
+            if engine:
+                by_shading_engine.setdefault(safe_asset_name(str(engine)), item)
+
     assigned = 0
-    try:
-        count = component.get_num_materials()
-    except Exception:
-        return 0
-    for index in range(count):
-        try:
-            existing = component.get_material(index)
-        except Exception:
-            continue
-        slot = safe_asset_name(existing.get_name() if existing else "")
-        for key, material in material_cache.items():
-            if safe_asset_name(str(key)) == slot:
-                try:
-                    component.set_material(index, material)
-                    assigned += 1
-                except Exception:
-                    pass
+    unmatched = []
+    slot_index = 0
+    track_index = 0
+    while slot_index < len(slots):
+        record = None
+        if track_index < len(tracks):
+            record = records.get(tracks[track_index])
+        items = [
+            item for item in ((record or {}).get("materials") or [])
+            if item.get("material")
+        ]
+        # A mesh with one shading group writes no face set, so it owns exactly
+        # one slot; a split mesh owns one per shading group.
+        span = len(items) if len(items) > 1 else 1
+        for offset in range(span):
+            index = slot_index + offset
+            if index >= len(slots):
                 break
-    if count and not assigned:
+            item = by_shading_engine.get(safe_asset_name(slots[index]))
+            if item is None and len(items) == 1:
+                item = items[0]
+            if item is None:
+                unmatched.append(slots[index] or str(index))
+                continue
+            try:
+                component.set_material(
+                    index,
+                    _material_for(item, material_cache, package_folder,
+                                  build_material, warnings),
+                )
+                assigned += 1
+            except Exception as exc:
+                warnings.append(
+                    'The cached object in slot {0} could not take its '
+                    "material: {1}".format(index, exc)
+                )
+        slot_index += span
+        track_index += 1
+        if track_index > len(tracks) and slot_index < len(slots):
+            break
+    if unmatched:
         warnings.append(
-            'The Alembic cache "{0}" kept its own materials; none of its {1} '
-            "slot(s) matched a Maya material this import rebuilt.".format(
-                label, count
+            "{0} slot(s) on the Alembic cache matched no Maya material and "
+            "kept the placeholder: {1}".format(
+                len(unmatched), ", ".join(sorted(set(unmatched))[:6])
             )
         )
     return assigned
 
 
-def import_alembic(package_data, package_folder, material_cache, warnings):
+def import_alembic(package_data, package_folder, material_cache, warnings,
+                   build_material=None):
     """Import the package cache and put it in the level.
 
     The cache is authored in world space by the exporter's AbcExport call, so
@@ -214,9 +330,11 @@ def import_alembic(package_data, package_folder, material_cache, warnings):
                 actor.tags = [GENERATED_TAG]
             except Exception:
                 pass
-            assigned += _assign_materials(
-                actor, material_cache, warnings, label
-            )
+            if build_material is not None:
+                assigned += assign_cache_materials(
+                    actor, cache, package_data, material_cache,
+                    package_folder, build_material, warnings,
+                )
             created += 1
         except Exception as exc:
             warnings.append(

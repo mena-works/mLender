@@ -129,8 +129,15 @@ def create_sequence(package_data, warnings):
     first = int(round(start * ticks_per_frame))
     last = int(round(end * ticks_per_frame))
     try:
-        sequence.set_playback_start(first)
-        sequence.set_playback_end(last)
+        # The playback range is the one part of this API that is **not** in
+        # ticks. Measured: set_playback_end(33000) reads back as 1375 seconds,
+        # while set_playback_end(33) reads back as 1.375 -- which is 33 frames
+        # at 24fps. Handing it ticks made the ruler a thousand times too long,
+        # so a 0-33 shot opened as 0-33000 with every key inside the first
+        # thirty-three frames, and scrubbing anywhere showed the last pose.
+        # That reads as "nothing is animated", which is how it was reported.
+        sequence.set_playback_start(int(round(start)))
+        sequence.set_playback_end(int(round(end)))
     except Exception:
         pass
     return sequence, ticks_per_frame, first, last

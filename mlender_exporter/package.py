@@ -40,10 +40,12 @@ from .particles import (
     scene_particle_shapes,
 )
 from .alembic import (
+    animated_cache_roots,
     cache_roots,
     cache_only_shapes,
     export_alembic,
     rig_deformed,
+    under_roots,
 )
 from .instancers import instancer_records, scene_instancers
 from .coverage import coverage_warnings
@@ -129,6 +131,7 @@ def export_scene(
     frame_end=None,
     frame_step=None,
     export_alembic_cache=False,
+    cache_animated_meshes=False,
     archive_package=False,
 ):
     """Write a numbered package folder holding the FBX and the scene JSON.
@@ -387,28 +390,35 @@ def export_scene(
         # Alembic covers what FBX cannot: meshes whose points move, and
         # particle systems the vertex bake refused. A cached mesh leaves the
         # FBX entirely, or the same object would arrive twice, frozen once.
+        # Caching everything that moves needs the cache itself, so the option
+        # carries its own prerequisite rather than doing nothing when only one
+        # of two checkboxes is ticked.
+        use_cache = export_alembic_cache or cache_animated_meshes
         alembic = _write_alembic(
             alembic_path,
-            mesh_shapes if export_alembic_cache else [],
-            particle_list if export_alembic_cache else [],
+            mesh_shapes if use_cache else [],
+            particle_list if use_cache else [],
             particle_shapes,
             animation,
             warnings,
+            cache_animated_meshes=cache_animated_meshes,
         )
-        cached = set(alembic.get("roots") or [])
+        cached = list(alembic.get("roots") or [])
         # The flag is what stops the importer building a second, frozen copy
-        # of an object the cache already carries.
+        # of an object the cache already carries. Membership, not equality: a
+        # root carries its whole subtree, so a still prop inside a moving
+        # group travels in the cache with it.
         for record in mesh_records:
-            if record.get("mesh_path") in cached:
+            if under_roots(record.get("mesh_path"), cached):
                 record["alembic"] = True
         for record in particle_list:
-            if record.get("particle_path") in cached:
+            if under_roots(record.get("particle_path"), cached):
                 record["alembic"] = True
         export_fbx(
             [
                 transform
                 for transform in mesh_transforms(mesh_shapes)
-                if transform not in cached
+                if not under_roots(transform, cached)
             ] + joints,
             fbx_path,
             animation,
@@ -449,6 +459,7 @@ def export_scene(
                 "file": alembic.get("file") or "",
                 "mesh_count": alembic.get("mesh_count") or 0,
                 "particle_count": alembic.get("particle_count") or 0,
+                "animated_count": alembic.get("animated_count") or 0,
             },
             "particles": particle_list,
             "transforms": transform_list,
@@ -588,15 +599,32 @@ def _apply_light_linking(light_records, light_shapes, mesh_records):
 
 
 def _write_alembic(path, mesh_shapes, particle_list, particle_shapes,
-                   animation, warnings):
+                   animation, warnings, cache_animated_meshes=False):
     """Cache what FBX loses. Returns what the payload should say about it.
 
-    Only two things qualify, and both were measured to need it: a mesh whose
-    points are moved by a deformer, which FBX delivers frozen, and a particle
-    object whose count changes, which no fixed vertex count can hold.
+    Two things qualify on their own, and both were measured to need it: a mesh
+    whose points are moved by a deformer, which FBX delivers frozen, and a
+    particle object whose count changes, which no fixed vertex count can hold.
+
+    ``cache_animated_meshes`` widens that to everything that moves, which is a
+    different kind of need. A simulation is not lost by the FBX so much as by
+    being a simulation: the solver writes a transform per frame with nothing
+    keyed behind it, so what travels depends on whether the scene happened to
+    be baked first. The cache carries the result either way.
     """
-    empty = {"roots": [], "file": "", "mesh_count": 0, "particle_count": 0}
+    empty = {
+        "roots": [],
+        "file": "",
+        "mesh_count": 0,
+        "particle_count": 0,
+        "animated_count": 0,
+    }
     if not animation.get("enabled"):
+        if cache_animated_meshes:
+            warnings.append(
+                "Caching animated objects needs the animation range turned "
+                "on, so nothing was cached."
+            )
         return empty
 
     deformed = cache_only_shapes(mesh_shapes)
@@ -606,9 +634,28 @@ def _write_alembic(path, mesh_shapes, particle_list, particle_shapes,
         if record.get("count_varies") or record.get("bake_too_large")
     ]
     mesh_roots = cache_roots(deformed)
+    animated_roots = []
+    if cache_animated_meshes:
+        # Measured rather than inferred, and measured over the whole
+        # hierarchy: see moving_transforms. A root the deformed pass already
+        # names is not repeated, and a moving group swallows the deformed
+        # shapes hanging inside it.
+        animated_roots = [
+            root for root in animated_cache_roots(mesh_shapes, animation)
+            if root not in mesh_roots
+        ]
+        mesh_roots = [
+            root for root in mesh_roots
+            if not under_roots(root, animated_roots)
+        ]
     particle_roots = cache_roots(varying)
-    roots = mesh_roots + particle_roots
+    roots = mesh_roots + animated_roots + particle_roots
     if not roots:
+        if cache_animated_meshes:
+            warnings.append(
+                "Nothing in the scene moved over the exported range, so the "
+                "cache holds no animated objects."
+            )
         return empty
 
     if not export_alembic(roots, path, animation):
@@ -629,11 +676,23 @@ def _write_alembic(path, mesh_shapes, particle_list, particle_shapes,
             "the cache holds the deformed result, and their rig cannot be "
             "posed in Blender.".format(len(rigged))
         )
+    if animated_roots:
+        # Worth saying rather than discovering. A cached object is geometry
+        # per frame: it arrives as a cache rather than as a mesh with a
+        # transform, so it is not instanced, it is larger on disk, and nobody
+        # downstream can re-time it. That is the trade this option is.
+        warnings.append(
+            "{0} moving object(s) travel as an Alembic cache rather than as "
+            "keyed geometry, simulations included. They arrive as cached "
+            "geometry, so they are not instanced and cannot be "
+            "re-animated.".format(len(animated_roots))
+        )
     return {
         "roots": roots,
         "file": maya_path(path),
-        "mesh_count": len(mesh_roots),
+        "mesh_count": len(mesh_roots) + len(animated_roots),
         "particle_count": len(particle_roots),
+        "animated_count": len(animated_roots),
     }
 
 

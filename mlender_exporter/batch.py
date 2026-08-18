@@ -125,6 +125,8 @@ def main(argv=None):
         "archive_package": True if _has(argv, "--archive") else None,
         "export_animation": True if _has(argv, "--animation") else None,
         "export_alembic_cache": True if _has(argv, "--alembic") else None,
+        "cache_animated_meshes": True if _has(argv, "--cache-animation")
+        else None,
         "bake_resolution": _flag(argv, "--bake-resolution"),
         "frame_start": _flag(argv, "--start"),
         "frame_end": _flag(argv, "--end"),

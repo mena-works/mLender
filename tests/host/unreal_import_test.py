@@ -1580,6 +1580,85 @@ def main():
     check("and still leaves the level's own alone",
           {"ArtistKeyLight", "ArtistFog"} <= set(theirs_off), theirs_off)
 
+    # --- the package that carries everything moving as a cache.
+    #
+    # Its own package, because it deliberately takes objects out of the FBX.
+    # Imports over the level, so it runs after the assertions above.
+    animcache = os.path.join(
+        os.path.dirname(PACKAGE), "animcache", "mLender_01")
+    if os.path.isfile(os.path.join(animcache, "mLender_01_scene.json")):
+        print("\nanimated objects carried as a cache")
+        with open(os.path.join(animcache, "mLender_01_scene.json")) as handle:
+            cache_data = json.load(handle)
+        mlender_unreal.import_scene_package(animcache)
+        actors = list(unreal.get_editor_subsystem(
+            unreal.EditorActorSubsystem).get_all_level_actors() or [])
+        # By asset name, not by class: a standin pointing at an .abc is a
+        # geometry cache as well, and this scene has two of those.
+        cache_name = os.path.splitext(os.path.basename(
+            (cache_data.get("alembic") or {}).get("file") or ""))[0]
+        cache_actors = []
+        for actor in actors:
+            if actor.get_class().get_name() != "GeometryCacheActor":
+                continue
+            asset = actor.geometry_cache_component.get_editor_property(
+                "geometry_cache")
+            if asset is not None and asset.get_name() == cache_name:
+                cache_actors.append(actor)
+        check("the package cache is in the level", len(cache_actors) == 1,
+              (cache_name, len(cache_actors)))
+        if cache_actors:
+            component = cache_actors[0].geometry_cache_component
+            asset = component.get_editor_property("geometry_cache")
+            tracks = list(asset.get_editor_property("tracks") or [])
+            # The importer's default flattens every object into one track with
+            # one material slot, so this is what stops the whole cache wearing
+            # a single material.
+            check("one track per cached object, not one flattened track",
+                  len(tracks) >= 3, len(tracks))
+            frames = component.get_number_of_frames()
+            check("and the cache holds the range, not a single frame",
+                  frames > 1, frames)
+
+            names = []
+            for index in range(component.get_num_materials()):
+                material = component.get_material(index)
+                names.append(material.get_name() if material else None)
+            slots = [str(name) for name in
+                     (asset.get_editor_property("material_slot_names") or [])]
+            # Without this the cache keeps WorldGridMaterial in every slot,
+            # which renders as the grey checker and looks like a shading bug
+            # rather than a transfer that dropped the materials.
+            check("every slot took a rebuilt material",
+                  names and all(str(name).startswith("ML_") for name in names),
+                  (slots, names))
+            # By name rather than by count: the objects this scene cached each
+            # have their own shader, and a mapping that put them in the wrong
+            # order would still fill every slot.
+            check("the simulated cube got its own material",
+                  any("simCube_shd" in str(name) for name in names), names)
+            check("and the prop inside the moving group got its own",
+                  any("simRider_shd" in str(name) for name in names), names)
+
+        labels = set()
+        for actor in actors:
+            try:
+                labels.add(actor.get_actor_label())
+            except Exception:
+                continue
+        # The same object arriving twice -- once cached and moving, once from
+        # the FBX and frozen -- is the failure this flag exists to prevent.
+        cached_names = [
+            record.get("mesh") for record in cache_data.get("meshes") or []
+            if record.get("alembic")
+        ]
+        doubled = [name for name in cached_names if name in labels]
+        check("a cached object does not also arrive from the FBX",
+              not doubled, doubled)
+        # And the rest of the scene still came the ordinary way.
+        check("objects that hold still still arrive as meshes",
+              len(labels) > 20, len(labels))
+
     # --- a second package, exported with baking off.
     #
     # Baking resolves a layeredTexture into one file before any receiver sees

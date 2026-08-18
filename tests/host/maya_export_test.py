@@ -986,6 +986,47 @@ def build_scene():
     cmds.setKeyframe(drop_cube + ".translateY", time=1, value=12.0)
     cmds.setKeyframe(drop_cube + ".translateY", time=25, value=0.0)
 
+    # A mesh that moves with nothing keyed on it. An expression stands in for
+    # a rigid body solver here -- the Bullet plugin is not on every machine,
+    # and what matters is the shape of the problem, not which solver has it:
+    # the transform is solved per frame, so listConnections finds no animation
+    # curve and any test asking "is this keyed" calls it still.
+    sim_cube = cmds.polyCube(name="simCube")[0]
+    cmds.setAttr(sim_cube + ".translateX", -18)
+    cmds.expression(
+        name="simCubeDrop",
+        string="{0}.translateY = 10 - (frame * 0.25);".format(sim_cube),
+    )
+    sim_shader = cmds.shadingNode(
+        "aiStandardSurface", asShader=True, name="simCube_shd")
+    cmds.setAttr(sim_shader + ".baseColor", 0.9, 0.2, 0.05, type="double3")
+    sim_set = cmds.sets(
+        renderable=True, noSurfaceShader=True, empty=True,
+        name="simCube_shdSG")
+    cmds.connectAttr(
+        sim_shader + ".outColor", sim_set + ".surfaceShader", force=True)
+    cmds.sets(sim_cube, edit=True, forceElement=sim_set)
+
+    # And a prop that never moves in its own right, inside a group that does.
+    # Rooting a cache at the prop would record its local transform and leave
+    # the journey behind: the object arrives, in the wrong place, holding
+    # still. Its own material, so the cached pair cannot share one by luck.
+    rider = cmds.polyCube(name="simRider")[0]
+    cmds.setAttr(rider + ".translateX", 2.0)
+    sim_group = cmds.group(rider, name="simGroup")
+    cmds.setAttr(sim_group + ".translateX", -22)
+    cmds.setKeyframe(sim_group + ".translateZ", time=1, value=0.0)
+    cmds.setKeyframe(sim_group + ".translateZ", time=25, value=9.0)
+    rider_shader = cmds.shadingNode(
+        "aiStandardSurface", asShader=True, name="simRider_shd")
+    cmds.setAttr(rider_shader + ".baseColor", 0.05, 0.3, 0.9, type="double3")
+    rider_set = cmds.sets(
+        renderable=True, noSurfaceShader=True, empty=True,
+        name="simRider_shdSG")
+    cmds.connectAttr(
+        rider_shader + ".outColor", rider_set + ".surfaceShader", force=True)
+    cmds.sets(rider, edit=True, forceElement=rider_set)
+
     # A turntable: the camera orbits a full 360 degrees while its focal length
     # pulls in. A full turn is the case that exposes Euler decomposition
     # flipping between frames, so the range deliberately closes the loop.
@@ -1509,7 +1550,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("61 meshes exported", payload["mesh_count"] == 61,
+    check("63 meshes exported", payload["mesh_count"] == 63,
           payload["mesh_count"])
     # The locator, the empty null, the nested locator, the group holding
     # only a curve, and the two shapeless FKIK switchers (root and NSRig:).
@@ -2596,6 +2637,78 @@ def main():
     check("with baking on, a layered texture is baked like any other network",
           baked_stack.get("baked") is True and "layered" not in baked_stack,
           dict((key, baked_stack.get(key)) for key in ("baked", "layered")))
+
+    # --- carrying everything that moves as a cache.
+    #
+    # Its own folder: this package deliberately takes objects out of the FBX,
+    # and the package the receiver tests read must keep them.
+    animated_result = za.export_scene(
+        os.path.join(OUT, "animcache"),
+        export_animation=True,
+        cache_animated_meshes=True,
+    )
+    with open(animated_result["json_path"], "r") as handle:
+        animated_payload = json.load(handle)
+    animated_section = animated_payload.get("alembic") or {}
+    animated_records = {}
+    for mesh in animated_payload.get("meshes") or []:
+        animated_records[mesh.get("mesh") or ""] = mesh
+
+    check("caching animated objects writes a cache",
+          bool(animated_section.get("file"))
+          and os.path.isfile(animated_section["file"]),
+          animated_section.get("file"))
+    check("and says how many moving objects are in it",
+          (animated_section.get("animated_count") or 0) >= 3,
+          animated_section.get("animated_count"))
+    # The whole point of measuring instead of reading connections: this cube
+    # is driven by an expression, so there is no animation curve anywhere
+    # above it. A keyed-plug test reports it still.
+    check("an object moved by a solver rather than a key is cached",
+          animated_records.get("simCube", {}).get("alembic") is True,
+          animated_records.get("simCube", {}).get("alembic"))
+    check("so is a keyed one",
+          animated_records.get("dropCube", {}).get("alembic") is True,
+          animated_records.get("dropCube", {}).get("alembic"))
+    check("and a still prop travels with the group carrying it",
+          animated_records.get("simRider", {}).get("alembic") is True,
+          animated_records.get("simRider", {}).get("alembic"))
+    # A scene where everything is cached would pass every check above while
+    # being useless, so something that does not move has to stay put.
+    still = [
+        name for name, record in animated_records.items()
+        if not record.get("alembic")
+    ]
+    check("objects that hold still are not cached", len(still) > 5, len(still))
+    check("the FBX is still written for them",
+          os.path.isfile(animated_result["fbx_path"]),
+          animated_result["fbx_path"])
+    # Materials are the reason the JSON still describes a cached mesh at all.
+    # Without this the receiver has geometry and no idea what colour it is.
+    sim_materials = (animated_records.get("simCube", {}).get("materials")
+                     or [])
+    check("a cached mesh still carries its material",
+          [item.get("material") for item in sim_materials] == ["simCube_shd"],
+          [item.get("material") for item in sim_materials])
+    rider_materials = (animated_records.get("simRider", {}).get("materials")
+                       or [])
+    check("and so does the prop inside the moving group",
+          [item.get("material") for item in rider_materials]
+          == ["simRider_shd"],
+          [item.get("material") for item in rider_materials])
+    check("the cost of the trade is said out loud",
+          any("not instanced" in str(line)
+              for line in animated_payload.get("export_warnings") or []),
+          animated_payload.get("export_warnings"))
+    # The default has to stay where it was, or every existing package changes
+    # shape because a new checkbox exists. The main package has the cache on
+    # for deformers, which is the closest neighbour this could leak into.
+    check("and none of this happens unless it is asked for",
+          not any(
+              mesh.get("alembic")
+              for mesh in payload.get("meshes") or []
+              if mesh.get("mesh") in ("simCube", "dropCube", "simRider")
+          ))
 
     # With baking off there is nothing to reference, and this is where the
     # gradient itself has to travel. Its own folder, so the package the

@@ -13,7 +13,7 @@ from __future__ import absolute_import
 # here rather than in __init__ so package.py can reach it without
 # importing the package root, which would be circular. The importer keeps
 # its own in constants.py for the same reason.
-BUILD_VERSION = "2.65.0"
+BUILD_VERSION = "2.66.0"
 
 TOOL_NAME = "mLender"
 WINDOW_NAME = "mLenderWindow"
@@ -705,12 +705,27 @@ ALEMBIC_FILE_SUFFIX = "_cache.abc"
 # uvWrite and writeUVSets so a cached mesh keeps the UVs the FBX would have
 # carried; worldSpace is deliberately absent, so the transform stays on the
 # object rather than being folded into the points.
+#
+# writeFaceSets is what carries the material assignment. Measured in Unreal:
+# without it every material slot on the imported cache is called
+# "NoFaceSetName", so nothing downstream can tell which of them belongs to
+# which shader -- a cache of ten objects arrived as ten slots of world grid
+# checker. With it the slots are named after the shading group, and a mesh
+# split between two shaders arrives as two slots rather than one.
 ALEMBIC_EXPORT_FLAGS = (
     "-uvWrite",
     "-writeUVSets",
     "-writeVisibility",
+    "-writeFaceSets",
     "-dataFormat ogawa",
 )
+
+# How many frames the "cache everything that moves" option looks at before it
+# decides an object is still, and how far a world matrix may drift and still
+# count as still. Probing rather than reading connections is the whole point:
+# a Bullet rigid body has no animation curve to find.
+ALEMBIC_MOTION_PROBES = 12
+ALEMBIC_MOTION_TOLERANCE = 1.0e-4
 
 # A particle bake writes three numbers per point per frame, and the live link
 # refuses a message over 32 MB, so a dense simulation would fail as a transfer

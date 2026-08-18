@@ -38,6 +38,7 @@ DEFAULT_SETTINGS = {
     "frame_end": None,
     "frame_step": None,
     "export_alembic_cache": False,
+    "cache_animated_meshes": False,
     "output_folder": "",
     "livelink_host": "",
     "livelink_port": 0,
@@ -55,6 +56,7 @@ EXPORT_KEYS = (
     "frame_end",
     "frame_step",
     "export_alembic_cache",
+    "cache_animated_meshes",
 )
 
 

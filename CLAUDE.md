@@ -763,6 +763,25 @@ Kullanıcının elle doğrulaması gereken adımlar:
 - ❌ Mesh'i olmayan bir mesh actor'ünde materyal atamasını sessizce atlama;
   daha önce gönderi barındıran content root'a yeniden import bunu üretiyor ve
   "2 mesh, 0 materyal, 0 uyarı" diye görünüyordu
+- ❌ Alembic'i face set yazmadan gönderip materyalin geleceğini sanma;
+  ölçüldü, `-writeFaceSets` yoksa Unreal'de **her slot** `NoFaceSetName`
+  ve hiçbir slot hangi shader'a ait olduğunu söylemiyor. Varken slot adı
+  shading group; tek materyalli mesh yine isimsiz tek slot verir, çok
+  materyalli olan SG başına bir tane
+- ❌ GeometryCache'i importer varsayılanıyla alma; `flatten_tracks` varsayılan
+  **True** ve altı objeyi tek track + **tek materyal slotu**na indiriyor.
+  Obje başına track istiyorsan açıkça `False` yaz
+- ❌ Cache slotlarını konumdan bağımsız sanma; isimsiz slotlar yalnız track
+  sırasıyla çözülür. Ölçüldü: track sırası alfabetik (`alphaShape_0`,
+  `mikeShape_0`…) ve slotlar o sırayı izliyor; ortadaki çok materyalli obje
+  ardışık iki isimli slot üretiyor
+- ❌ "Animasyonlu mu" sorusunu bağlantı yürüyerek cevaplama; Bullet, expression
+  ve constraint hiçbir animCurve bırakmaz. Zaman çizgisini adımlayıp **dünya
+  matrisini** oku — ve dünya, çünkü hareketsiz bir prop hareketli bir grubun
+  içinde seyahat eder
+- ❌ Alembic root'unu hareketli hiyerarşinin içine koyma; AbcExport root'un
+  kendi matrisini yazar, üstündekini yazmaz. İçerideki propu root yapmak onu
+  yanlış yerde ve hareketsiz teslim eder
 - ❌ Unreal'de coat/sheen'i bir girdiye zorlama; `MaterialProperty`'de yok
 - ❌ Tek master material ile bütün yüzey sınıflarını karşılamaya çalışma;
   blend mode instance'a ait değil
@@ -812,9 +831,14 @@ Kullanıcının elle doğrulaması gereken adımlar:
   bütçeyi anlatıyor. `get_num_nanite_triangles()` kaynağı verir.
   Nanite'ı bu araç açmıyor — motorun import varsayılanı
 - ❌ Sequencer'da display frame ile tick'i karıştırma; `add_key`,
-  `set_range`, `set_playback_start/end` ve oynatma konumu **hepsi tick**.
-  Ölçüldü: 24 karede 100→900 anahtarlanan sekans tick 12000'de 500,
-  "kare 12"de 100.40 okuyor. Display rate yalnız cetveli adlandırır
+  `set_range` ve oynatma konumu **tick**. Ölçüldü: 24 karede 100→900
+  anahtarlanan sekans tick 12000'de 500, "kare 12"de 100.40 okuyor.
+  Display rate yalnız cetveli adlandırır
+- ❌ …ama `set_playback_start/end` bu ailenin **istisnası**: o **kare**
+  alıyor. Ölçüldü: `set_playback_end(33000)` → `get_playback_end_seconds()`
+  = 1375 s, `set_playback_end(33)` → 1.375 s. Tick verince 0-33'lük bir
+  çekim 0-33000 açılıyor, bütün anahtarlar ilk otuz üç karede kalıyor ve
+  cetveli sürükleyen "animasyon yok" görüyor — kullanıcı böyle bildirdi
 - ❌ Mesh animasyonunun FBX'ten doğru geldiğini varsayma; Interchange onu
   kendi Level Sequence'ına, her anahtarı **kare numarasını tick olarak**
   yazarak koyuyor. Ölçüldü: 520 karelik hareket tick 1..519'da, yani ilk

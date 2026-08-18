@@ -128,15 +128,23 @@ def show_ui():
     # Off by default: it writes a second file and only two kinds of object
     # need it, so it is opt in rather than a silent size increase.
     alembic_field = cmds.checkBoxGrp(
+        numberOfCheckBoxes=2,
         label="Alembic Cache",
         label1="Cache deforming meshes and emitting particles",
+        label2="Cache everything that moves, simulations included",
         value1=False,
+        value2=False,
         annotation=(
             "Needs Export Animation. Deformed meshes travel frozen through "
             "FBX and emitting particles cannot travel at all; both go "
-            "through an Alembic cache instead."
+            "through an Alembic cache instead. The second box widens that to "
+            "every object whose world transform moves over the range, which "
+            "is how a Bullet simulation travels: the solver keys nothing, so "
+            "there is nothing for the FBX to carry. Materials still come "
+            "from the JSON either way. Cached objects arrive as geometry per "
+            "frame, so they are not instanced and cannot be re-timed."
         ),
-        columnWidth2=(120, 400),
+        columnWidth3=(120, 400, 400),
     )
     cmds.text(
         label="Packages: {0}01, {0}02, {0}03...".format(PACKAGE_PREFIX),
@@ -304,6 +312,8 @@ def ui_settings(export_folder, host_field, port_field, bake_field,
             selection_field, query=True, value1=True)),
         "export_alembic_cache": bool(cmds.checkBoxGrp(
             alembic_field, query=True, value1=True)),
+        "cache_animated_meshes": bool(cmds.checkBoxGrp(
+            alembic_field, query=True, value2=True)),
     }
 
 
@@ -338,6 +348,12 @@ def apply_settings(settings, export_folder, host_field, port_field, bake_field,
     ):
         if control is not None:
             cmds.checkBoxGrp(control, edit=True, value1=bool(settings.get(key)))
+    # The second box of the cache group, which the pairs above cannot reach.
+    if alembic_field is not None:
+        cmds.checkBoxGrp(
+            alembic_field, edit=True,
+            value2=bool(settings.get("cache_animated_meshes")),
+        )
     if frame_range_field is not None and settings.get("frame_start") is not None:
         cmds.textFieldGrp(
             frame_range_field, edit=True,
@@ -411,9 +427,13 @@ def export_from_ui(
         )
 
     export_alembic_cache = False
+    cache_animated_meshes = False
     if alembic_field is not None:
         export_alembic_cache = bool(
             cmds.checkBoxGrp(alembic_field, query=True, value1=True)
+        )
+        cache_animated_meshes = bool(
+            cmds.checkBoxGrp(alembic_field, query=True, value2=True)
         )
 
     collect = False
@@ -442,6 +462,7 @@ def export_from_ui(
             frame_end=frame_end,
             frame_step=frame_step,
             export_alembic_cache=export_alembic_cache,
+            cache_animated_meshes=cache_animated_meshes,
         )
     except Exception as exc:
         cmds.warning("mLender export failed: {0}".format(exc))

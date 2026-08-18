@@ -195,7 +195,8 @@ def import_scene_package(
     # filled, so it has to run after those are built and before anything that
     # counts what is in the level.
     alembic_result = import_alembic(
-        package_data, package_folder, material_cache, warnings
+        package_data, package_folder, material_cache, warnings,
+        build_material=build_material,
     )
 
     empty_result = import_transforms(

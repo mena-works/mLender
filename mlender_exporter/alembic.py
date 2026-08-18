@@ -26,9 +26,11 @@ import maya.cmds as cmds
 from .constants import (
     ALEMBIC_EXPORT_FLAGS,
     ALEMBIC_EXPORT_PLUGIN,
+    ALEMBIC_MOTION_PROBES,
+    ALEMBIC_MOTION_TOLERANCE,
     DEFORMER_NODE_TYPE,
 )
-from .mayautils import parent_of, unique
+from .mayautils import current_frame, parent_of, unique, world_matrix
 
 # Deformers whose result is a rig's, not a shape edit's. They are listed so
 # the caller can say what it found, not so they are treated differently:
@@ -104,6 +106,137 @@ def cache_only_shapes(shapes):
         if kinds - set(RIG_DEFORMER_TYPES):
             kept.append(shape)
     return kept
+
+
+def ancestor_paths(path):
+    """Every transform above a full DAG path, outermost first."""
+    parts = [part for part in (path or "").split("|") if part]
+    return [
+        "|" + "|".join(parts[:index]) for index in range(1, len(parts))
+    ]
+
+
+def probe_frames(animation, count):
+    """Up to ``count`` frames spread across the range, both ends included."""
+    try:
+        start = float(animation.get("start"))
+        end = float(animation.get("end"))
+    except Exception:
+        return []
+    if end < start:
+        start, end = end, start
+    span = end - start
+    if span <= 0.0:
+        return []
+    count = max(2, int(count))
+    step = span / float(count - 1)
+    return [start + step * index for index in range(count)]
+
+
+def moving_transforms(transforms, animation):
+    """Which transforms actually move, measured rather than inferred.
+
+    A rigid body simulation has no animation curve, no keyed plug and no
+    upstream connection worth walking: Bullet solves the transform each frame
+    and writes the answer. So does an expression, and so does a constraint
+    whose driver sits outside the export. Asking "is anything keyed above
+    this" answers a different question, and answers it wrong for exactly the
+    objects this option exists for -- the scene that prompted it had every one
+    of its rigid bodies reported still.
+
+    Stepping the timeline and reading the world matrix asks the real question.
+    World, not local, because a prop that never moves in its own right still
+    travels when the group holding it does.
+    """
+    paths = [path for path in unique(transforms or []) if path]
+    frames = probe_frames(animation, ALEMBIC_MOTION_PROBES)
+    if not paths or len(frames) < 2:
+        return []
+
+    original = current_frame()
+    first = {}
+    moving = set()
+    try:
+        for frame in frames:
+            try:
+                cmds.currentTime(frame, edit=True)
+            except Exception:
+                continue
+            for path in paths:
+                if path in moving:
+                    continue
+                matrix = world_matrix(path)
+                if not matrix:
+                    continue
+                reference = first.get(path)
+                if reference is None:
+                    first[path] = matrix
+                    continue
+                for before, now in zip(reference, matrix):
+                    if abs(before - now) > ALEMBIC_MOTION_TOLERANCE:
+                        moving.add(path)
+                        break
+    finally:
+        # The user's frame is restored whatever happened; parking their scene
+        # somewhere else is not something an export may leave behind.
+        try:
+            cmds.currentTime(original, edit=True)
+        except Exception:
+            pass
+    return [path for path in paths if path in moving]
+
+
+def topmost_moving(path, moving):
+    """The highest ancestor that also moves, or the path itself.
+
+    A root has to be the top of the moving hierarchy. AbcExport records a
+    root's own matrix and nothing above it, so rooting the cache at a prop
+    inside a moving group would write the prop's local transform and leave the
+    journey behind -- the object arrives, in the wrong place, holding still.
+    """
+    for ancestor in ancestor_paths(path):
+        if ancestor in moving:
+            return ancestor
+    return path
+
+
+def animated_cache_roots(shapes, animation):
+    """Roots covering every mesh whose world transform moves.
+
+    Deformation is not the question here: this is the option that carries a
+    simulation, and a rigid body deforms nothing.
+    """
+    transforms = unique([
+        transform for transform in
+        (cache_root(shape) for shape in (shapes or [])) if transform
+    ])
+    if not transforms:
+        return []
+    candidates = unique(transforms + [
+        ancestor
+        for transform in transforms
+        for ancestor in ancestor_paths(transform)
+    ])
+    moving = set(moving_transforms(candidates, animation))
+    return unique([
+        topmost_moving(transform, moving)
+        for transform in transforms if transform in moving
+    ])
+
+
+def under_roots(path, roots):
+    """Whether a path is one of the roots or hangs inside one.
+
+    A root carries its whole subtree, so membership is not equality. Testing
+    equality would leave a static prop inside a moving group in the FBX as
+    well as the cache, and the receiver would build it twice.
+    """
+    if not path:
+        return False
+    for root in roots or ():
+        if path == root or path.startswith(root + "|"):
+            return True
+    return False
 
 
 def cache_root(shape):
