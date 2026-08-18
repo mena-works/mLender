@@ -1756,3 +1756,32 @@ Fixture'da zaten keyli bir mesh vardı (`flatCube`, translateX 0→8) ve hiçbir
 assertion ona bakmıyordu; artık üç kontrol var: level'da mı, sekans onu
 kıpırdatıyor mu, ve tek yönde mi (yanlış ölçekli bir retime doğru yere varıp
 arada zıplayabilir).
+
+
+## Rigid body simülasyonu ve eksen hatası (2.64.0)
+
+Üçüncü gerçek sahne raporu: Bullet rigid body simülasyonu Unreal'de oynamıyor.
+
+Bullet kurulu olduğu için gerçek bir sim kurulup ölçüldü (yerden 20 birim
+yukarıdan düşen küp, 1–48). Zincir baştan sona izlendi:
+
+* Solver transform'u **animCurve olmadan ve `.translate`'e gelen bağlantı
+  olmadan** sürüyor — yani anahtar arayan hiçbir kontrol onu göremez.
+* FBX export'u kare aralığını bake ederken sahneyi adım adım değerlendiriyor,
+  bu da solver'ı çalıştırıyor: hareket **FBX'in içinde**. Blender'da
+  doğrulandı (küp 1/24/48'de 0.2 → 0.16 → 0.022).
+* Unreal'e de geliyordu, retime ediliyordu, track kuruluyordu — **ama obje
+  kıpırdamıyordu.**
+
+Sebep bendeydi ve dünkü retime kodundaydı: Interchange'den geri okunan
+kanalları **konuma göre** eşliyordum. Geri okuma yalnız anahtarı olan
+kanalları döndürüyor, düşüş de yalnız Z'de olduğu için tek kanal geliyor ve
+hedefte ilk sıraya, yani **X**'e yazılıyordu. Obje animasyonluydu, sadece
+yanlara gidiyordu.
+
+Bu, fixture'ın bir kez daha yakalayamadığı bir hataydı: sahnedeki hareketli
+her şey X'te hareket ediyordu, dolayısıyla konum eşlemesi tesadüfen doğru
+çıkıyordu. Kanallar artık **isimle** eşleniyor, ve fixture'a dikey hareket eden
+bir küp eklendi. İki yeni kontrol: Unreal'in Z'sinde düşüyor mu (Maya'nın Y'si),
+ve diğer iki eksende duruyor mu — ikincisi olmadan kayan bir eşleme yine
+"animasyon var" diye geçerdi.

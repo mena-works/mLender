@@ -1136,7 +1136,37 @@ def main():
                       abs(places[-1] - places[0]) > 1.0, places)
                 # Monotonic, because a move that lands right but jumps about
                 # in between is a retime that got its scale wrong.
-                check("smoothly, in one direction",
+                # On the axis Maya moved it, and only that one. Maya's Y is
+            # Unreal's Z, so a drop must land in Z -- a channel mapping that
+            # slipped would still animate, sideways, and still pass every
+            # check above.
+            dropper = None
+            for actor in (unreal.get_editor_subsystem(
+                    unreal.EditorActorSubsystem).get_all_level_actors() or []):
+                try:
+                    if actor.get_actor_label() == "dropCube":
+                        dropper = actor
+                        break
+                except Exception:
+                    continue
+            check("the object Maya dropped is in the level",
+                  dropper is not None)
+            if dropper is not None:
+                readings = []
+                for frame in (start, last_inside):
+                    scrub(frame)
+                    location = dropper.get_actor_location()
+                    readings.append((round(location.x, 2), round(location.y, 2),
+                                     round(location.z, 2)))
+                first_read, last_read = readings[0], readings[-1]
+                check("it falls on Unreal's Z, which is Maya's Y",
+                      abs(last_read[2] - first_read[2]) > 1.0, readings)
+                check("and stays put on the other two",
+                      abs(last_read[0] - first_read[0]) < 0.01
+                      and abs(last_read[1] - first_read[1]) < 0.01,
+                      readings)
+
+            check("smoothly, in one direction",
                       (places[0] <= places[1] <= places[2])
                       or (places[0] >= places[1] >= places[2]),
                       places)

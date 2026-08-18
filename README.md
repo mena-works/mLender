@@ -663,6 +663,20 @@ frame 1 in one application and frame 1001 in another is a conversation nobody
 can have. If the sequence starts at 1001, that is the scene's start frame, not
 an offset.
 
+### Simulation
+
+A rigid body simulation carries. Measured with a Bullet sim: the solver drives
+the transform with **no animation curve and no incoming connection**, so
+nothing that looks for keys can see it — but the FBX export bakes the frame
+range by stepping the scene, which evaluates the solver, and the motion is in
+the file. From there it takes the same route as any other object motion.
+
+Two things follow from that. The simulation has to have been **played through
+in Maya** before exporting, the way it would be before rendering; and Export
+Animation has to be on, since a single frame export bakes nothing. The solver
+node itself is reported as not carried, which is correct — it is the motion
+that travels, not the simulation.
+
 ### If nothing animated arrives
 
 **Export Animation is off by default.** With it off the package carries a

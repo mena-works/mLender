@@ -114,7 +114,7 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("60 meshes imported", result["mesh_count"] == 60,
+    check("61 meshes imported", result["mesh_count"] == 61,
           result["mesh_count"])
     check("46 materials built", result["material_count"] == 46,
           result["material_count"])

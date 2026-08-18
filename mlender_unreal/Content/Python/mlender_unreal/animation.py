@@ -759,25 +759,39 @@ def adopt_object_animation(sequence, ticks_per_frame, first, last, warnings):
     return adopted, keys_written
 
 
+def _channel_role(name):
+    """"Location.Z_2" -> "location.z". The suffix differs between assets."""
+    label = str(name or "")
+    if "_" in label:
+        head, _sep, tail = label.rpartition("_")
+        if tail.isdigit() and head:
+            label = head
+    return label.strip().lower()
+
+
 def _copy_channels(section, channels, scale):
-    """Write read-back channels onto a section, scaling their times."""
+    """Write read-back channels onto a section, scaling their times.
+
+    Matched by role, not by position. Only channels that carry keys come back
+    from a read, so a fall keyed on Z alone arrives as a single channel -- and
+    writing it into the destination's first slot puts a vertical drop on the X
+    axis. Measured on a rigid body sim: the object was keyed, the track was
+    there, and it did not move, because it was moving sideways out of view.
+    """
     destination = section.get_all_channels() or []
     if not destination:
         return 0
+    by_role = {}
+    for channel in destination:
+        by_role.setdefault(_channel_role(channel.get_name()), channel)
+
     written = 0
-    by_index = {}
-    for index, channel in enumerate(destination):
-        by_index[channel.get_name()] = index
-    for order, (name, pairs) in enumerate(channels):
-        # Match by position: the nine transform channels come back in the
-        # same order on both sections, and the names carry a suffix that
-        # differs between assets.
-        index = order if order < len(destination) else None
-        if index is None:
+    for name, pairs in channels:
+        target = by_role.get(_channel_role(name))
+        if target is None:
             continue
         for tick, value in pairs:
-            if _add_key(destination[index], int(round(tick * scale)),
-                        float(value)):
+            if _add_key(target, int(round(tick * scale)), float(value)):
                 written += 1
     return written
 

@@ -821,6 +821,13 @@ Kullanıcının elle doğrulaması gereken adımlar:
   karenin ellide birinde bitiyor ve "hiç hareket yok" gibi görünüyor.
   Anahtarları geri okuyup doğru zaman tabanıyla yaz, ve sıkışmayı **tespit et**
   — varsayarsan düzelmiş bir motorda animasyonu bin katına gerersin
+- ❌ Geri okunan kanalları **konuma göre** eşleme; okuma yalnız anahtarı olan
+  kanalları döndürüyor, yani Z'de düşen bir obje tek kanal olarak gelir ve
+  ilk sıraya (X'e) yazılır. Obje animasyonlu görünür, yanlara gider.
+  İsimle eşle, ve fixture'da **dikey** hareket eden bir şey bulundur
+- ❌ Simülasyonu anahtar arayarak tespit etmeye çalışma; Bullet solver
+  transform'u animCurve'suz ve `.translate`'e bağlantısız sürüyor. Hareket
+  FBX bake'ine düşüyor (ölçüldü), ama sim Maya'da bir kez oynatılmış olmalı
 - ❌ Bir kanalı ağırlığına bakmadan "kayboldu" diye bildirme; `coat_ior`
   varsayılanı 1.5 olduğu için coat kapalıyken bile uyarı çıkıyordu ve 31
   materyalin 28'i sahte uyarıydı, üç gerçeği gömüyordu

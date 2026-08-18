@@ -975,6 +975,17 @@ def build_scene():
     cmds.setKeyframe("flatCube.translateX", time=1, value=0.0)
     cmds.setKeyframe("flatCube.translateX", time=25, value=8.0)
 
+    # And one that moves on a different axis. Object motion reaches Unreal by
+    # being read back out of the FBX sequence and rewritten, and the first
+    # version of that matched channels by position rather than by name -- so a
+    # drop keyed on Y alone was written onto X. Everything in this scene moved
+    # sideways, so it passed. A rigid body sim falling straight down is what
+    # found it.
+    drop_cube = cmds.polyCube(name="dropCube")[0]
+    cmds.setAttr(drop_cube + ".translateX", -14)
+    cmds.setKeyframe(drop_cube + ".translateY", time=1, value=12.0)
+    cmds.setKeyframe(drop_cube + ".translateY", time=25, value=0.0)
+
     # A turntable: the camera orbits a full 360 degrees while its focal length
     # pulls in. A full turn is the case that exposes Euler decomposition
     # flipping between frames, so the range deliberately closes the loop.
@@ -1498,7 +1509,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("60 meshes exported", payload["mesh_count"] == 60,
+    check("61 meshes exported", payload["mesh_count"] == 61,
           payload["mesh_count"])
     # The locator, the empty null, the nested locator, the group holding
     # only a curve, and the two shapeless FKIK switchers (root and NSRig:).
