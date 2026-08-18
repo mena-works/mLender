@@ -471,6 +471,16 @@ def _channel_value(channel, record):
     return value
 
 
+def channel_value(channel, record):
+    """The flat value for a channel, with the exporter semantics applied.
+
+    Public because the animation module keys the same channels and has to
+    apply the same rules -- a keyed specular that skipped the weight-to-level
+    conversion would animate to a different place than frame one sits.
+    """
+    return _channel_value(channel, record)
+
+
 def build_material(record, package_folder, warnings):
     """One Material Instance Constant for one Maya shader."""
     channels = record.get("channels") or {}
@@ -590,15 +600,6 @@ def _report_unsupported(record, name, warnings, surface_class=None):
                 "Maya could not hand over; it fell back to its flat value. "
                 "Use Bake Procedurals to carry it.".format(
                     name, channel, texture.get("node_type") or "procedural"
-                )
-            )
-        if len((channel_record or {}).get("samples") or []) >= 2:
-            warnings.append(
-                'Material "{0}" channel "{1}" is keyed in Maya over {2} '
-                "frame(s). This build sets the first sample and does not "
-                "animate it; that needs a Level Sequence.".format(
-                    name, channel,
-                    len((channel_record or {}).get("samples") or []),
                 )
             )
         if texture.get("color_set"):

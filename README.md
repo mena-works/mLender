@@ -400,7 +400,6 @@ receiving end:
 | coat tint and coat IOR | the coat weight and its roughness travel (below); Unreal's clear coat has no tint or IOR input at all |
 | sheen, subsurface radius and scale | no Unreal input |
 | skeleton root motion | this build keys no skeletal animation in Unreal |
-| material parameter animation | a keyed roughness needs a Material Instance track per parameter; the first sample is set and the rest reported |
 | Maya constraints | Unreal has no equivalent, and the FBX bake already carries the motion they produced |
 | AOVs | render passes in Unreal are Movie Render Queue configuration, and this engine build does not ship MRQ |
 
@@ -457,6 +456,7 @@ same package starts on the same frame in Blender and in Unreal.
 | camera transform | transform track on the camera actor |
 | camera focal length, aperture | `CurrentFocalLength`, `CurrentAperture` on the cine camera component |
 | mesh visibility | visibility track, keyed `True` for visible |
+| keyed material parameters | a component material track on the mesh slot, scalar and colour |
 
 Four things about Sequencer were measured rather than assumed, and each of them
 accepts a wrong value without complaining:
@@ -473,7 +473,13 @@ accepts a wrong value without complaining:
   pre-animated values, so a check that reads there sees the actor's spawn state
   and concludes nothing was keyed.
 
-Material parameter animation is still reported rather than carried.
+A fifth thing was measured after the first four, while adding keyed material
+parameters: **the material parameter API does not use the same time unit**. On
+one sequence, a transform channel handed 1000 stores 1000 and
+`add_scalar_parameter_key` handed 1000 stores 1 — it divides by ticks per
+frame. The first version passed plain ticks and put twenty-five keys inside the
+first twenty-five ticks, which reads as "nothing is animated" because every
+scrub lands past the last key.
 
 ### Skinned meshes and Advanced Skeleton
 

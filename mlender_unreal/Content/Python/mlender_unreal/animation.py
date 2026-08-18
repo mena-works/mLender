@@ -42,6 +42,12 @@ from .lights import (
     light_intensity_for_unreal,
     resolve_unreal_light_class,
 )
+from .constants import (
+    MASTER_SCALAR_PARAMETERS,
+    MASTER_VECTOR_PARAMETERS,
+)
+from .materials import channel_value
+from .meshes import mesh_component
 from .transforms import unreal_transform
 from .utils import safe_asset_name, scalar
 
@@ -442,6 +448,132 @@ def animate_visibility(sequence, package_data, actors, ticks_per_frame,
     return tracks, keys
 
 
+def _material_slot(component, material_name):
+    """The slot index holding a rebuilt material, or None.
+
+    Slots are matched by name rather than by the record order, for the same
+    reason the material assignment does it: the FBX decides the order and an
+    index is only right until something reorders.
+    """
+    if component is None or not material_name:
+        return None
+    wanted = str(material_name)
+    try:
+        count = component.get_num_materials()
+    except Exception:
+        return None
+    for index in range(count):
+        try:
+            material = component.get_material(index)
+        except Exception:
+            continue
+        if material is None:
+            continue
+        name = material.get_name()
+        if name == wanted or name.endswith(wanted) or wanted in name:
+            return index
+    return None
+
+
+def animate_materials(sequence, package_data, actors, ticks_per_frame, first,
+                      last, warnings):
+    """Keyed material parameters, as component material tracks.
+
+    The time argument here is not the one every other channel takes. Measured
+    on the same sequence: a transform channel handed 1000 stores 1000, but
+    add_scalar_parameter_key handed 1000 stores 1 -- it divides by
+    ticks-per-frame. Keys therefore go in multiplied back up, and the first
+    version, which passed plain ticks, put twenty five keys inside the first
+    twenty five ticks of the sequence. It looked like nothing was animated at
+    all, because every scrub landed past the last key and read its value.
+    """
+    tracks = 0
+    keys = 0
+    for mesh_record in (package_data or {}).get("meshes") or []:
+        label = safe_asset_name(
+            mesh_record.get("mesh") or mesh_record.get("mesh_full_name")
+            or "Mesh", "Mesh",
+        )
+        actor = actors.get(label)
+        if actor is None:
+            continue
+        component = mesh_component(actor)
+        if component is None:
+            continue
+        binding = None
+        for material_record in mesh_record.get("materials") or []:
+            channels = material_record.get("channels") or {}
+            keyed = [
+                (channel, record) for channel, record in sorted(channels.items())
+                if (record or {}).get("samples")
+                and (channel in MASTER_SCALAR_PARAMETERS
+                     or channel in MASTER_VECTOR_PARAMETERS)
+            ]
+            if not keyed:
+                continue
+            slot = _material_slot(
+                component,
+                "{0}{1}".format("ML_", material_record.get("material") or ""),
+            )
+            if slot is None:
+                warnings.append(
+                    'Material "{0}" is keyed in Maya but no slot on "{1}" '
+                    "holds it, so it was not animated.".format(
+                        material_record.get("material"), label
+                    )
+                )
+                continue
+            if binding is None:
+                binding = sequence.add_possessable(component)
+            track = binding.add_track(unreal.MovieSceneComponentMaterialTrack)
+            track.set_material_index(slot)
+            section = track.add_section()
+            section.set_range(first, last)
+            interpolation = _linear()
+            built = 0
+            for channel, record in keyed:
+                info = unreal.MaterialParameterInfo()
+                colour = channel in MASTER_VECTOR_PARAMETERS
+                info.set_editor_property(
+                    "name",
+                    MASTER_VECTOR_PARAMETERS[channel] if colour
+                    else MASTER_SCALAR_PARAMETERS[channel],
+                )
+                for sample in record["samples"]:
+                    tick = _tick_of(sample, ticks_per_frame)
+                    stamp = unreal.FrameNumber(
+                        int(round(tick * ticks_per_frame))
+                    )
+                    value = channel_value(channel, sample)
+                    try:
+                        if colour:
+                            section.add_color_parameter_key(
+                                info, stamp,
+                                unreal.LinearColor(
+                                    value[0], value[1], value[2], 1.0
+                                ),
+                                "", "", [], interpolation,
+                            )
+                        else:
+                            section.add_scalar_parameter_key(
+                                info, stamp, float(value), "", "",
+                                interpolation,
+                            )
+                        built += 1
+                    except Exception as exc:
+                        warnings.append(
+                            'Material "{0}" channel "{1}" could not be keyed: '
+                            "{2}".format(
+                                material_record.get("material"), channel, exc
+                            )
+                        )
+                        break
+            if built:
+                tracks += 1
+                keys += built
+    return tracks, keys
+
+
 def import_animation(package_data, unreal_scale, metre_scale, power_scale,
                      warnings):
     """Build the Level Sequence and place an actor that plays it."""
@@ -462,6 +594,9 @@ def import_animation(package_data, unreal_scale, metre_scale, power_scale,
             sequence, package_data, actors, unreal_scale, ticks_per_frame,
             first, last, warnings),
         lambda: animate_visibility(
+            sequence, package_data, actors, ticks_per_frame, first, last,
+            warnings),
+        lambda: animate_materials(
             sequence, package_data, actors, ticks_per_frame, first, last,
             warnings),
     )

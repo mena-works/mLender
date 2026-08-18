@@ -803,6 +803,11 @@ Kullanıcının elle doğrulaması gereken adımlar:
   adıyla kontrol et — sahte ad `False` dönüyorsa `True` bir şey anlatır
 - ❌ Coat'u yalnız opak yüzeye verme; Unreal'de blend mode ile shading model
   bağımsızdır, masked bir yüzey de coat giyer
+- ❌ Sequencer'ın materyal parametre API'sine diğer kanallarla aynı zamanı
+  verme; ölçüldü, `add_scalar_parameter_key` verdiğin sayıyı
+  ticks-per-frame'e **bölüyor** (1000 verince 1 saklıyor), transform kanalı
+  bölmüyor. Tick'i geri çarp; yoksa bütün anahtarlar sekansın ilk birkaç
+  tick'ine yığılır ve "animasyon yok" gibi görünür
 - ❌ Component property'sini actor binding'ine anahtarlama; intensity ve
   LightColor `light_component`, focal/aperture `camera_component`
   binding'ine gider

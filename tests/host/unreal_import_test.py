@@ -397,6 +397,85 @@ def main():
                       and readings[2][3] > readings[0][3],
                       [(r[2], r[3]) for r in readings])
 
+            # Keyed material parameters. The time argument on this API is
+            # not the one the other channels take -- measured on the same
+            # sequence, a transform channel handed 1000 stores 1000 and
+            # add_scalar_parameter_key handed 1000 stores 1 -- so the check
+            # reads values back through the dynamic instance Sequencer makes
+            # rather than trusting that the keys went in.
+            keyed_material = None
+            keyed_mesh = None
+            for mesh_record in package_data.get("meshes") or []:
+                for material_record in mesh_record.get("materials") or []:
+                    channels = material_record.get("channels") or {}
+                    if any((r or {}).get("samples") for r in channels.values()):
+                        keyed_material = material_record
+                        keyed_mesh = mesh_record
+                        break
+                if keyed_material:
+                    break
+            check("the package has a keyed material parameter",
+                  keyed_material is not None,
+                  keyed_material and keyed_material.get("material"))
+            mesh_actor = by_label.get((keyed_mesh or {}).get("mesh") or "")
+            if keyed_material is not None and mesh_actor is not None:
+                component = mesh_actor.static_mesh_component
+                channels = keyed_material.get("channels") or {}
+                rough = (channels.get("roughness") or {}).get("samples") or []
+                colour = (channels.get("base_color") or {}).get("samples") or []
+                readings = []
+                for frame in (start, middle, last_inside):
+                    scrub(frame)
+                    material = component.get_material(0)
+                    try:
+                        got_scalar = material.get_scalar_parameter_value(
+                            "Roughness")
+                        got_colour = material.get_vector_parameter_value(
+                            "BaseColor")
+                    except Exception:
+                        got_scalar = None
+                        got_colour = None
+                    want_scalar = None
+                    for sample in rough:
+                        if abs(sample.get("frame", 0) - frame) < 0.01:
+                            want_scalar = sample.get("value")
+                    want_colour = None
+                    for sample in colour:
+                        if abs(sample.get("frame", 0) - frame) < 0.01:
+                            want_colour = sample.get("value")
+                    readings.append(
+                        (got_scalar, want_scalar, got_colour, want_colour)
+                    )
+                # Sequencer swaps in a dynamic instance when a material track
+                # drives the slot. A constant instance here means the track
+                # never took hold.
+                check("a material track drives the mesh slot",
+                      "Dynamic" in type(component.get_material(0)).__name__,
+                      type(component.get_material(0)).__name__)
+                scalar_ok = [
+                    (round(got, 4), round(want, 4))
+                    for got, want, _gc, _wc in readings
+                    if got is not None and want is not None
+                    and abs(got - want) > 0.002
+                ]
+                check("the keyed roughness follows Maya frame by frame",
+                      not scalar_ok
+                      and any(got is not None for got, _w, _gc, _wc in readings),
+                      scalar_ok or [r[0] for r in readings])
+                colour_off = [
+                    (gc.r, wc[0]) for _gs, _ws, gc, wc in readings
+                    if gc is not None and wc is not None
+                    and abs(gc.r - wc[0]) > 0.002
+                ]
+                check("and so does the keyed base colour",
+                      not colour_off,
+                      colour_off)
+                check("nothing still calls a keyed channel frozen",
+                      not [w for w in result.get("warnings") or []
+                           if "does not animate it" in w],
+                      [w for w in result.get("warnings") or []
+                       if "does not animate it" in w][:1])
+
             camera_record = None
             for record in (package_data.get("cameras") or []):
                 samples = record.get("samples") or []

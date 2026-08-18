@@ -1317,3 +1317,27 @@ Sözleşme testi de güncellendi: bir kanalın hem kablolu hem metadata olması
 yasaktı, coat artık ikisi birden (coat master'da kablolu, diğerlerinde hâlâ
 bildirilmesi gereken bir kayıp). Kontrol zayıflatılmadı — `CONDITIONAL_CHANNELS`
 diye açık bir liste var ve kesişim ona **birebir** eşit olmak zorunda.
+
+
+## Unreal materyal animasyonu (2.51.0) — sekans altyapısının ikinci hasadı
+
+Keyli materyal parametreleri artık Unreal'de de oynuyor: mesh slot'una bir
+`MovieSceneComponentMaterialTrack`, skaler ve renk parametreleri için anahtar.
+Doğrulama Maya örnekleriyle birebir: roughness 0.05 → 0.475 → 0.8957, base
+colour (1, 0.8, 0) → (0.5, 0.8, 0.5) → (0.005, 0.8, 0.995).
+
+**Beşinci Sequencer gerçeği, ilk dördünden sonra ölçüldü:** materyal parametre
+API'si aynı zaman birimini kullanmıyor. Aynı sekansta transform kanalı 1000
+verince 1000 saklıyor, `add_scalar_parameter_key` 1000 verince **1** saklıyor —
+ticks-per-frame'e bölüyor. İlk sürüm düz tick geçti ve yirmi beş anahtarı
+sekansın ilk yirmi beş tick'ine sıkıştırdı; sonuç "hiçbir şey animasyonlu
+değil" gibi görünüyordu, çünkü her scrub son anahtarın ötesine düşüp onun
+değerini okuyordu.
+
+İki küçük ayrıntı daha ölçüldü: `add_scalar_parameter_key`'in ilk argümanı
+string değil `MaterialParameterInfo`, ve UE 5.8 `layer_name`/`asset_name`
+argümanlarını zorunlu tutuyor.
+
+Doğrulama yine oynatarak: Sequencer slot'u sürdüğünde bileşenin materyali
+`MaterialInstanceDynamic`'e dönüşüyor, ve değerler oradan okunuyor. Beş yeni
+assertion; artık yanlış olan "bu build animasyonlamıyor" uyarısı kaldırıldı.
