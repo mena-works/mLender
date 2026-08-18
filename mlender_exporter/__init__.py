@@ -42,6 +42,7 @@ SUBMODULES = (
     "textures",
     "bake",
     "shaders",
+    "tessellate",
     "meshes",
     "rigging",
     "asrig",

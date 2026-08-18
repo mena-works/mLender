@@ -23,6 +23,7 @@ from __future__ import absolute_import
 
 import maya.cmds as cmds
 
+from .constants import CURVE_ON_SURFACE_MARK
 from .mayautils import (
     node_label,
     parent_of,
@@ -47,6 +48,13 @@ def scene_curve_shapes(selected_only=False):
     curve in the scene alongside the one asset that had been selected.
     """
     shapes = cmds.ls(type="nurbsCurve", long=True, noIntermediate=True) or []
+    # Curves on surface are construction data, not scene curves: a trim leaves
+    # one boundary curve per region, and a trimmed model would arrive buried in
+    # them. Maya writes them with an arrow in the DAG path
+    # (|plane|planeShape->|projectionCurve1|...), which is the only handle on
+    # them -- the node type is plain nurbsCurve and the parent is a transform
+    # like any other.
+    shapes = [shape for shape in shapes if CURVE_ON_SURFACE_MARK not in shape]
     if selected_only:
         allowed = set(expanded_selection())
         shapes = [shape for shape in shapes if shape in allowed]

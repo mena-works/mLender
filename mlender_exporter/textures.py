@@ -38,6 +38,7 @@ from .constants import (
     LAYERED_BLEND_MODES,
     LAYERED_DEFAULT_BLEND_MODE,
     LAYERED_TEXTURE_ENTRIES,
+    ANIMATION_CURVE_PREFIX,
     COLOR_SET_READER_TYPES,
     COLOR_SET_ATTRIBUTE_NAMES,
     LAYERED_TEXTURE_TYPE,
@@ -120,6 +121,13 @@ def texture_from_plug(plug, depth=0):
 
     source_plug = source_plugs[0]
     source_node = source_plug.split(".", 1)[0]
+    # A keyed attribute is connected, but to an animation curve rather than to
+    # a shading network. Returning None here means "no texture", which leaves
+    # the channel on its plain value -- and, crucially, keeps it away from the
+    # bake path, which used to write one frame of a keyframed roughness into a
+    # texture map.
+    if str(node_type(source_node) or "").startswith(ANIMATION_CURVE_PREFIX):
+        return None
     candidates = [source_node]
     candidates.extend(cmds.listHistory(source_node, pruneDagObjects=True) or [])
     # listHistory repeats the node it started from, and a repeat would record

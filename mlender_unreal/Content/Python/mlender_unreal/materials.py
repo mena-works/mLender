@@ -456,6 +456,15 @@ def _report_unsupported(record, name, warnings):
                     name, channel, texture.get("node_type") or "procedural"
                 )
             )
+        if len((channel_record or {}).get("samples") or []) >= 2:
+            warnings.append(
+                'Material "{0}" channel "{1}" is keyed in Maya over {2} '
+                "frame(s). This build sets the first sample and does not "
+                "animate it; that needs a Level Sequence.".format(
+                    name, channel,
+                    len((channel_record or {}).get("samples") or []),
+                )
+            )
         if texture.get("color_set"):
             warnings.append(
                 'Material "{0}" channel "{1}" reads the vertex colour set '

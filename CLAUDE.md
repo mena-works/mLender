@@ -36,6 +36,7 @@ mlender_exporter/     # Maya (import sırası = bağımlılık sırası)
   animation.py           # frame aralığı ve zaman çizgisi örnekleme
   textures.py            # upstream texture arama
   bake.py                # prosedürel ağları UV'ye bake etme
+  tessellate.py          # NURBS/subdiv yüzeyleri geçici polygon olarak
   shaders.py             # shader → kanal çıkarımı
   meshes.py              # mesh keşfi, material/face atamaları
   transforms.py          # locator ve boş null'lar
@@ -689,6 +690,13 @@ Kullanıcının elle doğrulaması gereken adımlar:
   olarak gidip export'u düşürür. Bilinmeyen anahtar **düşürülür**
 - ❌ Komut satırında adı geçmeyen ayarı varsayılana döndürme; `None` "söylenmedi"
   demektir ve preset'in değeri kalır
+- ❌ Bir compound plug'ın anahtarlı olup olmadığını yalnız kendisine sorma;
+  Maya renkleri **çocuklarından** anahtarlıyor (`baseColorR`), compound
+  "bağlantı yok" der ve keyli base colour sessizce donar
+- ❌ animCurve'ü shading network sanma; bake yolu anahtarlanmış bir skaleri
+  tek kare halinde texture'a basıyordu — upstream yürüyüşü animCurve'de durur
+- ❌ Bake edilmiş örnekleri Bezier bırakma; örnekler zaten değerlendirilmiş
+  eğri, LINEAR olmalı (iki kez ease etmesin)
 - ❌ String attribute'u `plug_value` ile okuma; o sayısal ve string'i **düşürüyor**
   (`None` dönüyor). `raw_attr_value` kullan
 - ❌ Renk seti için "current olan" varsayımı yapma; shader başka bir seti okuyor
@@ -768,6 +776,19 @@ Kullanıcının elle doğrulaması gereken adımlar:
 - ❌ Displacement'a birim ölçeği ekleme; FBX birim dönüşümünü obje scale'ine
   koyar, vertex'ler Maya biriminde kalır, object space displacement zaten doğru
 - ❌ Displacement'ı shader'da arama; Maya onu shadingEngine'de tutar
+- ❌ `nurbsToPoly`/`subdToPoly` çağırıp seçimi geri koymamak; ikisi de
+  çıktısını seçili bırakır, ve seçili-export o yüzden kullanıcının
+  seçmediği bir yüzeyi taşıdı. Seçimi sakla, geri koy; seçili olan bir
+  yüzeyi stand-in'iyle temsil et, yoksa seçtiği NURBS hiç gitmez
+- ❌ Curve-on-surface'ı sahne eğrisi sanma; her trim bölgesi başına bir
+  tane bırakır ve trimli bir model alıcıya gömülü gelir. DAG yolundaki
+  `->` tek işarettir — node tipi düz `nurbsCurve`, parent'ı normal bir
+  transform. Hem export hem kapsam taraması aynı kuralı uygulamalı
+- ❌ Nanite mesh'inde `get_num_triangles()` okuyup kaynak geometri sanma;
+  o **fallback** mesh'tir ve bütçeye göre kurulur. Ölçüldü: 896 üçgenlik
+  panel de 3968 üçgenlik küre de 256 okundu, yani sayı mesh'i değil
+  bütçeyi anlatıyor. `get_num_nanite_triangles()` kaynağı verir.
+  Nanite'ı bu araç açmıyor — motorun import varsayılanı
 - ❌ Mesh başına bütün kayıtları tarama veya materyali her mesh için yeniden
   okuma; ikisi de karesel, `benchmark_*.py` ile ölçüldü
 - ❌ Mesh eşleştirmesini yalnız isme dayandırma; aynı kısa isim farklı

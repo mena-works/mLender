@@ -13,7 +13,7 @@ from __future__ import absolute_import
 # here rather than in __init__ so package.py can reach it without
 # importing the package root, which would be circular. The importer keeps
 # its own in constants.py for the same reason.
-BUILD_VERSION = "2.46.0"
+BUILD_VERSION = "2.48.0"
 
 TOOL_NAME = "mLender"
 WINDOW_NAME = "mLenderWindow"
@@ -289,6 +289,21 @@ RAMP_TEXTURE_INTERPOLATIONS = (
 # Without this a colour-set network is unrepresentable and the channel
 # collapses to black: measured, an aiUserDataColor on baseColor exported as
 # value [0, 0, 0] with unsupported_network set and no warning anywhere.
+# An animation curve is not a shading network. Walking upstream from a keyed
+# attribute finds one, and without this it looked like a procedural with no
+# file behind it -- so the bake path turned a keyframed roughness into a flat
+# texture map, which is a wrong answer that looks deliberate. Measured:
+# baked_from named the animCurve node itself.
+# What a NURBS or subdivision surface's transform is renamed to while its
+# tessellated stand-in borrows its name. Only ever present during an
+# export, and put back in a finally.
+TESSELLATION_SUFFIX = "_mlOriginal"
+
+# Maya spells a curve-on-surface with an arrow in its DAG path.
+CURVE_ON_SURFACE_MARK = "->"
+
+ANIMATION_CURVE_PREFIX = "animCurve"
+
 COLOR_SET_READER_TYPES = (
     "aiUserDataColor",
     "aiUserDataRgb",

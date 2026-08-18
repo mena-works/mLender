@@ -393,9 +393,10 @@ def build_scene():
     cmds.connectAttr(cross_ramp + ".outColor",
                      cross_ramp_shd + ".transparency", force=True)
 
-    # A geometry kind this build does not carry. Measured before the
-    # coverage scan existed: it left the scene with nothing said, and so did
-    # gpuCache, aiStandIn, fluids and Maya subdivision surfaces.
+    # A NURBS surface. It used to be the example of a kind this build did not
+    # carry -- measured before the coverage scan existed, it left the scene
+    # with nothing said. It is tessellated for the export now, so it stands
+    # for the opposite: a surface that is not a mesh and arrives as one.
     nurbs_surface = cmds.sphere(name="nurbsBall", r=1)[0]
     cmds.setAttr(nurbs_surface + ".translateZ", -24)
 
@@ -711,6 +712,60 @@ def build_scene():
     # all, so before this the cube arrived visible for the whole range.
     blink = cmds.polyCube(name="blinkCube")[0]
     cmds.setAttr(blink + ".translateZ", -12)
+    # A NURBS surface and a Maya subdivision surface. Neither is a mesh, so
+    # discovery never saw them and they were reported missing rather than
+    # carried. They are tessellated for the export and the scene is put back.
+    nurbs_shader = cmds.shadingNode(
+        "aiStandardSurface", asShader=True, name="nurbsBall_shd"
+    )
+    nurbs_engine = cmds.sets(
+        renderable=True, noSurfaceShader=True, empty=True, name="nurbsBallSG"
+    )
+    cmds.connectAttr(
+        nurbs_shader + ".outColor", nurbs_engine + ".surfaceShader", force=True
+    )
+    cmds.sets(nurbs_surface, edit=True, forceElement=nurbs_engine)
+    # A *trimmed* surface, which is the reason this is a tessellation and not
+    # a native rebuild in the receiver: Blender has NURBS surfaces but cannot
+    # represent a trim, and a trimmed surface that arrives untrimmed is wrong
+    # in a way nobody notices until the hole is missing.
+    try:
+        trimmed = cmds.nurbsPlane(name="trimmedPanel", width=6, lengthRatio=1,
+                                  patchesU=4, patchesV=4)[0]
+        cutter = cmds.circle(name="trimCircle", radius=1.2, normal=(0, 0, 1))[0]
+        cmds.setAttr(trimmed + ".translateY", 14)
+        cmds.setAttr(cutter + ".translateY", 14)
+        cmds.setAttr(cutter + ".translateZ", 2)
+        cmds.projectCurve(cutter, trimmed, constructionHistory=False)
+        # Measured: the trim takes the tessellation from 1024 faces to 448,
+        # so this fixture is a real hole and not a decoration.
+        cmds.trim(trimmed, lu=0.5, lv=0.5)
+        cmds.delete(cutter)
+        cmds.sets(trimmed, edit=True, forceElement=nurbs_engine)
+    except Exception as exc:
+        print("  note: trimmed NURBS fixture unavailable: {0}".format(exc))
+    try:
+        subdiv_source = cmds.polyCube(name="subdivSource")[0]
+        subdiv_transform = cmds.polyToSubdiv(
+            subdiv_source, name="subdivBall"
+        )[0]
+        cmds.delete(subdiv_source)
+        cmds.sets(subdiv_transform, edit=True, forceElement=nurbs_engine)
+    except Exception as exc:
+        print("  note: polyToSubdiv unavailable: {0}".format(exc))
+
+    # Keyed shader parameters. A scalar and a colour, because a colour is a
+    # compound and Maya keys its children: asking the compound alone found the
+    # roughness and missed the base colour entirely.
+    anim_transform, _anim_shape = shaded_cube("animMatCube",
+                                              "aiStandardSurface")
+    cmds.setKeyframe("animMatCube_shd.specularRoughness", time=1, value=0.05)
+    cmds.setKeyframe("animMatCube_shd.specularRoughness", time=25, value=0.9)
+    cmds.setKeyframe("animMatCube_shd.baseColorR", time=1, value=1.0)
+    cmds.setKeyframe("animMatCube_shd.baseColorR", time=25, value=0.0)
+    cmds.setKeyframe("animMatCube_shd.baseColorB", time=1, value=0.0)
+    cmds.setKeyframe("animMatCube_shd.baseColorB", time=25, value=1.0)
+
     cmds.setKeyframe(blink + ".visibility", t=1, v=1)
     cmds.setKeyframe(blink + ".visibility", t=10, v=0)
     cmds.setKeyframe(blink + ".visibility", t=20, v=1)
@@ -1278,7 +1333,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("53 meshes exported", payload["mesh_count"] == 53,
+    check("57 meshes exported", payload["mesh_count"] == 57,
           payload["mesh_count"])
     # The locator, the empty null, the nested locator, the group holding
     # only a curve, and the two shapeless FKIK switchers (root and NSRig:).
@@ -1578,6 +1633,58 @@ def main():
         check("the report is inside the package folder",
               os.path.dirname(report_path) == result.get("package_folder"),
               os.path.dirname(report_path))
+
+    check("a NURBS surface arrived as a mesh", "nurbsBall" in by_mesh,
+          sorted(k for k in by_mesh if "nurbs" in str(k).lower()))
+    check("a trimmed NURBS surface arrived as a mesh",
+          "trimmedPanel" in by_mesh,
+          sorted(k for k in by_mesh if "trim" in str(k).lower()))
+    check("a Maya subdivision surface arrived as a mesh",
+          "subdivBall" in by_mesh,
+          sorted(k for k in by_mesh if "subdiv" in str(k).lower()))
+    check("the tessellated surface kept its material",
+          bool((by_mesh.get("nurbsBall") or {}).get("materials")),
+          (by_mesh.get("nurbsBall") or {}).get("materials"))
+    check("the export said it tessellated them",
+          any("tessellated" in w for w in result["warnings"]),
+          [w for w in result["warnings"] if "tessellated" in w][:1])
+    # And coverage must not contradict that line by reporting them missing.
+    check("coverage does not also call them missing",
+          not any("nurbsSurface" in w and "not exported" in w
+                  for w in result["warnings"]),
+          [w for w in result["warnings"] if "not exported" in w][:2])
+    # The scene is put back: the surfaces are still surfaces and nothing is
+    # left wearing the export's suffix.
+    check("the NURBS surface is still a NURBS surface in Maya",
+          bool(cmds.ls("nurbsBallShape", type="nurbsSurface")),
+          cmds.ls("nurbsBall*", long=True))
+    check("no tessellation leftovers in the scene",
+          not [node for node in (cmds.ls(long=True) or [])
+               if "_mlOriginal" in node],
+          [node for node in (cmds.ls(long=True) or [])
+           if "_mlOriginal" in node][:3])
+
+    anim_material = (by_mesh.get("animMatCube") or {}).get("materials") or [{}]
+    anim_channels = (anim_material[0] or {}).get("channels") or {}
+    rough_samples = (anim_channels.get("roughness") or {}).get("samples") or []
+    colour_samples = (anim_channels.get("base_color") or {}).get("samples") or []
+    check("a keyed scalar channel carries samples",
+          len(rough_samples) > 2, len(rough_samples))
+    # The compound trap: the curves hang off baseColorR and baseColorB, so a
+    # check that only asked the compound would find nothing here.
+    check("a keyed colour channel carries samples too",
+          len(colour_samples) > 2, len(colour_samples))
+    if rough_samples:
+        first = rough_samples[0].get("value")
+        last = rough_samples[-1].get("value")
+        check("the samples actually move",
+              abs(float(last) - float(first)) > 0.5, (first, last))
+    # And an animation curve is not a texture: it used to be walked into as a
+    # procedural network and baked, turning a keyed roughness into a flat map.
+    check("a keyed channel was not baked into a texture",
+          not ((anim_channels.get("roughness") or {}).get("texture") or {}
+               ).get("baked"),
+          (anim_channels.get("roughness") or {}).get("texture"))
 
     cpv = by_mesh.get("cpvCube") or {}
     sets = cpv.get("color_sets") or {}
@@ -2329,14 +2436,20 @@ def main():
     export_warnings = payload.get("export_warnings") or []
     coverage = [w for w in export_warnings if "were not exported" in w]
     check("an unsupported geometry kind is reported",
-          any("nurbsSurface" in item for item in coverage), coverage)
+          any("aiLightPortal" in item for item in coverage), coverage)
     if coverage:
         # A count and an example, so a scene with four hundred of them says
         # so in a line rather than four hundred.
         check("with a count and an example path",
-              any(item.startswith("1 ") and "|nurbsBall" in item
+              any(item.startswith("1 ") and "|aiPortal" in item
                   for item in coverage),
               coverage)
+    # And the kind that used to be the example here is carried now, so it
+    # must not appear: a surface cannot be both tessellated and missing.
+    check("a carried kind is not also called missing",
+          not any("nurbsSurface" in item or "subdiv" in item
+                  for item in coverage),
+          coverage)
     # The false positive guard, and it has already earned its keep: lights
     # travel through the JSON rather than as geometry, and the first version
     # of the scan reported every one of them as lost.

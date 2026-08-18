@@ -21,10 +21,10 @@ En yüksek öncelik. Kullanıcıya tek satır uyarı gitmiyor.
 
 | iş | durum | not |
 |---|---|---|
-| NURBS yüzeyler | **ölçüldü, kayboluyor** | Keşif `ls(type="mesh")` ile başlıyor; NURBS yüzey mesh değil, FBX seçimine de girmiyor. Maya'da marjinal değil: ürün/endüstriyel modelleme ve eski asset'ler. |
-| Maya subdiv yüzeyleri | **ölçüldü, kayboluyor** | Aynı sebep, aynı çözüm yolundan gider. |
-| Animasyonlu materyal parametreleri | **ölçüldü, gitmiyor** | Zaman ekseninde yalnız ışık, kamera, particle ve mesh görünürlüğü örnekleniyor. Anahtarlanmış bir roughness veya base colour export karesinde donuyor. Görünürlükte aynı sınıf hata çıkmıştı. |
-| Desteklenmeyen texture ağı uyarısı | **ölçüldü, sessiz** | `unsupported_network` exporter'da yazılıyor, importer'da hiç okunmuyor. Bake kapalıyken kanal düz değere çöküyor. `unsupported_corrections` zaten okunuyor; desen orada. Küçük iş. |
+| NURBS yüzeyler | **bitti (2.48.0)** | Export sırasında tessellate ediliyor; stand-in orijinalin parent'ını ve **adını** alıyor, o yüzden grubu, materyali ve set'leri korunuyor. Sahne `finally` içinde geri konuyor. Trim taşınıyor: ölçüldü, panel trimsiz 1024 yüz, trimli 448; FBX 448 poly/896 üçgen, Blender 448 poly, Unreal 896 üçgen. |
+| Maya subdiv yüzeyleri | **bitti (2.48.0)** | Aynı yoldan, `subdToPoly` ile. |
+| Animasyonlu materyal parametreleri | **bitti (2.47.0)** | Keyli kanallar örnekleniyor ve Blender soketleri LINEAR key'liyor. İki hata çıktı: base colour compound olduğu için çocuk plug'lardan anahtarlı (ilk sürüm bulamadı), ve animCurve shading network sanılıp bake ediliyordu. Animasyon kapalıyken donma artık uyarılı. |
+| Desteklenmeyen texture ağı uyarısı | **bitti (2.45.0)** | `unsupported_network` artık iki alıcıda da adıyla bildiriliyor. Başından beri yazılıyordu ve kimse okumuyordu — kanal sessizce düz değere (renkte siyaha) çöküyordu. |
 
 Ölçüm için:
 
@@ -32,16 +32,22 @@ En yüksek öncelik. Kullanıcıya tek satır uyarı gitmiyor.
 "C:\Program Files\Autodesk\Maya2023\bin\mayapy.exe" -c "..."   # geom probe
 ```
 
-NURBS için üç yol var, seçim önemlidir:
+NURBS için üç yol vardı ve üçü de ölçüldü:
 
-1. **FBX'e tessellate ettirmek** — trim'li yüzeyler dahil her şey doğru gelir,
-   Blender'da poly olur. Önerilen.
+1. **FBX'e tessellate ettirmek** — ölçüldü, **yanlış çıktı**: FBX NURBS'ü
+   taşıyor ama `nurbsSurface` olarak geri geliyor, hiçbir alıcı geometri
+   görmüyor. Maya subdiv yüzeyi round-trip'ten hiç sağ çıkmıyor. FBX'te
+   NURBS dönüştürme seçeneği de yok.
 2. **Blender'da yerel NURBS kurmak** — düzenlenebilir kalır ama trim'li
-   yüzeyleri temsil edemez. Yarım çözüm.
-3. **`nurbsToPoly` ile geçici mesh** — sahneyi değiştirir; CLAUDE.md bunu
-   yasaklıyor, atomik temizlikle yapılabilir ama karmaşık.
+   yüzeyleri temsil edemez. Yarım çözüm, reddedildi.
+3. **`nurbsToPoly` ile geçici mesh** — **seçilen yol** (`tessellate.py`).
+   Sahneyi değiştirir ama geri koyar; yasak olan iz bırakmak, ve bake yolu
+   zaten aynı şekilde node üretip siliyordu.
 
-FBX'in NURBS ayarının gerçek adı **probe edilmeden** tabloya yazılmamalıdır.
+Yol 3'ten iki tuzak çıktı, ikisi de artık yasak listesinde: `nurbsToPoly` ve
+`subdToPoly` çıktılarını **seçili bırakıyor** (seçili-export kullanıcının
+seçmediği yüzeyi taşıdı), ve trim her bölge başına bir **curve-on-surface**
+bırakıyor (trimli model alıcıya gömülü gelirdi).
 
 ---
 
@@ -50,7 +56,8 @@ FBX'in NURBS ayarının gerçek adı **probe edilmeden** tabloya yazılmamalıd�
 Probe çalıştırıldı. Sonuçlar:
 
 **Sessizce kayboluyordu** (artık uyarılıyor, aşağıya bak):
-`fluidShape`, ışık filtreleri (`aiGobo`), `hairSystem` — ve daha önce ölçülen NURBS yüzeyler ile Maya subdiv yüzeyleri.
+`fluidShape`, ışık filtreleri (`aiGobo`), `hairSystem`. NURBS ve Maya subdiv
+yüzeyleri de bu listedeydi; 2.48.0'da uyarılmakla kalmayıp taşınıyorlar.
 
 **Temize çıktı, listeden düştü:**
 
@@ -876,6 +883,44 @@ aranıyor, bulunmazsa uyarı.
 Host testinde iki assertion: cache geldi mi, ve level'da cache taşıyan bir
 `GeometryCacheActor` var mı. 38/38.
 
+## Animasyonlu materyal parametreleri (2.47.0) — 1. kategoriden bir sessiz kayıp daha
+
+Roadmap'in en üst kategorisindeki madde: "Zaman ekseninde yalnız ışık, kamera,
+particle ve mesh görünürlüğü örnekleniyor. Anahtarlanmış bir roughness veya base
+colour export karesinde donuyor." Ölçüldü — doğruydu, ve **bir adım daha
+kötüydü**.
+
+`sample_records` zaten `(kayıt, sampler)` çiftleri alıyordu, yani mekanizma
+hazırdı; eksik olan materyal kanallarının o listeye girmesiydi.
+
+**Ölçülen iki hata:**
+
+1. **base_color kare 1'de donuyordu**, uyarısız. (Beklenen.)
+2. **roughness texture'a bake ediliyordu**: `baked_from` animCurve node'unun
+   kendisini gösteriyordu. Yani anahtarlanmış bir skaler, dosyası olmayan bir
+   prosedürel sanılıp tek karesi haritaya basılıyordu — "kasıtlı görünen yanlış
+   cevap". Upstream yürüyüşü artık animCurve'de duruyor.
+
+**Compound tuzağı:** ilk sürüm roughness'ı buldu, base colour'ı **bulamadı**.
+Maya renkleri çocuk plug'lardan anahtarlıyor (`baseColorR`, `baseColorB`) ve
+compound "bağlantı yok" diyor. `plug_animated` artık çocuklara da bakıyor, ve
+fixture'da ikisi de var — yalnız skaler koysaydım yarım çalışan hali geçerdi.
+
+Blender soketleri doğrudan key'liyor, **LINEAR** (örnekler zaten
+değerlendirilmiş eğri; Bezier iki kez ease ederdi). Doğrulama sayma değil
+değerlendirme: kare 1'de roughness 0.05 / base (1, 0.8, 0), kare 25'te 0.9 /
+(0, 0.8, 1).
+
+Animasyon kapalıyken donma **artık sessiz değil**: kaç kanalın keyli olduğunu ve
+hangi karede donduğunu yazıyor.
+
+Yalnız gerçekten keyli kanallar örnekleniyor — görünürlükteki akıl yürütmenin
+aynısı. Şema bump'ı yok: `samples` eklenen bir alan, geriye uyumlu, ve düz
+`value` yanında duruyor (samples'ı yok sayan alıcı hala export karesini alıyor).
+
+Unreal örnekleri alıyor ve kanal başına bildiriyor; orada animasyon Level
+Sequence ister.
+
 ## Headless/batch export + preset (2.46.0) — roadmap maddesi 6, kapandı
 
 Kullanıcının sırasındaki son madde. İki parça, tek cevap: UI'ın ayarları her
@@ -1117,9 +1162,9 @@ Kullanıcı sırayı verdi: **2 → 7 → 4 → 3 → 6**. Numaralar bu oturumda
 |---|---|---|
 | 2 | UV set bağlantısı | **bitti** |
 | 7 | `layeredTexture` (diğer ikisi zaten vardı) | **bitti** |
-| 4 | Uyarıların okunabilirliği: pakete `report.txt`, N-panel'de liste | bekliyor |
-| 3 | Vertex colour / `colorSet` → Color Attribute node'u | bekliyor |
-| 6 | Headless/batch export girişi + ayar preset'i | bekliyor |
+| 4 | Uyarıların okunabilirliği: pakete `report.txt`, N-panel'de liste | **bitti** (2.44.0) |
+| 3 | Vertex colour / `colorSet` → Color Attribute node'u | **bitti** (2.45.0) |
+| 6 | Headless/batch export girişi + ayar preset'i | **bitti** (2.46.0) |
 | — | `aiStandIn` + `gpuCache` (sıra dışı, istendi) | **bitti** |
 
 ## layeredTexture — kapatıldı, ölçüldü

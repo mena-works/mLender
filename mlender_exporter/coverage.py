@@ -20,7 +20,11 @@ from __future__ import absolute_import
 
 import maya.cmds as cmds
 
-from .constants import COVERAGE_IGNORED_SHAPE_TYPES
+from .constants import (
+    COVERAGE_IGNORED_SHAPE_TYPES,
+    CURVE_ON_SURFACE_MARK,
+    TESSELLATION_SUFFIX,
+)
 from .mayautils import node_type, parent_of, unique
 
 
@@ -46,8 +50,19 @@ def unaccounted_shapes(exported_paths):
         kind = node_type(shape)
         if kind in COVERAGE_IGNORED_SHAPE_TYPES:
             continue
+        # A curve on surface is construction data -- a trim boundary, a
+        # projection -- and the exporter drops it on purpose. Calling it lost
+        # would put one warning per trim region in front of the user.
+        if CURVE_ON_SURFACE_MARK in shape:
+            continue
         transform = parent_of(shape)
         if not transform or transform in accounted:
+            continue
+        # A surface that was tessellated for this export did travel -- as the
+        # polygon stand-in wearing its name. Its original is standing aside
+        # under a suffix, and reporting it as missing would contradict the
+        # line that says it was carried.
+        if transform.endswith(TESSELLATION_SUFFIX):
             continue
         missing.append((transform, kind))
     return missing

@@ -653,3 +653,24 @@ sonucu veriyor.
 
 İkisi de aynı sınıfın örneği: **dönüş değerini kontrol etmeyen bir yazma.**
 Bu oturumda üçüncü kez.
+
+## Nanite fallback okuma tuzağı (2026-08-18)
+
+Tessellate edilen yüzeyleri doğrularken çıktı. `StaticMesh.get_num_triangles(0)`
+Nanite açık bir mesh'te **kaynak geometriyi değil fallback mesh'i** döndürüyor.
+
+| mesh | FBX'te | `get_num_triangles(0)` | `get_num_nanite_triangles()` |
+|---|---|---|---|
+| trimmedPanel | 448 poly / 896 üçgen | 256 | 896 |
+| nurbsBall | 2048 poly / 3968 üçgen | 256 | — |
+| subdivBall | 24 poly / 48 üçgen | 48 | — |
+| küpler (52 adet) | 12 üçgen | 12 | — |
+
+İki farklı mesh'in **tam olarak aynı** 256 sayısını vermesi ipucuydu: sayı
+mesh'i değil fallback bütçesini anlatıyor. Bütçenin altında kalan mesh'ler
+(küpler, subdivBall) doğru okunduğu için dağılıma bakmadan fark edilmiyor.
+
+Nanite'ı bu araç açmıyor; UE 5.8'in import varsayılanı. Yani sayıyı okuyan her
+kontrol önce `nanite_settings.enabled`'a bakmalı.
+
+Ölçüm: `tests/host/unreal_import_test.py`, "the trim survived to Unreal".

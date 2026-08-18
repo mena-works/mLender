@@ -114,9 +114,9 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("53 meshes imported", result["mesh_count"] == 53,
+    check("57 meshes imported", result["mesh_count"] == 57,
           result["mesh_count"])
-    check("41 materials built", result["material_count"] == 41,
+    check("43 materials built", result["material_count"] == 43,
           result["material_count"])
     # Four of the eight cubes asked for subdivision in Maya, the displaced one
     # among them; the rest must arrive unmodified.
@@ -308,6 +308,41 @@ def main():
         check("the report lists every warning",
               report_text.count("  - ") >= len(result.get("warnings") or []),
               (report_text.count("  - "), len(result.get("warnings") or [])))
+
+    anim_material = bpy.data.materials.get("ML_animMatCube_shd")
+    check("the keyed material arrived", anim_material is not None, "")
+    if anim_material is not None:
+        tree = anim_material.node_tree
+        action = getattr(getattr(tree, "animation_data", None), "action", None)
+        check("its node tree carries an action", action is not None, "")
+        if action is not None:
+            from mlender_importer.animation import action_fcurves
+
+            curves = list(action_fcurves(action))
+            check("the sockets are keyed", len(curves) >= 2, len(curves))
+            check("the keys are LINEAR, not eased twice",
+                  all(point.interpolation == "LINEAR"
+                      for curve in curves
+                      for point in curve.keyframe_points),
+                  sorted({point.interpolation for curve in curves
+                          for point in curve.keyframe_points}))
+            # Evaluated, not merely present: a curve with every key at the
+            # same value would satisfy a count and animate nothing.
+            bsdf = [n for n in tree.nodes
+                    if n.bl_idname == "ShaderNodeBsdfPrincipled"]
+            if bsdf:
+                readings = {}
+                for frame in (1, 25):
+                    bpy.context.scene.frame_set(frame)
+                    readings[frame] = (
+                        round(bsdf[0].inputs["Roughness"].default_value, 4),
+                        round(bsdf[0].inputs["Base Color"].default_value[0], 3),
+                    )
+                check("the roughness moves over the range",
+                      readings[1][0] != readings[25][0], readings)
+                check("and so does the base colour",
+                      readings[1][1] != readings[25][1], readings)
+                bpy.context.scene.frame_set(1)
 
     cpv_object = bpy.data.objects.get("cpvCube")
     check("the cube with colour sets arrived", cpv_object is not None, "")
@@ -771,6 +806,25 @@ def main():
         check("the mesh in setA is the one Maya had in setA",
               a_x > 0.0 and b_x < 0.0, (round(a_x, 4), round(b_x, 4)))
         check("they are two distinct objects", a_meshes[0] is not b_meshes[0])
+
+    # Surfaces that are not meshes in Maya. They are tessellated during the
+    # export, so what has to be true here is that they arrived as ordinary
+    # mesh objects -- and that the trim came with them. Measured in Maya: the
+    # untrimmed tessellation of that panel is 1024 faces and the trimmed one
+    # is 448, so a panel that arrives whole means the hole was lost somewhere.
+    for label in ("nurbsBall", "trimmedPanel", "subdivBall"):
+        surface = bpy.data.objects.get(label)
+        check("a Maya surface arrived as a mesh: " + label,
+              surface is not None and surface.type == "MESH",
+              surface.type if surface else "absent")
+    panel = bpy.data.objects.get("trimmedPanel")
+    if panel and panel.type == "MESH":
+        faces = len(panel.data.polygons)
+        check("the trim survived to Blender, hole and all",
+              faces == 448, faces)
+        check("and the tessellated surface came with its material",
+              bool(panel.data.materials) and panel.data.materials[0] is not None,
+              [m.name if m else None for m in panel.data.materials])
 
     accented = next(
         (obj for obj in bpy.data.objects

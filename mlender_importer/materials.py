@@ -20,6 +20,8 @@ the FBX importer creates.
 import math
 
 import bpy
+
+from .animation import animate_socket
 from mathutils import Matrix, Vector
 
 from .constants import (
@@ -1554,6 +1556,17 @@ def apply_record_to_socket(material, shader, target, channel, record, warnings):
     """
     if not record or target is None:
         return
+
+    # Keyed in Maya: the samples are the evaluated values, so they go straight
+    # onto the socket as keys. Before the texture branches because a channel
+    # that is keyed has no texture -- the upstream walk stops at an animation
+    # curve rather than treating it as a network.
+    samples = record.get("samples") or []
+    if len(samples) >= 2:
+        node = getattr(target, "node", None)
+        keyed = animate_socket(material, node, target, samples, warnings)
+        if keyed:
+            return
 
     # Before the texture: a rampShader carries a gradient and a fallback
     # value in the same record, and taking the value would flatten it.

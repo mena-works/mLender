@@ -22,7 +22,12 @@ from .constants import (
     PACKAGE_PREFIX,
     TOOL_NAME,
 )
-from .animation import animation_info, sample_records
+from .animation import (
+    animated_material_channels,
+    animation_info,
+    material_animation_entries,
+    sample_records,
+)
 from .cameras import camera_record, camera_sample, scene_camera_shapes
 from .curves import curve_records, scene_curve_shapes
 from .report import write_report
@@ -50,6 +55,10 @@ from .rigging import (
     root_motion_sample,
     scene_joints,
     skeleton_root_records,
+)
+from .tessellate import (
+    restore as restore_tessellation,
+    tessellate_scene,
 )
 from .sets import (
     display_layer_records,
@@ -150,6 +159,11 @@ def export_scene(
         warnings=warnings,
     )
 
+    # Before discovery, because discovery starts at ls(type="mesh") and a
+    # NURBS surface is not one. The stand-ins are ordinary meshes by the time
+    # anything looks, so materials, groups, sets and coverage all treat them
+    # as the surfaces they stand in for.
+    tessellation = tessellate_scene(warnings)
     try:
         mesh_shapes = scene_mesh_shapes(selected_only)
         if not mesh_shapes:
@@ -268,6 +282,22 @@ def export_scene(
                     animation["frame_count"], animation["end"]
                 )
             )
+        # Keyed shader parameters with animation switched off freeze at the
+        # export frame. That is a legitimate choice, but it was a silent one:
+        # the package looked the same as one whose materials never moved.
+        if not animation["enabled"]:
+            keyed = animated_material_channels(mesh_records)
+            if keyed:
+                warnings.append(
+                    "{0} material channel(s) are keyed in Maya and this export "
+                    "is a single frame, so they arrive frozen at frame {1:g}: "
+                    "{2}{3}. Tick Export Animation to carry them.".format(
+                        len(keyed), current_frame(),
+                        ", ".join(keyed[:6]),
+                        " and others" if len(keyed) > 6 else "",
+                    )
+                )
+
         # Sampling steps the timeline, so it runs after the static records are
         # read and before the FBX, which bakes its own animation.
         sample_records(
@@ -296,6 +326,9 @@ def export_scene(
             # above the skeleton (an unexported group's connection-driven
             # motion is folded at its static value), so the truth travels
             # and the importer keys it onto the root bones directly.
+            # Keyed shader parameters. Without these a keyframed roughness
+            # or base colour froze at the export frame with nothing said.
+            + material_animation_entries(mesh_records)
             + [
                 (record, _sampler(root_motion_sample, record))
                 for record in root_motion_list
@@ -446,6 +479,9 @@ def export_scene(
         except Exception:
             pass
         raise
+    finally:
+        # The scene gets its surfaces and its names back whatever happened.
+        restore_tessellation(tessellation)
 
     # Last, and never allowed to fail the export: the report is a
     # convenience, and losing a good package because its report could not be

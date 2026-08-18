@@ -19,7 +19,7 @@ import maya.cmds as cmds
 import maya.mel as mel
 
 from .constants import DEFAULT_FPS, MAX_ANIMATION_FRAMES, TIME_UNIT_FPS
-from .mayautils import current_frame
+from .mayautils import current_frame, plug_value
 
 
 def scene_fps():
@@ -152,3 +152,101 @@ def _number(value, default):
         return float(value)
     except (TypeError, ValueError):
         return float(default)
+
+
+def _curve_on(plug):
+    try:
+        return bool(cmds.listConnections(
+            plug, source=True, destination=False, type="animCurve"
+        ) or [])
+    except Exception:
+        return False
+
+
+def plug_animated(plug):
+    """Whether this plug, or any of its children, is driven by a curve.
+
+    Per plug rather than per node: a shader with one keyed attribute would
+    otherwise drag every other channel into the sampling, and stepping the
+    timeline is the expensive part of an export.
+
+    **The children matter.** A colour is a compound and Maya keys its children,
+    so the curves hang off baseColorR and baseColorB while the compound itself
+    reports no connection at all. Asking only the compound found a keyed
+    roughness and missed a keyed base colour entirely -- measured, and exactly
+    the sort of half-working that looks like it works.
+    """
+    if not plug:
+        return False
+    if _curve_on(plug):
+        return True
+    if "." not in plug:
+        return False
+    node, attribute = plug.split(".", 1)
+    try:
+        children = cmds.attributeQuery(
+            attribute, node=node, listChildren=True
+        ) or []
+    except Exception:
+        return False
+    for child in children:
+        if _curve_on("{0}.{1}".format(node, child)):
+            return True
+    return False
+
+
+def _plug_sampler(plug):
+    def sample():
+        return {"value": plug_value(plug)}
+
+    return sample
+
+
+def material_animation_entries(mesh_records):
+    """(channel record, sampler) pairs for every animated material channel.
+
+    Only the channels that are actually keyed, on the same reasoning as
+    visibility: reading every channel of every material at every frame is a
+    getAttr storm for something almost nothing in a scene does.
+
+    One entry per channel record **object**. A shader shared by forty meshes is
+    one record in memory, and adding it once per mesh would append the same
+    frames forty times over -- the record would look animated at forty times
+    the frame rate.
+    """
+    entries = []
+    seen = set()
+    for mesh in mesh_records or []:
+        for material in mesh.get("materials") or []:
+            channels = (material or {}).get("channels") or {}
+            for _name, channel in sorted(channels.items()):
+                if not isinstance(channel, dict) or id(channel) in seen:
+                    continue
+                plug = channel.get("maya_plug")
+                if not plug or not plug_animated(plug):
+                    continue
+                seen.add(id(channel))
+                entries.append((channel, _plug_sampler(plug)))
+    return entries
+
+
+def animated_material_channels(mesh_records):
+    """Names of the keyed channels, for the warning when animation is off."""
+    found = []
+    seen = set()
+    for mesh in mesh_records or []:
+        for material in mesh.get("materials") or []:
+            name = material.get("material") or "?"
+            for channel_name, channel in sorted(
+                ((material or {}).get("channels") or {}).items()
+            ):
+                if not isinstance(channel, dict):
+                    continue
+                key = (name, channel_name)
+                if key in seen:
+                    continue
+                plug = channel.get("maya_plug")
+                if plug and plug_animated(plug):
+                    seen.add(key)
+                    found.append("{0}.{1}".format(name, channel_name))
+    return found

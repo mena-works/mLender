@@ -136,6 +136,54 @@ def main():
             result["mesh_count"], len(package_data.get("meshes") or [])
         ),
     )
+    # Surfaces Maya does not store as meshes -- a NURBS sphere, a trimmed
+    # NURBS panel and a subdivision surface -- are tessellated during the
+    # export. Here they have to be indistinguishable from any other mesh.
+    actors = unreal.get_editor_subsystem(
+        unreal.EditorActorSubsystem
+    ).get_all_level_actors() or []
+    labels = set()
+    for actor in actors:
+        try:
+            labels.add(actor.get_actor_label())
+        except Exception:
+            pass
+    for label in ("nurbsBall", "trimmedPanel", "subdivBall"):
+        check("a tessellated Maya surface is in the level: " + label,
+              any(name == label or name.startswith(label + "_")
+                  for name in labels),
+              sorted(n for n in labels if label[:5].lower() in n.lower())[:4])
+    # Measured in Maya: 1024 faces untrimmed, 448 trimmed. A panel that
+    # arrives whole means the trim was dropped on the way here.
+    panel = next(
+        (actor for actor in actors
+         if isinstance(actor, unreal.StaticMeshActor)
+         and actor.get_actor_label().startswith("trimmedPanel")),
+        None,
+    )
+    if panel is not None:
+        mesh = panel.static_mesh_component.static_mesh
+        # Nanite is on for imported meshes here -- the engine's default, not
+        # something this tool sets -- and get_num_triangles then reports the
+        # *fallback* mesh. Measured: the 896-triangle panel reads back 256,
+        # and so does a 3968-triangle sphere, because the fallback is built to
+        # a budget. Counting that would have reported a surface as lost when
+        # every triangle of it was present.
+        triangles = -1
+        try:
+            nanite = mesh.get_editor_property("nanite_settings")
+            if nanite.get_editor_property("enabled"):
+                triangles = mesh.get_num_nanite_triangles()
+            else:
+                triangles = mesh.get_num_triangles(0)
+        except Exception as exc:
+            print("  note: triangle count unavailable: {0}".format(exc))
+        if triangles >= 0:
+            # 448 quads triangulated. Exact, not a range: a trim that half
+            # survives is the failure worth catching, and a range hides it.
+            check("the trim survived to Unreal, hole and all",
+                  triangles == 896, triangles)
+
     expected_lights = len([
         record for record in (package_data.get("lights") or [])
         if record.get("enabled", True)

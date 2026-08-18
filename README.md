@@ -613,12 +613,54 @@ package carries, and whatever is left over is reported, grouped by type with a
 count and an example:
 
 ```text
-mLender warning: 2 "nurbsSurface" object(s) were not exported; this build
-does not carry that type. First: |nurbsBall
+mLender warning: 1 "aiLightPortal" object(s) were not exported; this build
+does not carry that type. First: |aiPortal
 ```
 
 A kind nobody has thought of yet is now a line the user can read rather than
 geometry that quietly is not there.
+
+### Surfaces that are not meshes
+
+NURBS surfaces and Maya subdivision surfaces are geometry a lookdev pass cares
+about, and reporting them is not the same as carrying them: product and
+industrial scenes are largely NURBS. Three routes were measured.
+
+| Route | Result |
+|-------|--------|
+| Let the FBX carry it | It does — and it arrives a `nurbsSurface`, so no receiver sees geometry. A Maya subdivision surface does not survive the trip at all. |
+| Rebuild natively in the receiver | Blender has NURBS surfaces but cannot represent a **trimmed** one, and trims are most of why anybody models in NURBS. |
+| Tessellate during the export | What this does. |
+
+Each surface gets a temporary polygon stand-in that takes the original's parent
+and its name, so it lands in the right group, keeps its material and its sets,
+and every receiver treats it as the mesh it is standing in for. The scene is put
+back in a `finally`: the originals get their names back and the stand-ins are
+deleted, whether the export succeeded or threw.
+
+The trim comes with it, and all three hosts agree on the number. Measured on
+the test panel: 1024 faces untrimmed, 448 trimmed; the FBX carries 448 polygons
+and 896 triangles; Blender reports 448 polygons and Unreal 896 triangles.
+
+Reading that number back in Unreal has a trap worth knowing. Nanite is on for
+imported meshes by default, and `get_num_triangles()` then reports the
+**fallback** mesh, which is built to a budget: the 896-triangle panel and a
+3968-triangle sphere both read back 256. `get_num_nanite_triangles()` is the
+source geometry.
+
+Two smaller things fall out of the same measurement. `nurbsToPoly` and
+`subdToPoly` leave their output selected, which silently replaced the user's
+selection — a scoped export then carried a surface nobody had picked, so the
+selection is saved and restored, with a surface that *was* selected represented
+by its stand-in. And a trim leaves one curve-on-surface per region behind;
+those are construction data, not scene curves, so they are neither exported nor
+counted as lost.
+
+```text
+mLender warning: 3 NURBS or subdivision surface(s) were tessellated to polygons
+for the export: nurbsBall, trimmedPanel, subdivBall. They arrive as meshes,
+which is what every receiver can read; the originals are untouched in Maya.
+```
 
 Deliberately **not** included:
 
@@ -753,6 +795,7 @@ mlender_exporter/        # Maya side
   animation.py              # frame range and timeline sampling
   textures.py               # upstream texture search
   bake.py                   # baking procedural networks to UVs
+  tessellate.py             # NURBS and subdiv surfaces as temporary polygons
   shaders.py                # shader to channel extraction
   meshes.py                 # mesh discovery, material and face assignment
   transforms.py             # locators and empty nulls
@@ -1961,6 +2004,41 @@ Blender IK controls.
 Out of scope, deliberately: the face (its ~144 joints pose as plain FK), the
 spine's hybrid IK, and round-tripping a Blender pose back onto the Maya
 controls.
+
+### Animated material parameters
+
+A keyed roughness, base colour or emission travels. The exporter samples the
+channel over the frame range the same way it samples lights and cameras, and
+Blender keys the socket directly, LINEAR — the samples are already the
+evaluated curve, so easing between them would ease twice.
+
+Only channels that are **actually keyed** are sampled, on the same reasoning as
+visibility: reading every channel of every material at every frame is a getAttr
+storm for something almost nothing in a scene does.
+
+**A colour is a compound and Maya keys its children.** The curves hang off
+`baseColorR` and `baseColorB` while the compound itself reports no connection,
+so asking only the compound found a keyed roughness and missed a keyed base
+colour entirely. Both are in the fixture for that reason.
+
+With **Export Animation off** a keyed channel still freezes at the export frame
+— that is a legitimate choice — but it is no longer a silent one:
+
+```text
+mLender warning: 2 material channel(s) are keyed in Maya and this export is a
+single frame, so they arrive frozen at frame 4: animShader.roughness,
+animShader.base_color. Tick Export Animation to carry them.
+```
+
+> Fixed on the way: **an animation curve was being walked into as a shading
+> network.** With nothing but a curve upstream and no file behind it, the bake
+> path treated a keyed scalar as a procedural and wrote one frame of it into a
+> texture map — a wrong answer that looked deliberate. The upstream walk now
+> stops at an animation curve, so the channel keeps its plain value and its
+> samples.
+
+Unreal receives the samples and reports them per channel; animating them there
+needs a Level Sequence, which this build does not write.
 
 ## Scene structure
 

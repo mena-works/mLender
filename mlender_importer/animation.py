@@ -188,3 +188,83 @@ def set_linear_interpolation(holder):
                 point.interpolation = ANIMATION_INTERPOLATION
             except Exception:
                 return
+
+
+def _socket_data_path(node, socket):
+    """The RNA path a socket's value is keyed through.
+
+    By index, not by name: Blender renamed several Principled sockets between
+    4.1 and 5.2 while their indices stayed put, which is the same reason the
+    correction nodes are addressed by index.
+    """
+    for index, candidate in enumerate(node.inputs):
+        if candidate == socket:
+            return 'nodes["{0}"].inputs[{1}].default_value'.format(
+                node.name.replace('"', '\\"'), index
+            )
+    return ""
+
+
+def animate_socket(material, node, socket, samples, warnings=None):
+    """Key a node socket from a channel's per frame samples.
+
+    Returns the number of keys set. Fewer than two samples is not animation
+    and is left as a plain value, so a channel that happens to carry one
+    sample does not end up with a pointless curve on it.
+
+    The keys are LINEAR. Maya's own curve shape does not travel -- only the
+    sampled values do -- so easing between samples that are already the
+    evaluated result would ease twice.
+    """
+    if material is None or node is None or socket is None:
+        return 0
+    if len(samples or []) < 2:
+        return 0
+    path = _socket_data_path(node, socket)
+    if not path:
+        return 0
+
+    tree = material.node_tree
+    keyed = 0
+    for sample in samples:
+        frame = sample.get("frame")
+        if frame is None:
+            continue
+        value = sample.get("value")
+        try:
+            if isinstance(value, (list, tuple)):
+                current = socket.default_value
+                if hasattr(current, "__len__"):
+                    # A colour socket is four components and the sample is
+                    # three; assuming the count is how a Subsurface Radius
+                    # ends up half written.
+                    width = len(current)
+                    filled = list(value[:width])
+                    while len(filled) < width:
+                        filled.append(1.0)
+                    socket.default_value = filled
+                else:
+                    socket.default_value = float(value[0])
+            else:
+                socket.default_value = float(value)
+            tree.keyframe_insert(data_path=path, frame=frame)
+            keyed += 1
+        except Exception:
+            continue
+
+    _make_linear(tree, path)
+    if keyed and warnings is not None:
+        pass
+    return keyed
+
+
+def _make_linear(tree, path):
+    """Baked samples are already the evaluated curve; Bezier would ease twice."""
+    action = getattr(getattr(tree, "animation_data", None), "action", None)
+    if action is None:
+        return
+    for curve in action_fcurves(action):
+        if curve.data_path != path:
+            continue
+        for point in curve.keyframe_points:
+            point.interpolation = "LINEAR"
