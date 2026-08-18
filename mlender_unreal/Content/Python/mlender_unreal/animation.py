@@ -34,6 +34,7 @@ import unreal
 
 from .constants import (
     ANIMATION_SEQUENCE_NAME,
+    MESH_CONTENT_PATH,
     GENERATED_TAG,
     SEQUENCE_CONTENT_PATH,
 )
@@ -574,6 +575,93 @@ def animate_materials(sequence, package_data, actors, ticks_per_frame, first,
     return tracks, keys
 
 
+def assign_skeletal_animation(warnings):
+    """Hand each skeletal actor the sequence the FBX brought for its skeleton.
+
+    The FBX import creates an AnimSequence and then leaves it in the content
+    browser: measured, four skeletal actors sat in ANIMATION_BLUEPRINT mode
+    with no asset while Take_001 existed beside them, so a skinned character
+    arrived in the pose it was bound in and never moved. Matching is by
+    skeleton rather than by name, because the FBX names the take after the
+    take, not after the mesh.
+    """
+    sequences = []
+    try:
+        paths = unreal.EditorAssetLibrary.list_assets(
+            MESH_CONTENT_PATH, recursive=True
+        ) or []
+    except Exception:
+        paths = []
+    for path in paths:
+        try:
+            asset = unreal.EditorAssetLibrary.load_asset(path)
+        except Exception:
+            continue
+        if isinstance(asset, unreal.AnimSequence):
+            sequences.append(asset)
+    if not sequences:
+        return 0
+
+    by_skeleton = {}
+    for sequence in sequences:
+        try:
+            skeleton = sequence.get_editor_property("skeleton")
+        except Exception:
+            skeleton = None
+        if skeleton is not None:
+            by_skeleton.setdefault(skeleton.get_path_name(), sequence)
+
+    assigned = 0
+    for actor in (unreal.get_editor_subsystem(
+            unreal.EditorActorSubsystem).get_all_level_actors() or []):
+        if not isinstance(actor, unreal.SkeletalMeshActor):
+            continue
+        component = actor.skeletal_mesh_component
+        mesh = None
+        for name in ("skeletal_mesh_asset", "skeletal_mesh"):
+            try:
+                mesh = component.get_editor_property(name)
+            except Exception:
+                mesh = None
+            if mesh is not None:
+                break
+        if mesh is None:
+            continue
+        try:
+            skeleton = mesh.get_editor_property("skeleton")
+        except Exception:
+            continue
+        if skeleton is None:
+            continue
+        sequence = by_skeleton.get(skeleton.get_path_name())
+        if sequence is None:
+            continue
+        try:
+            component.set_editor_property(
+                "animation_mode", unreal.AnimationMode.ANIMATION_SINGLE_NODE
+            )
+            # Both, and they are not the same thing: set_animation drives the
+            # live instance and animation_data is what the level stores.
+            # Measured, setting only the first left animation_data empty, so
+            # the assignment vanished the moment anybody reloaded the map.
+            play_data = unreal.SingleAnimationPlayData()
+            play_data.set_editor_property("anim_to_play", sequence)
+            # The fields are saved_* here, not looping/playing -- the plain
+            # names are refused outright, which is the good kind of failure.
+            play_data.set_editor_property("saved_looping", True)
+            play_data.set_editor_property("saved_playing", True)
+            component.set_editor_property("animation_data", play_data)
+            component.set_animation(sequence)
+            component.play(True)
+            assigned += 1
+        except Exception as exc:
+            warnings.append(
+                'Skeletal actor "{0}" could not be given its animation: '
+                "{1}".format(actor.get_actor_label(), exc)
+            )
+    return assigned
+
+
 def import_animation(package_data, unreal_scale, metre_scale, power_scale,
                      warnings):
     """Build the Level Sequence and place an actor that plays it."""
@@ -581,11 +669,25 @@ def import_animation(package_data, unreal_scale, metre_scale, power_scale,
         package_data, warnings
     )
     if sequence is None:
-        return {"sequence_path": "", "track_count": 0, "key_count": 0}
+        # No package animation still leaves the FBX's own take to hand out.
+        skeletal = 0
+        try:
+            skeletal = assign_skeletal_animation(warnings)
+        except Exception:
+            pass
+        return {"sequence_path": "", "track_count": 0, "key_count": 0,
+                "skeletal_animated": skeletal}
 
     actors = actors_by_label()
     tracks = 0
     keys = 0
+    try:
+        skeletal = assign_skeletal_animation(warnings)
+    except Exception as exc:
+        skeletal = 0
+        warnings.append(
+            "Skeletal animation could not be assigned: {0}".format(exc)
+        )
     builders = (
         lambda: animate_lights(
             sequence, package_data, actors, unreal_scale, metre_scale,
@@ -640,4 +742,5 @@ def import_animation(package_data, unreal_scale, metre_scale, power_scale,
         "sequence_path": path,
         "track_count": tracks,
         "key_count": keys,
+        "skeletal_animated": skeletal,
     }

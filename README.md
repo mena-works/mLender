@@ -399,9 +399,27 @@ receiving end:
 | Advanced Skeleton **control layer** | Unreal's equivalent is a Control Rig asset, and authoring one from Python means building a rig graph. The skeletal meshes themselves do arrive — see below |
 | coat tint and coat IOR | the coat weight and its roughness travel (below); Unreal's clear coat has no tint or IOR input at all |
 | sheen, subsurface radius and scale | no Unreal input |
-| skeleton root motion | this build keys no skeletal animation in Unreal |
+| skeleton root motion | the take plays; re-keying the sampled world truth on top of it would double the motion |
 | Maya constraints | Unreal has no equivalent, and the FBX bake already carries the motion they produced |
 | AOVs | render passes in Unreal are Movie Render Queue configuration, and this engine build does not ship MRQ |
+
+### Skeletal animation
+
+The FBX brings an `AnimSequence` and used to leave it in the content browser.
+Measured: four skeletal actors sat in `ANIMATION_BLUEPRINT` mode with no asset
+while `Take_001` existed beside them, so a skinned character arrived in its bind
+pose and never moved. Each skeletal actor is now handed the take that belongs to
+its **skeleton** — matched that way rather than by name, since the FBX names the
+take after the take.
+
+It is stored twice, and the two are not the same thing: `set_animation` drives
+the live instance and `animation_data` is what the level keeps. Setting only the
+first left the assignment to vanish on the next map load.
+
+Root motion is still reported rather than applied. The exporter samples each
+root joint's evaluated world per frame because the FBX bake cannot be trusted
+for motion driven by a connection; re-keying that on top of a take that already
+plays would double the motion rather than correct it.
 
 ### Clear coat
 

@@ -242,6 +242,7 @@ def import_scene_package(
         "sequence_path": animation_result["sequence_path"],
         "animation_track_count": animation_result["track_count"],
         "animation_key_count": animation_result["key_count"],
+        "skeletal_animated": animation_result.get("skeletal_animated", 0),
         "set_count": set_result["set_count"],
         "layer_count": set_result["layer_count"],
         "assignments": assignments,
@@ -266,7 +267,9 @@ def _report_uncarried(package_data, warnings):
     """
     kinds = (
         ("skeleton_root_motion", "skeleton root motion tracks",
-         "this build keys no skeletal animation in Unreal"),
+         "the FBX take is assigned to the skeletal actor and plays, but the "
+         "sampled world truth is not re-keyed on top of it -- doing that "
+         "wrongly would double the motion rather than correct it"),
         ("constraints", "Maya constraints",
          "Unreal has no equivalent; the FBX bake already carries the motion "
          "they produced"),

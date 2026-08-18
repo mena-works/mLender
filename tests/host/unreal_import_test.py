@@ -256,6 +256,42 @@ def main():
               [w for w in result.get("warnings") or []
                if "carries coat," in w][:1])
 
+    # The FBX brings an AnimSequence and used to leave it in the content
+    # browser: measured, four skeletal actors sat in ANIMATION_BLUEPRINT mode
+    # with no asset while Take_001 existed beside them, so a skinned character
+    # arrived in its bind pose and never moved.
+    skeletal = [
+        actor for actor in (unreal.get_editor_subsystem(
+            unreal.EditorActorSubsystem).get_all_level_actors() or [])
+        if isinstance(actor, unreal.SkeletalMeshActor)
+    ]
+    if skeletal:
+        playing = []
+        for actor in skeletal:
+            data = actor.skeletal_mesh_component.get_editor_property(
+                "animation_data")
+            asset = getattr(data, "anim_to_play", None)
+            if asset is not None:
+                playing.append((actor.get_actor_label(), asset.get_name()))
+        check("a skeletal actor was given the take the FBX brought",
+              bool(playing),
+              [a.get_actor_label() for a in skeletal])
+        # Stored on the component, not only on the live instance: setting the
+        # second alone left animation_data empty, so the assignment vanished
+        # the moment anybody reloaded the map.
+        check("and it is stored on the component, not just played",
+              all(actor.skeletal_mesh_component.get_editor_property(
+                  "animation_mode")
+                  == unreal.AnimationMode.ANIMATION_SINGLE_NODE
+                  for actor, _name in [
+                      (a, None) for a in skeletal
+                      if getattr(a.skeletal_mesh_component.get_editor_property(
+                          "animation_data"), "anim_to_play", None) is not None
+                  ]),
+              playing)
+        check("the importer counted it", result.get("skeletal_animated", 0) > 0,
+              result.get("skeletal_animated"))
+
     # A UDIM set. Measured: handed the first tile with its siblings beside it,
     # Unreal finds the rest itself and switches virtual texture streaming on,
     # which is how the engine says "this is a set". The exporter writes a

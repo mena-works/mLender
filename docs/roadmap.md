@@ -1378,3 +1378,24 @@ Bütün fixture'ları çevirmek yerine yalnız UDIM seti gerçek PNG yapıldı �
 alıcının dosyanın **kendisiyle** bir şey yapmak zorunda olduğu tek yer orası.
 Kalan `.tx`'ler taşıdıkları şeyi (yol tesisatını) taşımaya devam ediyor ve
 "import edilemedi" diye dürüstçe bildiriliyorlar.
+
+
+## İskelet animasyonu (2.54.0) — asset vardı, kimse atamıyordu
+
+FBX bir `AnimSequence` getiriyor ve content browser'da bırakıyordu. Ölçüldü:
+dört iskeletli aktör `ANIMATION_BLUEPRINT` modunda, asset'siz duruyordu ve
+`Take_001` yanlarında bekliyordu — yani skinli karakter bind pozunda gelip hiç
+kıpırdamıyordu. Artık her iskeletli aktör **iskeletine** ait take'i alıyor;
+isimle değil iskeletle eşleşiyor çünkü FBX take'i mesh'e göre değil take'e göre
+adlandırıyor.
+
+İki yere birden yazılıyor ve ikisi aynı şey değil: `set_animation` canlı
+örneği sürüyor, `animation_data` ise level'ın sakladığı. Yalnız ilkini set
+etmek atamayı bir sonraki harita yüklemesinde buharlaştırıyordu. `looping` ve
+`playing` alan adları da yanlıştı — gerçek adlar `saved_looping`/`saved_playing`
+ve yanlış ad açık hatayla reddediliyor (iyi cinsten hata).
+
+Kök hareketi hâlâ bildiriliyor, uygulanmıyor: exporter her kök eklemin
+değerlendirilmiş dünyasını kare kare örnekliyor çünkü bağlantıyla sürülen
+hareket için FBX bake'ine güvenilmez — ama zaten oynayan bir take'in üstüne
+bunu yeniden anahtarlamak hareketi düzeltmez, **ikiye katlar**.
