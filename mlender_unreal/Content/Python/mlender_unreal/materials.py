@@ -47,6 +47,7 @@ from .constants import (
     SPECULAR_WEIGHT_TO_LEVEL,
     UNREAL_METADATA_CHANNELS,
 )
+from .graphs import build_blend_material
 from .images import load_texture, ramp_lut_texture
 from .utils import (
     channel_texture_path,
@@ -592,6 +593,17 @@ def channel_value(channel, record):
 
 def build_material(record, package_folder, warnings):
     """One Material Instance Constant for one Maya shader."""
+    # A blend shader is a stack of surfaces, which a Material Instance cannot
+    # express: an instance shares one master and can only change its numbers.
+    # That case gets a graph of its own -- the other half of the hybrid.
+    if len(record.get("layers") or []) > 1:
+        graph = build_blend_material(record, package_folder, warnings)
+        if graph is not None:
+            _report_unsupported(record, safe_asset_name(
+                record.get("material") or "Material", "Material"), warnings,
+                carried_layers=True)
+            return graph
+
     channels = record.get("channels") or {}
     name = safe_asset_name(
         ASSET_PREFIX + str(
@@ -864,7 +876,8 @@ def apply_corrections(instance, channel_record, parameter):
     return unhandled
 
 
-def _report_unsupported(record, name, warnings, surface_class=None):
+def _report_unsupported(record, name, warnings, surface_class=None,
+                        carried_layers=False):
     """Say what did not travel. Silence is the failure mode this repo fears."""
     channels = record.get("channels") or {}
     carried = set()
@@ -915,7 +928,7 @@ def _report_unsupported(record, name, warnings, surface_class=None):
             "used. Bake Procedurals resolves the stack into one texture, "
             "which does travel.".format(name)
         )
-    if record.get("layers"):
+    if record.get("layers") and not carried_layers:
         # Not the same thing as a layeredTexture, and the advice is not the
         # same either: baking flattens a texture stack, but it cannot merge
         # two shaders into one. A blend shader needs a material graph per

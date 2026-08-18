@@ -38,6 +38,7 @@ SUBMODULES = (
     "objects",
     "images",
     "materials",
+    "graphs",
     "lights",
     "cameras",
     "meshes",
@@ -65,6 +66,7 @@ from . import transforms  # noqa: E402,F401
 from . import objects  # noqa: E402,F401
 from . import images  # noqa: E402,F401
 from . import materials  # noqa: E402,F401
+from . import graphs  # noqa: E402,F401
 from . import lights  # noqa: E402,F401
 from . import cameras  # noqa: E402,F401
 from . import meshes  # noqa: E402,F401

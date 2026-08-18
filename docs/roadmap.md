@@ -1505,3 +1505,37 @@ Son iki satır aynı çözümü bekliyor: **materyal başına graph**. Unreal'de
 instance'lar tek master'ı paylaşır, değişken derinlikli bir yığın ise kendi
 graph'ını ister — bu, kullanıcının başta seçtiği "gerektiğinde graph"ın ta
 kendisi ve bu turdaki dört maddenin toplamından büyük bir iş.
+
+
+## Blend shader graph'ı (2.59.0) — hibritin öteki yarısı
+
+Kullanıcı en baştan "Material Instance varsayılan, gerektiğinde graph" dedi.
+Bugüne kadar hep instance yoluydu; blend shader'lar onu kaldıramaz, çünkü
+instance tek master'ı paylaşır ve yalnız sayı değiştirir. İki farklı yüzeyin
+ağırlıkla karışımı sayı değil **yapı** meselesi.
+
+`graphs.py`: her katman kendi kanallarından beslenen bir
+`MakeMaterialAttributes`, katmanlar `BlendMaterialAttributes` ile
+birleştiriliyor. Unreal'de shader karıştırma yok — materyal bir closure değil,
+yüzey özellikleri kümesi — ama tam o kümeyi karıştıran node bu. Katman
+değerleri isimli parametre olarak iniyor (`Layer0_BaseColor`, `Layer1`), yani
+graph Unreal'de elle de ayarlanabiliyor.
+
+| kaynak | ağırlık | durum |
+|---|---|---|
+| `aiMixShader`, `aiLayerShader` | `mix` (üst katmanın ağırlığı) | kuruluyor |
+| `layeredShader`, `layer_texture` | transparency (alttan geçen) | kuruluyor |
+| `layeredShader`, `layer_shaders` | üstü, altın ölçeklenmiş kopyasına **ekliyor** | bildiriliyor |
+
+Son satır yüzey özelliklerinin karışımı değil; makul görünüp yanlış olan bir
+fade'e çevirmek yerine adıyla bildiriliyor.
+
+**Ölçülen tuzak:** önceki bir gönderide instance olarak gelen materyal aynı
+isimde bir asset bırakıyor ve `create_asset` kullanılan bir ismi almıyor. İlk
+sürüm bunu görmeyip `None` dönüyordu, materyal de sessizce yerini alması
+gereken instance'a düşüyordu — beş blend shader'ın ikisi tam bu yüzden graph
+olmamıştı. Bayat asset siliniyor.
+
+Doğrulama Maya'nın kendi kaydına karşı: karışım ağırlığı 0.25 → 0.25, iki
+katmanın taban renkleri birebir (tek katmanı iki kez bağlayan bir graph tek
+katman kontrolünden geçerdi), ve level'daki mesh gerçekten graph'ı giyiyor.

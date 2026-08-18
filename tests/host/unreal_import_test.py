@@ -461,6 +461,117 @@ def main():
                   library.get_material_instance_scalar_parameter_value(
                       instance, parameter + "RemapUse"))
 
+    # Blend shaders, as a graph of their own. A Material Instance shares one
+    # master and can only change numbers, so a stack of surfaces cannot be one
+    # -- this is the other half of the hybrid.
+    blends = []
+    for mesh_record in package_data.get("meshes") or []:
+        for material_record in mesh_record.get("materials") or []:
+            if len(material_record.get("layers") or []) > 1:
+                blends.append(material_record)
+    check("the package has blend shaders", bool(blends),
+          [b.get("material") for b in blends])
+    if blends:
+        library = unreal.MaterialEditingLibrary
+        graphs = 0
+        instances = 0
+        for material_record in blends:
+            asset = unreal.EditorAssetLibrary.load_asset(
+                "/Game/mLender/Materials/ML_{0}".format(
+                    material_record.get("material"))
+            )
+            if isinstance(asset, unreal.MaterialInstanceConstant):
+                instances += 1
+            elif isinstance(asset, unreal.Material):
+                graphs += 1
+        check("every one of them became a Material, not an instance",
+              graphs == len(blends) and instances == 0,
+              (graphs, instances, len(blends)))
+
+        # The one with a plain mix weight: its numbers have a single right
+        # answer on the other side, so they are checked against Maya's own
+        # record rather than against this build's arithmetic.
+        mixed = None
+        for material_record in blends:
+            layers = material_record["layers"]
+            if (layers[1].get("mix") or {}).get("value") is not None:
+                mixed = material_record
+                break
+        if mixed is not None:
+            asset = unreal.EditorAssetLibrary.load_asset(
+                "/Game/mLender/Materials/ML_{0}".format(mixed["material"]))
+            check("the blended material uses material attributes",
+                  asset is not None
+                  and asset.get_editor_property("use_material_attributes"),
+                  mixed["material"])
+            want_mix = float(mixed["layers"][1]["mix"]["value"])
+            try:
+                got_mix = library.get_material_default_scalar_parameter_value(
+                    asset, "Layer1")
+            except Exception:
+                got_mix = None
+            check("the mix weight Maya set is the weight Unreal blends with",
+                  got_mix is not None and abs(got_mix - want_mix) < 0.001,
+                  (got_mix, want_mix))
+            # Both layers, because a graph that wired one layer twice would
+            # pass a single-layer check.
+            matched = []
+            for index, layer in enumerate(mixed["layers"]):
+                want = ((layer.get("channels") or {}).get("base_color")
+                        or {}).get("value")
+                if not want:
+                    continue
+                try:
+                    got = library.get_material_default_vector_parameter_value(
+                        asset, "Layer{0}_BaseColor".format(index))
+                except Exception:
+                    got = None
+                if got is None:
+                    matched.append((index, "missing"))
+                    continue
+                if (abs(got.r - want[0]) > 0.002
+                        or abs(got.g - want[1]) > 0.002
+                        or abs(got.b - want[2]) > 0.002):
+                    matched.append((index, (got.r, got.g, got.b), want))
+            check("and each layer kept its own colour",
+                  not matched, matched)
+
+        # And the level wears it, which is the claim that matters to a user.
+        worn = 0
+        for actor in (unreal.get_editor_subsystem(
+                unreal.EditorActorSubsystem).get_all_level_actors() or []):
+            if not isinstance(actor, unreal.StaticMeshActor):
+                continue
+            component = actor.static_mesh_component
+            try:
+                count = component.get_num_materials()
+            except Exception:
+                continue
+            for slot in range(count):
+                material = component.get_material(slot)
+                if (material is not None
+                        and isinstance(material, unreal.Material)
+                        and material.get_name().startswith("ML_")):
+                    worn += 1
+        check("a mesh in the level actually wears a blend graph", worn > 0,
+              worn)
+
+    # A layeredShader in "layer_shaders" mode adds rather than blends, which
+    # is not something BlendMaterialAttributes can be told to do. It has to be
+    # reported rather than quietly turned into a fade.
+    adding = [
+        material_record for mesh_record in (package_data.get("meshes") or [])
+        for material_record in (mesh_record.get("materials") or [])
+        for layer in (material_record.get("layers") or [])
+        if layer.get("compositing") not in (None, "", "layer_texture")
+    ]
+    if adding:
+        check("a layeredShader that adds is reported, not faked as a fade",
+              any("adds the upper layer" in w
+                  for w in result.get("warnings") or []),
+              [w for w in result.get("warnings") or []
+               if "layeredShader" in w][:1])
+
     # AOVs, as a Movie Render Queue config. Render passes are not level
     # contents in Unreal, so what has to exist is the config the user renders
     # with -- and the mapping has to be by quantity, not by name: Unreal has a

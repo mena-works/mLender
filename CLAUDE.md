@@ -104,6 +104,7 @@ mlender_unreal/       # Unreal plugin (klasörün kendisi plugin'dir)
       objects.py           # JSON'dan kurulan her şey için ortak yerleştirme
       images.py            # texture import, sRGB/compression
       materials.py         # master material üretimi + Material Instance
+      graphs.py            # blend shader'lar için materyal başına graph
       lights.py            # Unreal light actor'leri, lümen/lüks
       cameras.py           # CineCameraActor, filmback ve focus
       meshes.py            # Interchange FBX scene import, materyal slot eşleşmesi
@@ -113,6 +114,8 @@ mlender_unreal/       # Unreal plugin (klasörün kendisi plugin'dir)
       standins.py          # .abc → Geometry Cache; okunamayan → çapa
       particles.py         # parçacık çapası + instancer'ın nokta kaynagı
       instancers.py        # nokta başına StaticMeshActor, mesh paylaşımlı
+      animation.py         # ışık/kamera/görünürlük/materyal anahtarları (Level Sequence)
+      aovs.py              # AOV'lar → Movie Render Queue config
       sets.py              # selection set / display layer → Unreal Layer
       scene.py             # level temizleme ve doğrulama
       importer.py          # orkestrasyon + şema doğrulaması

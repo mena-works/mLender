@@ -402,6 +402,37 @@ receiving end:
 | skeleton root motion | the take plays; re-keying the sampled world truth on top of it would double the motion |
 | Maya constraints | Unreal has no equivalent, and the FBX bake already carries the motion they produced |
 
+### Blend shaders, as a graph of their own
+
+A Material Instance shares one master and can only change its numbers. That is
+right for nearly every material and it cannot express a stack of **shaders** —
+two surfaces with different colours, roughnesses and maps, mixed by a weight.
+So a blend shader gets a Material instead of an instance. This is the other
+half of the hybrid the receiver was designed around.
+
+Unreal has no shader-level mix — a material is a set of surface properties, not
+a closure — but it has the node that mixes exactly those. Each layer becomes a
+`MakeMaterialAttributes` fed from its own channels, and the layers are combined
+with `BlendMaterialAttributes`. Every layer value lands as a named parameter
+(`Layer0_BaseColor`, `Layer1`, …) so the graph stays adjustable in Unreal.
+
+Two Maya sources arrive here and they spend their weight differently:
+
+| source | weight | built |
+|---|---|---|
+| `aiMixShader`, `aiLayerShader` | `mix`, the weight of the upper layer | yes |
+| `layeredShader`, `layer_texture` mode | transparency: what shows through from below | yes |
+| `layeredShader`, `layer_shaders` mode | adds the upper layer to a scaled copy of what is under it | reported |
+
+The last row is not a blend of surface properties at all, so it is named rather
+than turned into a fade that would look plausible and be wrong.
+
+One detail worth knowing if a send ever seems to ignore this: a material that
+travelled as an *instance* in an earlier send leaves an asset under the same
+name, and `create_asset` will not take a name that is in use. The stale one is
+replaced. Measured — leaving it made the graph path return nothing and the
+material silently fell back to the instance it was meant to replace.
+
 ### AOVs, as a render config
 
 Render passes are not level contents in Unreal — they are Movie Render Queue
