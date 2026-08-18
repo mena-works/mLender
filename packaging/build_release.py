@@ -128,6 +128,11 @@ def install_notes(version):
     """
     return """# Installing mLender {version}
 
+`mLender_Setup.exe`, if it came with these archives, does all of the below for
+you: it finds the Maya and Blender versions you have and the Unreal projects
+under `Documents\\Unreal Projects`, installs what you tick, and enables the
+plugin in the project file. The steps below are the same install by hand.
+
 Install the Maya exporter, then whichever receiver you send to. The exporter is
 required; Blender and Unreal are alternative destinations and you can install
 either, or both. Every part checks the others' version.

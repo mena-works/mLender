@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import json
 import os
 import sys
 import glob
@@ -23,8 +24,10 @@ def find_zips():
     dist_dir = get_resource_path("dist")
     maya_zip = glob.glob(os.path.join(dist_dir, "mLender-*-maya-module.zip"))
     blender_zip = glob.glob(os.path.join(dist_dir, "mLender-*-blender-addon.zip"))
+    unreal_zip = glob.glob(os.path.join(dist_dir, "mLender-*-unreal-plugin.zip"))
     return (maya_zip[0] if maya_zip else None,
-            blender_zip[0] if blender_zip else None)
+            blender_zip[0] if blender_zip else None,
+            unreal_zip[0] if unreal_zip else None)
 
 def bundled_version(path):
     """The version out of a bundled archive's name, so the window says what
@@ -53,16 +56,18 @@ class InstallerApp(ctk.CTk):
         self.resizable(False, False)
         
         # Internal state
-        self.maya_z, self.blender_z = find_zips()
+        self.maya_z, self.blender_z, self.unreal_z = find_zips()
         if not self.maya_z or not self.blender_z:
             print(f"dist directory: {get_resource_path('dist')}")
             # We don't crash, but we might show an error later
         
         self.maya_versions = self.detect_maya()
         self.blender_versions = self.detect_blender()
+        self.unreal_projects = self.detect_unreal_projects()
         
         self.maya_vars = {}
         self.blender_vars = {}
+        self.unreal_vars = {}
         
         self.build_ui()
         
@@ -159,6 +164,34 @@ class InstallerApp(ctk.CTk):
                         
         return sorted(list(versions), reverse=True)
         
+    def detect_unreal_projects(self):
+        """Unreal projects the plugin can be installed into.
+
+        Projects rather than the engine, for two reasons the install notes
+        already give: the engine folder is under Program Files and needs
+        administrator rights, and an engine update wipes what is in it.
+
+        A .uproject is what makes a folder a project, so that is what is
+        looked for -- a folder named after one proves nothing.
+        """
+        found = {}
+        roots = [
+            os.path.join(os.path.expanduser("~"), "Documents",
+                         "Unreal Projects"),
+            os.path.join(os.path.expanduser("~"), "Unreal Projects"),
+        ]
+        for root in roots:
+            if not os.path.isdir(root):
+                continue
+            for entry in sorted(os.listdir(root)):
+                folder = os.path.join(root, entry)
+                if not os.path.isdir(folder):
+                    continue
+                projects = glob.glob(os.path.join(folder, "*.uproject"))
+                if projects:
+                    found[entry] = projects[0]
+        return found
+
     def build_ui(self):
         # Header
         header = ctk.CTkFrame(self, fg_color="transparent")
@@ -168,7 +201,7 @@ class InstallerApp(ctk.CTk):
         title.pack(anchor="w")
         subtitle = ctk.CTkLabel(
             header,
-            text="Maya to Blender  -  installing build {0}".format(
+            text="Maya to Blender and Unreal  -  installing build {0}".format(
                 bundled_version(self.blender_z)),
             font=ctk.CTkFont(size=14),
             text_color="gray",
@@ -210,6 +243,28 @@ class InstallerApp(ctk.CTk):
                 chk.pack(anchor="w", padx=10, pady=5)
                 self.blender_vars[v] = var
                 
+        # Unreal Section
+        unreal_lbl = ctk.CTkLabel(main_frame, text="Unreal Projects", font=ctk.CTkFont(size=16, weight="bold"))
+        unreal_lbl.pack(anchor="w", pady=(20, 5))
+
+        if not self.unreal_z:
+            ctk.CTkLabel(main_frame, text="No Unreal plugin in this installer.", text_color="gray").pack(anchor="w", padx=10)
+        elif not self.unreal_projects:
+            # Projects, not engines: the engine folder is under Program Files
+            # and an engine update wipes what is in it.
+            ctk.CTkLabel(main_frame, text="No Unreal projects found under Documents\\Unreal Projects.", text_color="gray").pack(anchor="w", padx=10)
+        else:
+            for name in sorted(self.unreal_projects):
+                var = ctk.BooleanVar(value=False)
+                chk = ctk.CTkSwitch(main_frame, text=name, variable=var)
+                chk.pack(anchor="w", padx=10, pady=5)
+                self.unreal_vars[name] = var
+            ctk.CTkLabel(
+                main_frame,
+                text="The plugin is enabled in the .uproject as well; without that Unreal loads it only after you turn it on.",
+                text_color="gray", font=ctk.CTkFont(size=11), wraplength=520, justify="left",
+            ).pack(anchor="w", padx=10, pady=(0, 5))
+
         # Footer
         footer = ctk.CTkFrame(self, fg_color="transparent")
         footer.pack(fill="x", padx=20, pady=20)
@@ -232,6 +287,7 @@ class InstallerApp(ctk.CTk):
         try:
             self.install_maya()
             self.install_blender()
+            self.install_unreal()
             self.after(0, self.finish_install)
         except Exception as e:
             self.after(0, lambda: self.status_lbl.configure(text=f"Error: {str(e)}", text_color="red"))
@@ -298,6 +354,65 @@ class InstallerApp(ctk.CTk):
             replace_folder(os.path.join(addons_dir, "mlender_importer"))
             with zipfile.ZipFile(self.blender_z, 'r') as zf:
                 zf.extractall(addons_dir)
+
+    def install_unreal(self):
+        selected = [k for k, v in self.unreal_vars.items() if v.get()]
+        if not selected or not self.unreal_z:
+            return
+
+        for name in selected:
+            uproject = self.unreal_projects.get(name)
+            if not uproject:
+                continue
+            plugins_dir = os.path.join(os.path.dirname(uproject), "Plugins")
+            os.makedirs(plugins_dir, exist_ok=True)
+            self.after(0, lambda d=plugins_dir: self.status_lbl.configure(
+                text="Installing to {0}...".format(d)))
+
+            # The folder inside the archive is mLender, which is the name
+            # Unreal reads from the .uplugin -- not the one the repository
+            # uses. A previous build goes first, for the same reason it does
+            # everywhere else.
+            replace_folder(os.path.join(plugins_dir, "mLender"))
+            with zipfile.ZipFile(self.unreal_z, "r") as archive:
+                archive.extractall(plugins_dir)
+
+            self.enable_in_uproject(uproject)
+
+    def enable_in_uproject(self, uproject):
+        """Turn the plugin on in the project file.
+
+        Dropping the folder into Plugins/ is not enough: mLender ships
+        EnabledByDefault false, so the editor loads it only once it is
+        enabled. Doing it here is the same edit the Plugins window makes, and
+        it saves the user a restart they would otherwise spend finding out.
+
+        The rest of the file is read and written back untouched -- a project
+        file carries settings nobody wants an installer rewriting.
+        """
+        try:
+            with open(uproject, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except Exception:
+            return
+
+        plugins = data.get("Plugins")
+        if not isinstance(plugins, list):
+            plugins = []
+        for entry in plugins:
+            if isinstance(entry, dict) and entry.get("Name") == "mLender":
+                entry["Enabled"] = True
+                break
+        else:
+            plugins.append({"Name": "mLender", "Enabled": True})
+        data["Plugins"] = plugins
+
+        try:
+            with open(uproject, "w", encoding="utf-8") as handle:
+                json.dump(data, handle, indent=2)
+        except Exception:
+            pass
+
 
 if __name__ == "__main__":
     app = InstallerApp()

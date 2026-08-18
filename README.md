@@ -2379,6 +2379,15 @@ nodes instance onto — which is how a Blender artist would put geometry back on
 them. Per-particle radius, colour and opacity arrive as point-domain
 attributes under their own names when Maya had them.
 
+**nParticle counts as a particle**, which is worth saying because it is the one
+an artist actually makes — the shelf and the nParticles menu both produce it,
+and the classic `particle` is what a script produces. Discovery lists the base
+type on the grounds that `nParticle` derives from `particle`, and that is
+measured: `nodeType` answers `nParticle`, its inheritance chain runs
+`... particle, nBase, nParticle`, and `ls(type="particle")` returns it anyway.
+An nParticle also carries per-particle colour and opacity that a bare classic
+one does not, and those travel with it.
+
 Two readings were measured rather than assumed. `particle -q -position`
 returns **None**; the query that works is `getParticleAttr` with `array`,
 which hands back three numbers per particle in one flat list. And those

@@ -776,6 +776,27 @@ def build_scene():
     spark_tf, spark_shape = cmds.particle(name="sparkParticle")
     cmds.connectDynamic(spark_tf, emitters=emitter)
 
+    # An nParticle, which is the one artists actually make -- the shelf and
+    # the nParticles menu both produce this, not the classic particle above.
+    # Discovery lists the base type on the grounds that nParticle derives from
+    # particle, and that was written in a comment and never exercised: every
+    # particle in this scene was a classic one, so a change that narrowed the
+    # discovery would have passed. Measured, the inheritance holds --
+    # nodeType is "nParticle" and ls(type="particle") returns it anyway.
+    try:
+        nucleus_tf, nucleus_shape = cmds.nParticle(
+            p=[(0, 0, 0), (1, 0, 0), (2, 0, 0), (3, 0, 0)],
+            name="nucleusParticle",
+        )
+        cmds.setAttr(nucleus_tf + ".translateZ", -22)
+        # A field, so its samples differ from each other. Points that never
+        # move would let a per-frame bake that writes frame one every time
+        # look correct.
+        nucleus_gravity = cmds.gravity(name="nucleusGravity")
+        cmds.connectDynamic(nucleus_tf, fields=nucleus_gravity)
+    except Exception as exc:
+        print("  note: nParticle unavailable: {0}".format(exc))
+
     # Geometry placed on points. Nothing looked for an instancer, so it and
     # everything it placed left the scene without a word.
     cmds.select(clear=True)
@@ -1548,11 +1569,29 @@ def main():
           by_transform, sorted(by_transform))
 
     print("\nparticles")
+    by_particle = {}
+    for record in payload.get("particles") or []:
+        by_particle[record.get("particle")] = record
+    check("the nParticle was discovered as well as the classic one",
+          "nucleusParticle" in by_particle,
+          sorted(by_particle))
+    nucleus = by_particle.get("nucleusParticle") or {}
+    check("with its points",
+          len(nucleus.get("positions") or []) == 12,
+          len(nucleus.get("positions") or []))
+    # Per-frame samples that actually differ. A bake that wrote frame one
+    # every time would pass a count check and carry a still image.
+    nucleus_samples = nucleus.get("samples") or []
+    check("and per-frame samples that are not all the same",
+          len(nucleus_samples) > 1
+          and (nucleus_samples[0].get("positions")
+               != nucleus_samples[-1].get("positions")),
+          len(nucleus_samples))
     by_particle = {
         item.get("particle"): item
         for item in (payload.get("particles") or [])
     }
-    check("3 particle objects exported", payload["particle_count"] == 3,
+    check("4 particle objects exported", payload["particle_count"] == 4,
           payload["particle_count"])
     dust = by_particle.get("dustParticle") or {}
     check("its count is carried", dust.get("count") == 4, dust.get("count"))
@@ -1576,10 +1615,10 @@ def main():
           "dustParticle" not in by_transform, sorted(by_transform))
 
     print("\nparticle bake")
-    # dustParticle and the instancer's scatterParticle both hold a steady
-    # count; only the emitter driven one refuses.
-    check("the two steady ones could be baked",
-          payload.get("particle_baked_count") == 2,
+    # dustParticle, the instancer's scatterParticle and the nParticle all
+    # hold a steady count; only the emitter driven one refuses.
+    check("the three steady ones could be baked",
+          payload.get("particle_baked_count") == 3,
           payload.get("particle_baked_count"))
     samples = dust.get("samples") or []
     check("the constant count one carries a sample per frame",

@@ -1591,3 +1591,27 @@ public API'nin yerinde olduğu.
    yok ve plugin bunu zaten açıkça bildiriyor. Kontrol menüyü istemek yerine
    `register()`'ın cevap verdiğini ve açılış satırının log'a düştüğünü sınıyor
    — veremeyeceği şeyi isteyen bir test, sınırı yazmayan bir testten kötüdür.
+
+
+## nParticle — taşınıyordu, ama sınanmamıştı
+
+Soru soruldu: nParticle taşınıyor mu? Kodda net bir iddia vardı — "`nParticle`,
+`particle`'dan türüyor, taban tipi listelemek ikisini de yakalar" — ama
+fixture'daki her parçacık `cmds.particle` ile yapılmıştı, yani iddia **yorumda
+yazılı ve hiç çalıştırılmamıştı**. Keşfi daraltan bir değişiklik testten
+geçerdi.
+
+Ölçüldü, iddia doğru: `nodeType` `nParticle` diyor, kalıtım zinciri
+`... particle, nBase, nParticle`, ve `ls(type="particle")` onu yine de
+döndürüyor. Tam export'tan geçince kayıt dolu geliyor — 4 nokta, 12 pozisyon
+float'ı, kare kare örnekler, ve alan bağlıyken örnekler birbirinden farklı.
+nParticle kaydı klasikten fazlasını da taşıyor: parçacık başına `color` ve
+`opacity`.
+
+Fixture'a bir nParticle eklendi (alan bağlı, ki örnekler ayırt edici olsun) ve
+üç tarafa da assertion kondu. Blender'da dört noktalı, yüzsüz bir mesh olarak
+geliyor; Unreal'de çapa olarak (bu build'in dolduracağı point cloud yok) ve
+kare kare örneklerinin animasyonlanmadığı bildiriliyor.
+
+Bu, bu oturumda kapatılan beşinci fixture boşluğu: bir yolun "kapsandığı"
+görünüp aslında düşmesi imkânsız bir assertion'la örtülmüş olması.

@@ -413,10 +413,10 @@ def main():
     # cannot be built from Python at all, so they arrive as loose vertices.
     dust = bpy.data.objects.get("dustParticle")
     check("the particle object arrived", dust is not None)
-    # One, not two: the emitting system travels in the Alembic cache and
+    # Not all of them: the emitting system travels in the Alembic cache and
     # must not also be rebuilt here as a frozen snapshot.
     check("the import reported the uncached ones",
-          result["particle_count"] == 2, result["particle_count"])
+          result["particle_count"] == 3, result["particle_count"])
     if dust:
         check("as a mesh of loose vertices",
               dust.type == "MESH" and len(dust.data.vertices) == 4
@@ -435,9 +435,24 @@ def main():
         check("the Maya count is recorded",
               dust.get("ml_source_count") == 4, dust.get("ml_source_count"))
 
+    # The nParticle, which is the one an artist actually makes: the shelf
+    # and the nParticles menu both produce it. It reaches here by
+    # inheritance -- nParticle derives from particle, so the exporter lists
+    # the base type and catches both. That was a comment in the code and
+    # nothing in this scene had ever exercised it.
+    nucleus = bpy.data.objects.get("nucleusParticle")
+    check("the nParticle arrived too",
+          nucleus is not None and nucleus.type == "MESH",
+          nucleus.type if nucleus else "absent")
+    if nucleus is not None:
+        check("with its four points",
+              len(nucleus.data.vertices) == 4, len(nucleus.data.vertices))
+        check("and no faces, the way a point cloud arrives",
+              len(nucleus.data.polygons) == 0, len(nucleus.data.polygons))
+
     print("\nparticle bake")
-    check("the import reported both bakes",
-          result["particle_baked_count"] == 2,
+    check("the import reported every bake",
+          result["particle_baked_count"] == 3,
           result["particle_baked_count"])
     if dust:
         action = getattr(
