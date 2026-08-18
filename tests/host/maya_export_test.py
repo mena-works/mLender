@@ -900,6 +900,25 @@ def build_scene():
     cmds.setAttr(boost + ".intensity", 2.0)
     cmds.setAttr(boost_tf + ".translateY", 12.0)
 
+    # A light that actually changes. Measured: every light in this fixture was
+    # sampled and every sample was identical, so the whole animated-light path
+    # -- exporter sampling, Blender keyframes, Unreal sequence tracks -- was
+    # carried by tests that could not have failed. Intensity, colour and
+    # position all move, and they move to values that tell the channels apart:
+    # a light that only brightens cannot catch a colour track wired to the
+    # intensity samples.
+    anim_light = cmds.createNode("pointLight", name="animLightShape")
+    anim_light_tf = cmds.listRelatives(anim_light, parent=True,
+                                       fullPath=True)[0]
+    cmds.setKeyframe(anim_light + ".intensity", time=1, value=1.0)
+    cmds.setKeyframe(anim_light + ".intensity", time=25, value=9.0)
+    cmds.setKeyframe(anim_light + ".colorR", time=1, value=1.0)
+    cmds.setKeyframe(anim_light + ".colorR", time=25, value=0.0)
+    cmds.setKeyframe(anim_light + ".colorG", time=1, value=0.0)
+    cmds.setKeyframe(anim_light + ".colorG", time=25, value=1.0)
+    cmds.setKeyframe(anim_light_tf + ".translateX", time=1, value=0.0)
+    cmds.setKeyframe(anim_light_tf + ".translateX", time=25, value=8.0)
+
     area = cmds.createNode("aiAreaLight", name="aiAreaShape")
     area_tf = cmds.listRelatives(area, parent=True, fullPath=True)[0]
     cmds.setAttr(area + ".aiTranslator", "disk", type="string")

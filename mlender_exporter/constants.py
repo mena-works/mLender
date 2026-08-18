@@ -13,7 +13,7 @@ from __future__ import absolute_import
 # here rather than in __init__ so package.py can reach it without
 # importing the package root, which would be circular. The importer keeps
 # its own in constants.py for the same reason.
-BUILD_VERSION = "2.48.0"
+BUILD_VERSION = "2.49.0"
 
 TOOL_NAME = "mLender"
 WINDOW_NAME = "mLenderWindow"

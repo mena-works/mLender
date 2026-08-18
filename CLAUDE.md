@@ -593,7 +593,8 @@ home'una kurar. İki artefakt da bir kez yanlıştı ve yalnız kurunca ortaya
 `sys.path`'e koyduğu için repo kopyası import ediliyor, modül hiç denenmiyor
 ve "ok" yazıyordu.
 
-Kurulu Blender sürümleri: 4.1, 4.3, 4.5, 5.2. Kullanıcının hedefi **5.2**.
+Kurulu tek Blender sürümü **5.2** (2026-08-18'de kontrol edildi; 4.1/4.3/4.5
+bir zamanlar kuruluydu, artık değil). Kullanıcının hedefi de 5.2.
 Sürüm uyumu iddia eden bir değişiklik yaptıysan 4. adımı birden fazla sürümde
 çalıştır — bu araç 3.6'dan 5.2'ye kadar iddia ediyor ve aradaki farklar gerçek
 (`shadow_method` 4.5'te kalktı, `use_temperature` 4.2'de geldi).
@@ -789,6 +790,21 @@ Kullanıcının elle doğrulaması gereken adımlar:
   panel de 3968 üçgenlik küre de 256 okundu, yani sayı mesh'i değil
   bütçeyi anlatıyor. `get_num_nanite_triangles()` kaynağı verir.
   Nanite'ı bu araç açmıyor — motorun import varsayılanı
+- ❌ Sequencer'da display frame ile tick'i karıştırma; `add_key`,
+  `set_range`, `set_playback_start/end` ve oynatma konumu **hepsi tick**.
+  Ölçüldü: 24 karede 100→900 anahtarlanan sekans tick 12000'de 500,
+  "kare 12"de 100.40 okuyor. Display rate yalnız cetveli adlandırır
+- ❌ Component property'sini actor binding'ine anahtarlama; intensity ve
+  LightColor `light_component`, focal/aperture `camera_component`
+  binding'ine gider
+- ❌ Görünürlük anahtarını motorun `hidden` bayrağıyla aynı sanma;
+  Sequencer kanalında **True = görünür**, ters yazmak her blink'i çevirir
+- ❌ Sekansı son karesinde okuyup "anahtar yok" deme; bitişe inmek
+  sekansı bitirir ve animasyon öncesi değerleri geri koyar
+- ❌ Animasyon örneğini kaydın üstüne yazarken eski türevi bırakma;
+  `effective_intensity` statik kayıttan gelir ve dönüşüm onu tercih eder,
+  yani yalnız `intensity`'yi yazmak ilk kareyi 25 kez anahtarlar. Beklenen
+  değeri de aynı yoldan hesaplarsan test uyar ve hiçbir şey yakalamaz
 - ❌ Mesh başına bütün kayıtları tarama veya materyali her mesh için yeniden
   okuma; ikisi de karesel, `benchmark_*.py` ile ölçüldü
 - ❌ Mesh eşleştirmesini yalnız isme dayandırma; aynı kısa isim farklı

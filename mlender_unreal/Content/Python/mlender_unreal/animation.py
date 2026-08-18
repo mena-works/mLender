@@ -1,0 +1,508 @@
+# -*- coding: utf-8 -*-
+"""Light, camera and visibility animation, as a Level Sequence.
+
+The FBX brings mesh and skeletal animation with it. Everything else the
+exporter samples -- a light that brightens, a camera that racks focus, a mesh
+that blinks -- rode in the package and was thrown away here, with one warning
+line to say so. Blender rebuilds all of it as keyframes; this is the Unreal
+half, and a Level Sequence is the only place Unreal keeps that kind of key.
+
+Every number below was measured in this engine rather than read off a doc,
+because a frame space is the sort of thing that accepts a wrong value in
+silence:
+
+* **Sequencer's Python surface is entirely in ticks.** ``add_key``,
+  ``set_range``, ``set_playback_start``/``end`` and the player's playback
+  position all take tick numbers; the display rate only labels the ruler.
+  Measured: a sequence keyed 100 -> 900 over 24 frames reads 500 at tick 12000
+  and 100.40 at "frame 12", because 12 ticks is half a thousandth of the span.
+* **The playback position has to be inside the range.** Landing exactly on the
+  end finishes the sequence and restores the pre-animated values, so a probe
+  that scrubs to the last frame reads the actor's spawn state and concludes
+  nothing was keyed.
+* **A component property is keyed on the component's own binding**, not the
+  actor's: intensity and colour bind ``light_component``, focal length and
+  aperture bind ``camera_component``.
+* **Visibility is keyed True for visible.** The engine's own flag is
+  ``hidden``, which is the other way round.
+
+Maya's frame numbers are kept. Blender keys at the same numbers, and a package
+that starts at frame 1 in one receiver and frame 0 in the other is a bug report
+nobody can read.
+"""
+import unreal
+
+from .constants import (
+    ANIMATION_SEQUENCE_NAME,
+    GENERATED_TAG,
+    SEQUENCE_CONTENT_PATH,
+)
+from .lights import (
+    light_colour,
+    light_intensity_for_unreal,
+    resolve_unreal_light_class,
+)
+from .transforms import unreal_transform
+from .utils import safe_asset_name, scalar
+
+
+def _linear():
+    """LINEAR, or nothing if this build spells the enum differently."""
+    try:
+        return unreal.MovieSceneKeyInterpolation.LINEAR
+    except Exception:
+        return None
+
+
+def _add_key(channel, tick, value):
+    """One key, linear where the channel allows it."""
+    interpolation = _linear()
+    if interpolation is not None:
+        try:
+            channel.add_key(
+                unreal.FrameNumber(int(tick)), value,
+                interpolation=interpolation,
+            )
+            return True
+        except Exception:
+            pass
+    # A bool channel takes no interpolation, and says so by raising.
+    try:
+        channel.add_key(unreal.FrameNumber(int(tick)), value)
+        return True
+    except Exception:
+        return False
+
+
+def create_sequence(package_data, warnings):
+    """An empty Level Sequence covering the package's frame range.
+
+    Returns ``(sequence, ticks_per_frame, first_tick, last_tick)``, or Nones
+    when the package carries no animation.
+    """
+    animation = (package_data or {}).get("animation") or {}
+    if not animation.get("enabled"):
+        return None, 0.0, 0, 0
+
+    fps = scalar(animation.get("fps"), 24.0) or 24.0
+    start = scalar(animation.get("start"), 1.0)
+    end = scalar(animation.get("end"), start)
+
+    label = safe_asset_name(
+        (package_data or {}).get("package_name") or "Scene", "Scene"
+    )
+    asset_name = "{0}_{1}".format(ANIMATION_SEQUENCE_NAME, label)
+    try:
+        tools = unreal.AssetToolsHelpers.get_asset_tools()
+        sequence = tools.create_asset(
+            asset_name, SEQUENCE_CONTENT_PATH, unreal.LevelSequence,
+            unreal.LevelSequenceFactoryNew(),
+        )
+    except Exception as exc:
+        warnings.append(
+            "The package carries animation but the Level Sequence could not "
+            "be created: {0}".format(exc)
+        )
+        return None, 0.0, 0, 0
+    if sequence is None:
+        warnings.append(
+            "The package carries animation but Unreal returned no Level "
+            "Sequence asset."
+        )
+        return None, 0.0, 0, 0
+
+    try:
+        sequence.set_display_rate(unreal.FrameRate(int(round(fps)), 1))
+    except Exception:
+        pass
+    resolution = sequence.get_tick_resolution()
+    ticks_per_frame = float(resolution.numerator) / (
+        float(resolution.denominator or 1) * float(fps)
+    )
+    first = int(round(start * ticks_per_frame))
+    last = int(round(end * ticks_per_frame))
+    try:
+        sequence.set_playback_start(first)
+        sequence.set_playback_end(last)
+    except Exception:
+        pass
+    return sequence, ticks_per_frame, first, last
+
+
+def _section(binding, track_class, first, last):
+    """A track's single section, spanning the whole range."""
+    track = binding.add_track(track_class)
+    section = track.add_section()
+    section.set_range(first, last)
+    return track, section
+
+
+def _tick_of(sample, ticks_per_frame):
+    return int(round(scalar(sample.get("frame"), 0.0) * ticks_per_frame))
+
+
+def _key_transform(section, samples, unreal_scale, ticks_per_frame):
+    """Nine channels from a run of sampled Maya world matrices.
+
+    The channel order was read back rather than assumed: Location X/Y/Z,
+    Rotation X/Y/Z, Scale X/Y/Z.
+    """
+    channels = section.get_all_channels()
+    if len(channels) < 6:
+        return 0
+    keys = 0
+    for sample in samples:
+        matrix = sample.get("matrix")
+        if not matrix:
+            continue
+        tick = _tick_of(sample, ticks_per_frame)
+        location, rotation = unreal_transform(
+            {"world_matrix": matrix}, unreal_scale
+        )
+        values = (
+            location.x, location.y, location.z,
+            rotation.roll, rotation.pitch, rotation.yaw,
+        )
+        for index, value in enumerate(values):
+            if _add_key(channels[index], tick, float(value)):
+                keys += 1
+    return keys
+
+
+def _key_float(binding, property_name, samples, ticks_per_frame, value_of,
+               first, last):
+    """One float property track, keyed from a sample run."""
+    pairs = []
+    for sample in samples:
+        try:
+            value = value_of(sample)
+        except Exception:
+            value = None
+        if value is None:
+            continue
+        pairs.append((_tick_of(sample, ticks_per_frame), float(value)))
+    if not pairs:
+        return 0
+    track, section = _section(
+        binding, unreal.MovieSceneFloatTrack, first, last
+    )
+    track.set_property_name_and_path(property_name, property_name)
+    channels = section.get_all_channels()
+    if not channels:
+        return 0
+    keys = 0
+    for tick, value in pairs:
+        if _add_key(channels[0], tick, value):
+            keys += 1
+    return keys
+
+
+def _key_colour(binding, property_name, samples, ticks_per_frame, colour_of,
+                first, last):
+    """A colour property track: four channels, R G B A, in that order."""
+    pairs = []
+    for sample in samples:
+        try:
+            rgb = colour_of(sample)
+        except Exception:
+            rgb = None
+        if rgb is None:
+            continue
+        pairs.append((_tick_of(sample, ticks_per_frame), rgb))
+    if not pairs:
+        return 0
+    track, section = _section(
+        binding, unreal.MovieSceneColorTrack, first, last
+    )
+    track.set_property_name_and_path(property_name, property_name)
+    channels = section.get_all_channels()
+    if len(channels) < 3:
+        return 0
+    keys = 0
+    for tick, rgb in pairs:
+        values = list(rgb) + [1.0, 1.0, 1.0, 1.0]
+        for index in range(min(4, len(channels))):
+            if _add_key(channels[index], tick, float(values[index])):
+                keys += 1
+    return keys
+
+
+def actors_by_label():
+    """Every level actor, keyed by label, for matching Maya names."""
+    found = {}
+    try:
+        actors = unreal.get_editor_subsystem(
+            unreal.EditorActorSubsystem
+        ).get_all_level_actors() or []
+    except Exception:
+        return found
+    for actor in actors:
+        try:
+            found.setdefault(actor.get_actor_label(), actor)
+        except Exception:
+            continue
+    return found
+
+
+def _component(actor, name):
+    try:
+        return getattr(actor, name)
+    except Exception:
+        return None
+
+
+def animate_lights(sequence, package_data, actors, unreal_scale, metre_scale,
+                   power_scale, ticks_per_frame, first, last, warnings):
+    """Transform, intensity and colour for every light that was sampled."""
+    tracks = 0
+    keys = 0
+    for record in (package_data or {}).get("lights") or []:
+        samples = record.get("samples") or []
+        if len(samples) < 2:
+            continue
+        label = safe_asset_name(record.get("name") or "Light", "Light")
+        actor = actors.get(label)
+        if actor is None:
+            warnings.append(
+                'Light "{0}" is animated but no actor of that name is in the '
+                "level, so its animation was not keyed.".format(label)
+            )
+            continue
+
+        binding = sequence.add_possessable(actor)
+        _track, section = _section(
+            binding, unreal.MovieScene3DTransformTrack, first, last
+        )
+        moved = _key_transform(
+            section, samples, unreal_scale, ticks_per_frame
+        )
+        if moved:
+            tracks += 1
+            keys += moved
+
+        component = _component(actor, "light_component")
+        if component is None:
+            continue
+        component_binding = sequence.add_possessable(component)
+
+        light_class = resolve_unreal_light_class(
+            str(record.get("light_kind") or "AREA").upper(),
+            str(record.get("area_shape") or "RECTANGLE").upper(),
+        )
+
+        def intensity_of(sample, record=record, light_class=light_class):
+            # Run through the same measured conversion the static value uses.
+            # Keying raw Maya intensity would animate a different quantity
+            # than the one frame one is holding.
+            #
+            # The stale key has to go, not just be written over: the record
+            # carries the *static* effective_intensity and the conversion
+            # prefers it, so a first version keyed the frame-one value
+            # twenty-five times. It agreed with its own expected value and
+            # still animated nothing -- what gave it away was the number
+            # sitting still while the Maya samples ran 1 to 9.
+            merged = dict(record)
+            merged.pop("effective_intensity", None)
+            merged["intensity"] = sample.get("intensity", record.get(
+                "intensity"))
+            merged["exposure"] = sample.get("exposure", record.get("exposure"))
+            if sample.get("effective_intensity") is not None:
+                merged["effective_intensity"] = sample["effective_intensity"]
+            parameters = dict(record.get("parameters") or {})
+            parameters.pop("intensity", None)
+            parameters.pop("exposure", None)
+            merged["parameters"] = parameters
+            value, _units = light_intensity_for_unreal(
+                merged, light_class, metre_scale, power_scale
+            )
+            return value
+
+        keyed = _key_float(
+            component_binding, "Intensity", samples, ticks_per_frame,
+            intensity_of, first, last,
+        )
+        if keyed:
+            tracks += 1
+            keys += keyed
+
+        def colour_of(sample, record=record):
+            rgb = sample.get("color")
+            if not rgb:
+                return None
+            merged = dict(record)
+            merged["color"] = rgb
+            # parameters wins over the top level record in light_colour, so
+            # writing only record["color"] leaves the static colour in place.
+            parameters = dict(record.get("parameters") or {})
+            parameters["color"] = rgb
+            merged["parameters"] = parameters
+            # light_colour hands back a LinearColor, which is not iterable;
+            # measured the hard way, as a caught "object is not iterable" that
+            # dropped every colour track while the rest of the keys landed.
+            value = light_colour(merged)
+            return (value.r, value.g, value.b, value.a)
+
+        keyed = _key_colour(
+            component_binding, "LightColor", samples, ticks_per_frame,
+            colour_of, first, last,
+        )
+        if keyed:
+            tracks += 1
+            keys += keyed
+    return tracks, keys
+
+
+def animate_cameras(sequence, package_data, actors, unreal_scale,
+                    ticks_per_frame, first, last, warnings):
+    """Transform, focal length and aperture for every camera that moved."""
+    tracks = 0
+    keys = 0
+    for record in (package_data or {}).get("cameras") or []:
+        samples = record.get("samples") or []
+        if len(samples) < 2:
+            continue
+        label = safe_asset_name(record.get("name") or "Camera", "Camera")
+        actor = actors.get(label)
+        if actor is None:
+            warnings.append(
+                'Camera "{0}" is animated but no actor of that name is in the '
+                "level, so its animation was not keyed.".format(label)
+            )
+            continue
+
+        binding = sequence.add_possessable(actor)
+        _track, section = _section(
+            binding, unreal.MovieScene3DTransformTrack, first, last
+        )
+        moved = _key_transform(
+            section, samples, unreal_scale, ticks_per_frame
+        )
+        if moved:
+            tracks += 1
+            keys += moved
+
+        component = _component(actor, "camera_component")
+        if component is None:
+            continue
+        component_binding = sequence.add_possessable(component)
+        for property_name, key in (("CurrentFocalLength", "focal_length_mm"),
+                                   ("CurrentAperture", "f_stop")):
+            keyed = _key_float(
+                component_binding, property_name, samples, ticks_per_frame,
+                lambda sample, key=key: sample.get(key),
+                first, last,
+            )
+            if keyed:
+                tracks += 1
+                keys += keyed
+    return tracks, keys
+
+
+def animate_visibility(sequence, package_data, actors, ticks_per_frame,
+                       first, last, warnings):
+    """A visibility track per mesh whose Maya visibility was keyed."""
+    tracks = 0
+    keys = 0
+    for record in (package_data or {}).get("meshes") or []:
+        samples = record.get("visibility_samples") or []
+        if len(samples) < 2:
+            continue
+        # A run that never changes is not animation; a track per mesh in a
+        # scene where nothing blinks is noise in the Sequencer outliner.
+        states = set(bool(sample.get("visible")) for sample in samples)
+        if len(states) < 2:
+            continue
+        # A mesh record is keyed on "mesh", not "name" -- a first version
+        # asked for "name", got nothing from every record, and labelled the
+        # lot "Mesh", so no actor ever matched and no blink was keyed.
+        label = safe_asset_name(
+            record.get("mesh") or record.get("mesh_full_name") or "Mesh",
+            "Mesh",
+        )
+        actor = actors.get(label)
+        if actor is None:
+            continue
+        binding = sequence.add_possessable(actor)
+        _track, section = _section(
+            binding, unreal.MovieSceneVisibilityTrack, first, last
+        )
+        channels = section.get_all_channels()
+        if not channels:
+            continue
+        counted = 0
+        for sample in samples:
+            # True is visible here; the engine's own flag is hidden, and
+            # passing that value straight through inverts every blink.
+            if _add_key(channels[0], _tick_of(sample, ticks_per_frame),
+                        bool(sample.get("visible"))):
+                counted += 1
+        if counted:
+            tracks += 1
+            keys += counted
+    return tracks, keys
+
+
+def import_animation(package_data, unreal_scale, metre_scale, power_scale,
+                     warnings):
+    """Build the Level Sequence and place an actor that plays it."""
+    sequence, ticks_per_frame, first, last = create_sequence(
+        package_data, warnings
+    )
+    if sequence is None:
+        return {"sequence_path": "", "track_count": 0, "key_count": 0}
+
+    actors = actors_by_label()
+    tracks = 0
+    keys = 0
+    builders = (
+        lambda: animate_lights(
+            sequence, package_data, actors, unreal_scale, metre_scale,
+            power_scale, ticks_per_frame, first, last, warnings),
+        lambda: animate_cameras(
+            sequence, package_data, actors, unreal_scale, ticks_per_frame,
+            first, last, warnings),
+        lambda: animate_visibility(
+            sequence, package_data, actors, ticks_per_frame, first, last,
+            warnings),
+    )
+    for builder in builders:
+        try:
+            built_tracks, built_keys = builder()
+        except Exception as exc:
+            warnings.append(
+                "Part of the animation could not be keyed: {0}".format(exc)
+            )
+            continue
+        tracks += built_tracks
+        keys += built_keys
+
+    path = ""
+    try:
+        path = sequence.get_path_name()
+        unreal.EditorAssetLibrary.save_loaded_asset(sequence)
+    except Exception:
+        pass
+
+    # An actor that holds the sequence, so the level plays it rather than the
+    # level holding an asset nobody opens.
+    try:
+        player_actor = unreal.EditorLevelLibrary.spawn_actor_from_class(
+            unreal.LevelSequenceActor, unreal.Vector(0.0, 0.0, 0.0)
+        )
+        player_actor.set_sequence(sequence)
+        player_actor.set_actor_label(
+            safe_asset_name(ANIMATION_SEQUENCE_NAME, "Sequence")
+        )
+        player_actor.tags = [GENERATED_TAG]
+    except Exception as exc:
+        warnings.append(
+            "The Level Sequence was built but no actor plays it: {0}".format(
+                exc
+            )
+        )
+
+    return {
+        "sequence_path": path,
+        "track_count": tracks,
+        "key_count": keys,
+    }

@@ -10,7 +10,7 @@ Everything under "measured" was read off a live Unreal 5.8.1 session or solved
 from a probe, never guessed. tests/docs/unreal_calibration.md records how.
 """
 
-BUILD_VERSION = "2.48.0"
+BUILD_VERSION = "2.49.0"
 
 TOOL_NAME = "mLender"
 
@@ -44,6 +44,7 @@ CONTENT_ROOT = "/Game/mLender"
 MESH_CONTENT_PATH = CONTENT_ROOT + "/Meshes"
 MATERIAL_CONTENT_PATH = CONTENT_ROOT + "/Materials"
 TEXTURE_CONTENT_PATH = CONTENT_ROOT + "/Textures"
+SEQUENCE_CONTENT_PATH = CONTENT_ROOT + "/Sequences"
 MASTER_MATERIAL_NAME = ASSET_PREFIX + "Master"
 MASTER_MATERIAL_PATH = MATERIAL_CONTENT_PATH + "/" + MASTER_MATERIAL_NAME
 # Actor folder paths, Unreal's equivalent of the Blender collections the
@@ -51,6 +52,9 @@ MASTER_MATERIAL_PATH = MATERIAL_CONTENT_PATH + "/" + MASTER_MATERIAL_NAME
 ACTOR_FOLDER_ROOT = "mLender Import"
 LIGHT_FOLDER = ACTOR_FOLDER_ROOT + "/mLender Lights"
 CAMERA_FOLDER = ACTOR_FOLDER_ROOT + "/mLender Cameras"
+
+# The Level Sequence that carries light, camera and visibility keys.
+ANIMATION_SEQUENCE_NAME = "ML_Sequence"
 
 # --------------------------------------------------------------- measured
 # Maya Y-up right-handed to Unreal Z-up left-handed is a plain Y/Z swap with no

@@ -826,6 +826,48 @@ def main():
               bool(panel.data.materials) and panel.data.materials[0] is not None,
               [m.name if m else None for m in panel.data.materials])
 
+    # A light that actually changes. Every other light in this fixture was
+    # sampled and every sample was identical, so this path -- energy and
+    # colour keyed per frame -- was covered by assertions that could not have
+    # failed. Maya runs intensity 1 -> 9 and swaps red for green.
+    anim_light = bpy.data.objects.get("animLight")
+    check("the animated light arrived", anim_light is not None
+          and anim_light.type == "LIGHT",
+          anim_light.type if anim_light else "absent")
+    if anim_light is not None and anim_light.type == "LIGHT":
+        data = anim_light.data
+        action = data.animation_data.action if data.animation_data else None
+        paths = set()
+        if action is not None:
+            for curve in fcurves_of(action):
+                paths.add(curve.data_path)
+        check("its energy and colour are both keyed",
+              "energy" in paths and "color" in paths, sorted(paths))
+        # Read the curves rather than the scene: evaluating means setting the
+        # frame, and a test that leaves the frame moved is a test that changes
+        # what the next assertion sees.
+        energies = []
+        colours = []
+        for curve in fcurves_of(action) if action else []:
+            if curve.data_path == "energy":
+                energies = [k.co[1] for k in curve.keyframe_points]
+            if curve.data_path == "color" and curve.array_index == 0:
+                colours = [k.co[1] for k in curve.keyframe_points]
+        check("the energy keys actually rise, 1 to 9 in Maya",
+              len(energies) > 2 and energies[-1] > energies[0] * 5,
+              (round(energies[0], 4), round(energies[-1], 4))
+              if energies else "no keys")
+        check("and the red channel falls the way Maya keyed it",
+              len(colours) > 2 and colours[-1] < colours[0],
+              (round(colours[0], 3), round(colours[-1], 3))
+              if colours else "no keys")
+        # The frame numbers matter as much as the values: a one frame drift
+        # rode a whole release once.
+        first = min(k.co[0] for curve in fcurves_of(action)
+                    for k in curve.keyframe_points) if action else None
+        check("the first light key is at Maya's first frame",
+              first == 1.0, first)
+
     accented = next(
         (obj for obj in bpy.data.objects
          if obj.type == "MESH" and not obj.name.isascii()),

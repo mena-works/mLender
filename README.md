@@ -388,7 +388,9 @@ the sun branch already produces.
 ### What does not travel, and says so
 
 Four things are left, each because Unreal has no equivalent this build can
-honestly fill rather than because nobody got to them. Every one is **reported
+honestly fill rather than because nobody got to them. Light, camera and
+visibility animation used to be a fifth; it is carried now, as a Level
+Sequence (below). Every one is **reported
 with its count and the reason**, which is the `coverage.py` idea applied to the
 receiving end:
 
@@ -396,11 +398,43 @@ receiving end:
 |---|---|
 | Advanced Skeleton **control layer** | Unreal's equivalent is a Control Rig asset, and authoring one from Python means building a rig graph. The skeletal meshes themselves do arrive — see below |
 | skeleton root motion | this build keys no skeletal animation in Unreal |
+| material parameter animation | a keyed roughness needs a Material Instance track per parameter; the first sample is set and the rest reported |
 | Maya constraints | Unreal has no equivalent, and the FBX bake already carries the motion they produced |
 | AOVs | render passes in Unreal are Movie Render Queue configuration, and this engine build does not ship MRQ |
 
-Light, camera and visibility **animation** is not rebuilt either — that needs a
-Level Sequence. It is reported.
+### Animation, as a Level Sequence
+
+The FBX brings mesh and skeletal animation with it. Everything else the
+exporter samples — a light that brightens, a camera that racks focus, a mesh
+that blinks — is rebuilt as a **Level Sequence** in `/Game/mLender/Sequences`,
+with an actor in the level that plays it. Maya frame numbers are kept, so the
+same package starts on the same frame in Blender and in Unreal.
+
+| keyed | where it lands |
+|---|---|
+| light transform | transform track on the light actor |
+| light intensity | `Intensity` on the light **component** binding, through the same measured conversion the static value uses |
+| light colour | `LightColor` on the component binding |
+| camera transform | transform track on the camera actor |
+| camera focal length, aperture | `CurrentFocalLength`, `CurrentAperture` on the cine camera component |
+| mesh visibility | visibility track, keyed `True` for visible |
+
+Four things about Sequencer were measured rather than assumed, and each of them
+accepts a wrong value without complaining:
+
+- **The Python surface is entirely in ticks.** `add_key`, `set_range`,
+  `set_playback_start`/`end` and the playback position all take tick numbers;
+  the display rate only labels the ruler. A sequence keyed 100 → 900 over 24
+  frames reads 500 at tick 12000 and **100.40** at "frame 12".
+- **A component property is keyed on the component's own binding**, not the
+  actor's.
+- **Visibility is keyed `True` for visible**; the engine's own flag is `hidden`,
+  which is the other way round.
+- **Scrubbing to the last frame finishes the sequence** and restores the
+  pre-animated values, so a check that reads there sees the actor's spawn state
+  and concludes nothing was keyed.
+
+Material parameter animation is still reported rather than carried.
 
 ### Skinned meshes and Advanced Skeleton
 

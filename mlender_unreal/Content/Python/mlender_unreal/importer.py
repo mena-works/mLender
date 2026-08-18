@@ -17,6 +17,7 @@ from .constants import (
 )
 from .alembic import import_alembic
 from .asrig import apply_as_rigs
+from .animation import import_animation
 from .cameras import import_cameras
 from .curves import import_curves
 from .empties import import_transforms
@@ -204,6 +205,12 @@ def import_scene_package(
     # Sets name actors, so this runs after everything that creates them.
     set_result = import_sets(package_data, warnings)
 
+    # Last, and it has to be: every track binds an actor by its label, so
+    # nothing that spawns one may run after this.
+    animation_result = import_animation(
+        package_data, unreal_scale, metre_scale, power_scale, warnings
+    )
+
     _report_uncarried(package_data, warnings)
 
     result = {
@@ -232,6 +239,9 @@ def import_scene_package(
         "particle_count": particle_result["particle_count"],
         "instancer_count": instancer_result["instancer_count"],
         "instance_count": instancer_result["instance_count"],
+        "sequence_path": animation_result["sequence_path"],
+        "animation_track_count": animation_result["track_count"],
+        "animation_key_count": animation_result["key_count"],
         "set_count": set_result["set_count"],
         "layer_count": set_result["layer_count"],
         "assignments": assignments,
@@ -276,10 +286,4 @@ def _report_uncarried(package_data, warnings):
                     count, label, reason
                 )
             )
-    animation = package_data.get("animation") or {}
-    if animation.get("enabled"):
-        warnings.append(
-            "The package carries animation; the FBX brings mesh animation but "
-            "this build does not rebuild light, camera or visibility animation "
-            "in Unreal -- that needs a Level Sequence."
-        )
+

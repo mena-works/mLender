@@ -1243,3 +1243,42 @@ turundan daha çok şey söyler.
 Kullanıcının adımı kısa: Maya'da `ml.show_ui()` → gönder, Blender'da N-panel'de
 `Build` numarasını doğrula, status satırını ve System Console'daki
 `mLender warning:` satırlarını getir.
+
+
+## Unreal Level Sequence (2.49.0) — ışık/kamera/görünürlük animasyonu taşınıyor
+
+Unreal alıcısında kalan en büyük delik. FBX mesh ve skeletal animasyonu
+getiriyordu; exporter'ın örneklediği her şey (ışık parlaklığı, kamera focal,
+mesh görünürlüğü) pakete yazılıp burada **atılıyordu**, tek satır uyarıyla.
+Artık `/Game/mLender/Sequences` altında bir Level Sequence kuruluyor ve
+level'a onu oynatan bir actor konuyor. Maya kare numaraları korunuyor.
+
+**Ölçülen dört Sequencer gerçeği** (dördü de yanlış değeri sessizce kabul eder):
+
+1. **Python yüzeyi baştan sona tick.** `add_key`, `set_range`,
+   `set_playback_start/end` ve oynatma konumu tick alır. 24 karede 100→900
+   anahtarlanan sekans tick 12000'de 500, "kare 12"de **100.40** okuyor.
+2. **Component property'si component binding'ine anahtarlanır**, actor'e değil.
+3. **Görünürlükte True = görünür**; motorun kendi bayrağı `hidden`, tersi.
+4. **Son kareye scrub etmek sekansı bitirir** ve animasyon öncesi değerleri
+   geri koyar — orada okuyan bir kontrol "hiç anahtar yok" sanır.
+
+**Fixture yalan söylüyordu.** Doğrulama yazarken çıktı: sahnedeki dört ışığın
+dördü de örnekleniyordu ve **her örnek aynıydı**. Yani exporter örneklemesi,
+Blender keyframe'leri ve Unreal track'leri düşmesi imkânsız assertion'larla
+kapsanıyordu. Fixture'a gerçekten değişen bir ışık kondu (intensity 1→9, renk
+kırmızıdan yeşile, konum 0→8) ve üç alıcıya da assertion eklendi.
+
+**Kendi testim de bir kez yalan söyledi.** İlk sürüm kaydın *statik*
+`effective_intensity`'sini 25 kez anahtarlıyordu; beklenen değeri de aynı
+bozuk yoldan hesapladığım için test **uyuştu**. Yakalatan şey karşılaştırma
+değil, kaynak 1→9 giderken sonucun sabit durmasıydı.
+
+Doğrulama sayarak değil **oynatarak** yapılıyor: host testi sekansı bir
+`LevelSequenceActor` ile çalıştırıp actor'ün değerlerini okuyor. Yoğunluk
+Maya'nın oranıyla karşılaştırılıyor (kalibrasyon sabitinden bağımsız), her
+görünürlük örneği tek tek Maya'yla eşleştiriliyor. Dokuz yeni assertion.
+
+Not: `LevelSequenceEditorBlueprintLibrary.open_level_sequence` commandlet'te
+Slate olmadığı için **motoru assert'e sokuyor**; `LevelSequenceActor`ın
+player'ı UI istemiyor ve doğru yol o.

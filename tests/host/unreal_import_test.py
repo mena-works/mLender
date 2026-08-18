@@ -184,6 +184,157 @@ def main():
             check("the trim survived to Unreal, hole and all",
                   triangles == 896, triangles)
 
+    # --- Level Sequence: light, camera and visibility animation.
+    #
+    # These assertions play the sequence rather than counting its keys. Keys
+    # that exist and keys that reach the actor are different claims, and this
+    # build was already caught making the first while failing the second: a
+    # version that keyed the record static intensity twenty five times agreed
+    # with its own expected value and animated nothing.
+    animation = package_data.get("animation") or {}
+    if animation.get("enabled"):
+        check("a Level Sequence was built", bool(result.get("sequence_path")),
+              result.get("sequence_path"))
+        check("with tracks on it", result.get("animation_track_count", 0) > 0,
+              result.get("animation_track_count"))
+        sequence = None
+        if result.get("sequence_path"):
+            sequence = unreal.load_asset(
+                result["sequence_path"].split(".")[0]
+            )
+        if sequence is not None:
+            fps = float(animation.get("fps") or 24.0)
+            per_frame = sequence.get_tick_resolution().numerator / fps
+            player_actor = unreal.EditorLevelLibrary.spawn_actor_from_class(
+                unreal.LevelSequenceActor, unreal.Vector(0.0, 0.0, 0.0)
+            )
+            player_actor.set_sequence(sequence)
+            player = player_actor.sequence_player
+            by_label = {}
+            for actor in (unreal.get_editor_subsystem(
+                    unreal.EditorActorSubsystem
+            ).get_all_level_actors() or []):
+                try:
+                    by_label.setdefault(actor.get_actor_label(), actor)
+                except Exception:
+                    continue
+
+            def scrub(frame):
+                params = unreal.MovieSceneSequencePlaybackParams()
+                params.set_editor_property("frame", unreal.FrameTime(
+                    unreal.FrameNumber(int(round(frame * per_frame)))))
+                params.set_editor_property(
+                    "position_type", unreal.MovieScenePositionType.FRAME)
+                params.set_editor_property(
+                    "update_method", unreal.UpdatePositionMethod.JUMP)
+                player.set_playback_position(params)
+
+            start = float(animation.get("start") or 1.0)
+            end = float(animation.get("end") or start)
+            # Never the last frame: landing on the end finishes the sequence
+            # and restores the pre-animated values, which reads as "nothing
+            # was keyed" when everything was.
+            middle = (start + end) / 2.0
+            last_inside = end - 1.0
+
+            light_record = None
+            for record in (package_data.get("lights") or []):
+                samples = record.get("samples") or []
+                if len(samples) > 1 and len(set(
+                        sample.get("intensity") for sample in samples)) > 1:
+                    light_record = record
+                    break
+            check("the package has a light whose intensity really moves",
+                  light_record is not None,
+                  [r.get("name") for r in package_data.get("lights") or []])
+            light_actor = by_label.get((light_record or {}).get("name") or "")
+            if light_record is not None and light_actor is not None:
+                samples = light_record["samples"]
+
+                def sample_at(frame, samples=samples):
+                    return min(samples,
+                               key=lambda s: abs(s.get("frame", 0) - frame))
+
+                readings = []
+                for frame in (start, middle, last_inside):
+                    scrub(frame)
+                    component = light_actor.light_component
+                    readings.append((
+                        component.intensity,
+                        light_actor.get_actor_location().x,
+                        component.light_color.r,
+                        component.light_color.g,
+                    ))
+                check("the sequence actually drives the light intensity",
+                      readings[0][0] < readings[1][0] < readings[2][0],
+                      [round(r[0], 4) for r in readings])
+                # Against the Maya numbers, not against this build own
+                # conversion: a ratio is independent of the calibration
+                # constant, so it still fails if the samples stop being
+                # followed after somebody changes that constant.
+                maya_first = sample_at(start).get("intensity")
+                maya_last = sample_at(last_inside).get("intensity")
+                if maya_first:
+                    want = maya_last / float(maya_first)
+                    got = readings[2][0] / readings[0][0]
+                    check("and follows the Maya intensity ratio",
+                          abs(got - want) < 0.02 * max(1.0, want),
+                          (round(got, 4), round(want, 4)))
+                check("the sequence drives the light position too",
+                      abs(readings[2][1] - readings[0][1]) > 1.0,
+                      [round(r[1], 3) for r in readings])
+                check("and the colour, red falling as green rises",
+                      readings[2][2] < readings[0][2]
+                      and readings[2][3] > readings[0][3],
+                      [(r[2], r[3]) for r in readings])
+
+            camera_record = None
+            for record in (package_data.get("cameras") or []):
+                samples = record.get("samples") or []
+                if len(set(sample.get("focal_length_mm")
+                           for sample in samples)) > 1:
+                    camera_record = record
+                    break
+            camera_actor = by_label.get((camera_record or {}).get("name") or "")
+            if camera_record is not None and camera_actor is not None:
+                focals = []
+                wanted = []
+                for frame in (start, last_inside):
+                    scrub(frame)
+                    focals.append(
+                        camera_actor.camera_component.current_focal_length
+                    )
+                    nearest = min(
+                        camera_record["samples"],
+                        key=lambda s, f=frame: abs(s.get("frame", 0) - f),
+                    )
+                    wanted.append(nearest.get("focal_length_mm"))
+                check("the sequence drives the camera focal length",
+                      all(abs(got - expect) < 0.01
+                          for got, expect in zip(focals, wanted)),
+                      (focals, wanted))
+
+            blink = None
+            for record in (package_data.get("meshes") or []):
+                samples = record.get("visibility_samples") or []
+                if len(set(bool(s.get("visible")) for s in samples)) > 1:
+                    blink = record
+                    break
+            blink_actor = by_label.get((blink or {}).get("mesh") or "")
+            if blink is not None and blink_actor is not None:
+                states = []
+                for sample in blink["visibility_samples"]:
+                    frame = sample.get("frame")
+                    if frame is None or frame >= end:
+                        continue
+                    scrub(frame)
+                    states.append((bool(sample.get("visible")),
+                                   not blink_actor.is_hidden_ed()))
+                mismatched = [s for s in states if s[0] != s[1]]
+                check("the sequence hides and shows the mesh Maya blinked",
+                      bool(states) and not mismatched,
+                      mismatched[:4] or "all matched")
+
     expected_lights = len([
         record for record in (package_data.get("lights") or [])
         if record.get("enabled", True)
