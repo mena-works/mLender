@@ -1611,11 +1611,19 @@ def main():
             component = cache_actors[0].geometry_cache_component
             asset = component.get_editor_property("geometry_cache")
             tracks = list(asset.get_editor_property("tracks") or [])
-            # The importer's default flattens every object into one track with
-            # one material slot, so this is what stops the whole cache wearing
-            # a single material.
-            check("one track per cached object, not one flattened track",
-                  len(tracks) >= 3, len(tracks))
+            # One track per cached object, on the nose. The importer's
+            # default flattens the file into a single track with a single
+            # material slot, and rooting the cache at moving *groups* instead
+            # of meshes put 574 objects into 133 tracks and 575 slots -- both
+            # leave the slots unattributable, and both look like a working
+            # import until somebody notices the grey checker.
+            cached_records = [
+                record for record in cache_data.get("meshes") or []
+                if record.get("alembic")
+            ]
+            check("one track per cached object",
+                  len(tracks) == len(cached_records),
+                  (len(tracks), len(cached_records)))
             frames = component.get_number_of_frames()
             check("and the cache holds the range, not a single frame",
                   frames > 1, frames)

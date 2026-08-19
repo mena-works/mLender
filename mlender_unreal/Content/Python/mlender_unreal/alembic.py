@@ -245,13 +245,15 @@ def assign_cache_materials(actor, cache, package_data, material_cache,
                 )
         slot_index += span
         track_index += 1
-        if track_index > len(tracks) and slot_index < len(slots):
-            break
     if unmatched:
+        # Counted, not sampled. An earlier version stopped walking when the
+        # tracks ran out and reported one unmatched slot while 441 of them
+        # were still wearing the world grid checker.
         warnings.append(
-            "{0} slot(s) on the Alembic cache matched no Maya material and "
-            "kept the placeholder: {1}".format(
-                len(unmatched), ", ".join(sorted(set(unmatched))[:6])
+            "{0} of the {1} slot(s) on the Alembic cache matched no Maya "
+            "material and kept the placeholder: {2}".format(
+                len(unmatched), len(slots),
+                ", ".join(sorted(set(unmatched))[:6])
             )
         )
     return assigned

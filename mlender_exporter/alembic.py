@@ -108,14 +108,6 @@ def cache_only_shapes(shapes):
     return kept
 
 
-def ancestor_paths(path):
-    """Every transform above a full DAG path, outermost first."""
-    parts = [part for part in (path or "").split("|") if part]
-    return [
-        "|" + "|".join(parts[:index]) for index in range(1, len(parts))
-    ]
-
-
 def probe_frames(animation, count):
     """Up to ``count`` frames spread across the range, both ends included."""
     try:
@@ -186,25 +178,23 @@ def moving_transforms(transforms, animation):
     return [path for path in paths if path in moving]
 
 
-def topmost_moving(path, moving):
-    """The highest ancestor that also moves, or the path itself.
-
-    A root has to be the top of the moving hierarchy. AbcExport records a
-    root's own matrix and nothing above it, so rooting the cache at a prop
-    inside a moving group would write the prop's local transform and leave the
-    journey behind -- the object arrives, in the wrong place, holding still.
-    """
-    for ancestor in ancestor_paths(path):
-        if ancestor in moving:
-            return ancestor
-    return path
-
-
 def animated_cache_roots(shapes, animation):
-    """Roots covering every mesh whose world transform moves.
+    """One root per mesh whose world transform moves.
 
     Deformation is not the question here: this is the option that carries a
     simulation, and a rigid body deforms nothing.
+
+    Per mesh rather than per moving hierarchy, and only because the job is
+    written in world space. A root records its own matrix and nothing above
+    it, so in local space a prop inside a moving group had to be cached *with*
+    the group or it arrived still; in world space it carries the journey on
+    its own. Measured both ways: a still child of a group keyed 0 to 7 arrives
+    keyed 0 to 7.
+
+    What that buys is the receiving end. One root is one track and one
+    material slot, named after the shape, so a cached object can be matched
+    back to the material Maya gave it. Rooting at groups put 574 objects into
+    133 tracks and 575 slots, and nothing could say which slot was whose.
     """
     transforms = unique([
         transform for transform in
@@ -212,16 +202,9 @@ def animated_cache_roots(shapes, animation):
     ])
     if not transforms:
         return []
-    candidates = unique(transforms + [
-        ancestor
-        for transform in transforms
-        for ancestor in ancestor_paths(transform)
-    ])
-    moving = set(moving_transforms(candidates, animation))
-    return unique([
-        topmost_moving(transform, moving)
-        for transform in transforms if transform in moving
-    ])
+    # The mesh's own world matrix already carries every group above it, so
+    # there is nothing else to probe.
+    return moving_transforms(transforms, animation)
 
 
 def under_roots(path, roots):
