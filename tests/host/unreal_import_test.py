@@ -1580,6 +1580,29 @@ def main():
     check("and still leaves the level's own alone",
           {"ArtistKeyLight", "ArtistFog"} <= set(theirs_off), theirs_off)
 
+    # The FBX importer's own sequence must not be left behind. It sits beside
+    # the meshes, it is the easier of the two to open by mistake, and it plays
+    # nothing -- every key at its frame number as a tick, so the whole shot
+    # happens inside the first fiftieth of a frame.
+    # The FBX importer makes a Level Sequence of its own, beside the meshes,
+    # holding the same keys at one tick per frame -- so it plays the whole
+    # shot inside the first fiftieth of a frame. It is the easier of the two
+    # to open by mistake. The engine refuses to delete it while it is still
+    # referenced, so what is asserted is that the import says so rather than
+    # leaving the user to find out by dragging a playhead.
+    leftover = [
+        path for path in
+        (unreal.EditorAssetLibrary.list_assets(
+            "/Game/mLender/Meshes", recursive=True) or [])
+        if isinstance(unreal.EditorAssetLibrary.load_asset(path),
+                      unreal.LevelSequence)
+    ]
+    if leftover:
+        check("a sequence the FBX importer left behind is reported",
+              any("left a Level Sequence of its own" in str(line)
+                  for line in result.get("warnings") or []),
+              leftover)
+
     # --- the package that carries everything moving as a cache.
     #
     # Its own package, because it deliberately takes objects out of the FBX.

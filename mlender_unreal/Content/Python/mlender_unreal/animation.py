@@ -761,7 +761,9 @@ def adopt_object_animation(sequence, ticks_per_frame, first, last, warnings):
     actors = actors_by_label()
     adopted = 0
     keys_written = 0
+    emptied = []
     for source in _interchange_sequences():
+        taken = 0
         for binding in source.get_bindings() or []:
             label = str(binding.get_display_name() or "")
             actor = actors.get(label)
@@ -785,6 +787,7 @@ def adopt_object_animation(sequence, ticks_per_frame, first, last, warnings):
                     written = _copy_channels(destination, channels, scale)
                     if written:
                         adopted += 1
+                        taken += 1
                         keys_written += written
                         if scale != 1.0:
                             warnings.append(
@@ -795,7 +798,46 @@ def adopt_object_animation(sequence, ticks_per_frame, first, last, warnings):
                                     label, written
                                 )
                             )
+        if taken:
+            emptied.append(source)
+    _discard(emptied, warnings)
     return adopted, keys_written
+
+
+def _discard(sequences, warnings):
+    """Get the FBX importer's sequences out of the way once their keys are ours.
+
+    Leaving one costs more than the disk it takes. Interchange puts its
+    sequence beside the meshes, where it is the easier of the two to open by
+    mistake, and it plays nothing: every key sits at its frame number as a
+    tick, so the whole shot happens inside the first fiftieth of a frame.
+    Somebody opening that one drags the playhead and sees a level that does
+    not move.
+
+    Deleting is refused while anything still references it, and the refusal
+    is a False return rather than an exception -- so the answer is read, and
+    when it is no, the user is told which sequence to open instead. Only
+    sequences whose keys were taken are touched; one that gave up nothing may
+    still hold something.
+    """
+    for sequence in sequences:
+        path = ""
+        gone = False
+        try:
+            path = sequence.get_path_name().split(".")[0]
+            gone = bool(unreal.EditorAssetLibrary.delete_loaded_asset(sequence))
+            if not gone:
+                gone = bool(unreal.EditorAssetLibrary.delete_asset(path))
+        except Exception:
+            gone = False
+        if not gone:
+            warnings.append(
+                "The FBX importer left a Level Sequence of its own at "
+                "\"{0}\", which could not be removed. Its keys are already "
+                "on the mLender sequence; opening that one instead is the "
+                "difference between a shot that plays and one that looks "
+                "still.".format(path)
+            )
 
 
 def _channel_role(name):
