@@ -304,16 +304,22 @@ def triangulated(shapes, warnings):
 
 
 def export_alembic(roots, path, animation):
-    """Write one Alembic holding every root. True when a file was written.
+    """Write one Alembic holding every root. ``(ok, reason)``.
 
     A single file rather than one per object: Blender makes one cache
     datablock per file, and a scene of twenty caches would otherwise carry
     twenty readers pointing at the same directory.
+
+    Every root is named in the job string. Exporting the selection instead
+    would keep that string short, and was tried: it is not the same export --
+    a mesh went missing and the deforming ones arrived without a cache
+    reader -- so the string stays and the failure is reported rather than
+    worked around.
     """
     if not roots:
-        return False
+        return False, "nothing to cache"
     if not plugin_loaded():
-        return False
+        return False, "the AbcExport plugin would not load"
 
     folder = os.path.dirname(path)
     if folder and not os.path.isdir(folder):
@@ -335,9 +341,18 @@ def export_alembic(roots, path, animation):
 
     try:
         cmds.AbcExport(j=" ".join(job))
-    except Exception:
-        return False
-    return os.path.isfile(path)
+    except Exception as exc:
+        return False, "AbcExport failed after {0} root(s): {1}".format(
+            len(roots), exc)
+
+    if not os.path.isfile(path):
+        return False, "AbcExport wrote no file"
+    if os.path.getsize(path) <= 0:
+        # It creates the file before it writes, so "the file is there" is not
+        # the same as "the cache is in it" -- and the difference is a package
+        # whose objects are missing from both the FBX and the cache.
+        return False, "AbcExport wrote an empty file"
+    return True, ""
 
 
 def rig_deformed(shapes):

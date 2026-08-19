@@ -713,7 +713,7 @@ def _write_alembic(path, mesh_shapes, particle_list, particle_shapes,
         warnings,
     )
     try:
-        written = export_alembic(roots, path, animation)
+        written, reason = export_alembic(roots, path, animation)
     finally:
         if undo:
             try:
@@ -725,8 +725,8 @@ def _write_alembic(path, mesh_shapes, particle_list, particle_shapes,
                 )
     if not written:
         warnings.append(
-            "Alembic cache could not be written, so {0} object(s) that need "
-            "one travel as a single frame.".format(len(roots))
+            "Alembic cache could not be written ({0}), so {1} object(s) that "
+            "need one travel as a single frame.".format(reason, len(roots))
         )
         empty["failed"] = True
         return empty
