@@ -204,7 +204,29 @@ def animated_cache_roots(shapes, animation):
         return []
     # The mesh's own world matrix already carries every group above it, so
     # there is nothing else to probe.
-    return moving_transforms(transforms, animation)
+    return outermost(moving_transforms(transforms, animation))
+
+
+def outermost(paths):
+    """The given paths with none of them sitting inside another.
+
+    AbcExport refuses a job holding two roots where one is a descendant of the
+    other -- "|a|b and |a|b|c|d have parenting relationships" -- and it
+    refuses the *whole job*, so a single nested pair costs the entire cache.
+    Measured on a shot: 3384 objects moved over its full range, two of them
+    were nested, and the export wrote a file of zero bytes.
+
+    Dropping the descendant loses nothing. A root carries its subtree, so the
+    object still travels; it travels inside its ancestor.
+    """
+    ordered = sorted(unique([path for path in (paths or []) if path]), key=len)
+    kept = []
+    for path in ordered:
+        # Shortest first, so an ancestor is always considered before anything
+        # inside it.
+        if not under_roots(path, kept):
+            kept.append(path)
+    return kept
 
 
 def under_roots(path, roots):

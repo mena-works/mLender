@@ -42,6 +42,7 @@ from .particles import (
 from .alembic import (
     animated_cache_roots,
     deformed_shapes,
+    outermost,
     triangulated,
     cache_roots,
     cache_only_shapes,
@@ -694,7 +695,10 @@ def _write_alembic(path, mesh_shapes, particle_list, particle_shapes,
             if not under_roots(root, animated_roots)
         ]
     particle_roots = cache_roots(varying)
-    roots = mesh_roots + animated_roots + particle_roots
+    # One last pass over the union: a deformed mesh or a particle object can
+    # sit inside a moving group just as easily, and AbcExport refuses the job
+    # over any nested pair, not only the ones this option found.
+    roots = outermost(mesh_roots + animated_roots + particle_roots)
     if not roots:
         if cache_animated_meshes:
             warnings.append(

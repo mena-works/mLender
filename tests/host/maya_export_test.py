@@ -1027,6 +1027,20 @@ def build_scene():
     # file over it, so a single n-gon in a shot took all 574 cached objects
     # down with it and the only thing said was that the cache could not be
     # read. Modelled scenes are full of them, so the fixture has one.
+    # A moving mesh with another mesh parented under it. AbcExport refuses a
+    # job holding two roots where one sits inside the other -- "have parenting
+    # relationships" -- and it refuses the whole job, so one such pair in a
+    # scene means no cache at all. A shot found it: 3384 objects moved over
+    # its full range and two of them were nested, and the export wrote a file
+    # of zero bytes.
+    carrier = cmds.polyCube(name="carrierBox")[0]
+    cmds.setAttr(carrier + ".translateX", -30)
+    passenger = cmds.polyCube(name="passengerBox")[0]
+    cmds.setAttr(passenger + ".translateY", 2.0)
+    cmds.parent(passenger, carrier)
+    cmds.setKeyframe(carrier + ".translateZ", time=1, value=0.0)
+    cmds.setKeyframe(carrier + ".translateZ", time=25, value=7.0)
+
     ngon = cmds.polyCreateFacet(
         name="ngonSpinner",
         point=[(0, 0, 0), (2, 0, 0), (2.5, 0, 1.5), (1, 0, 2.5), (-0.5, 0, 1.5)],
@@ -1569,7 +1583,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("64 meshes exported", payload["mesh_count"] == 64,
+    check("66 meshes exported", payload["mesh_count"] == 66,
           payload["mesh_count"])
     # The locator, the empty null, the nested locator, the group holding
     # only a curve, and the two shapeless FKIK switchers (root and NSRig:).
@@ -2715,6 +2729,14 @@ def main():
           [item.get("material") for item in rider_materials]
           == ["simRider_shd"],
           [item.get("material") for item in rider_materials])
+    # Both of the nested pair travel, and the cache exists at all -- which is
+    # the part that was failing: the refusal takes the whole file with it.
+    check("a mesh parented under another moving mesh is cached",
+          animated_records.get("passengerBox", {}).get("alembic") is True,
+          animated_records.get("passengerBox", {}).get("alembic"))
+    check("so is the one carrying it",
+          animated_records.get("carrierBox", {}).get("alembic") is True,
+          animated_records.get("carrierBox", {}).get("alembic"))
     check("a face with more than four sides is triangulated for the cache",
           any("more than four sides" in str(line)
               for line in animated_payload.get("export_warnings") or []),
