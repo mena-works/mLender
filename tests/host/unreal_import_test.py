@@ -1584,6 +1584,34 @@ def main():
     # the meshes, it is the easier of the two to open by mistake, and it plays
     # nothing -- every key at its frame number as a tick, so the whole shot
     # happens inside the first fiftieth of a frame.
+    # --- and the masters must actually compile.
+    #
+    # Only visible when the commandlet is allowed to render: with -nullrhi no
+    # shader is built and every material reports zero instructions, which is
+    # indistinguishable from a material that failed. So the check runs when
+    # the engine is compiling and skips when it is not, and the run that
+    # matters is the one with -AllowCommandletRendering.
+    statistics = []
+    for path in (unreal.EditorAssetLibrary.list_assets(
+            "/Game/mLender/Materials", recursive=True) or []):
+        asset = unreal.EditorAssetLibrary.load_asset(path)
+        if not isinstance(asset, unreal.Material):
+            continue
+        try:
+            stats = unreal.MaterialEditingLibrary.get_statistics(asset)
+            statistics.append(
+                (asset.get_name(),
+                 int(stats.get_editor_property(
+                     "num_pixel_shader_instructions"))))
+        except Exception:
+            continue
+    if any(count > 0 for _name, count in statistics):
+        check("every master compiled to real shader instructions",
+              all(count > 0 for _name, count in statistics), statistics)
+    else:
+        print("  --    shader compilation is off in this run; "
+              "re-run with -AllowCommandletRendering to check the masters")
+
     # --- every input the masters build must actually be connected.
     #
     # connect_material_expressions answers a wrong pin name with False rather

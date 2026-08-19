@@ -241,7 +241,7 @@ def _texture_parameter(material, name, x, y, sampler_type=None):
 _UNWIRED = []
 
 
-def _wire(source, node, pin):
+def _wire(source, node, pin, output=""):
     """Connect two expressions and record it when the pin refuses.
 
     Two names were wrong here for months, and both were read off the engine
@@ -255,7 +255,7 @@ def _wire(source, node, pin):
         return False
     try:
         joined = bool(unreal.MaterialEditingLibrary
-                      .connect_material_expressions(source, "", node, pin))
+                      .connect_material_expressions(source, output, node, pin))
     except Exception:
         joined = False
     if not joined:
@@ -344,7 +344,13 @@ def _correction_stack(material, parameter, sampler, x, y):
             half.set_editor_property("r", 0.5)
         except Exception:
             pass
-        _wire(sampler, coordinate, "A")
+        # One channel, not the colour. A texture sample's default output is
+        # float4 and a UV input is float2, and the mismatch is fatal:
+        # "Cannot cast from larger type float4 to smaller type float2" fails
+        # the master, which drops every object using it to the engine's
+        # default material. The remap curve is a scalar remap in Maya, so red
+        # is the channel that means anything here.
+        _wire(sampler, coordinate, "A", "R")
         _wire(half, coordinate, "B")
         _wire(coordinate, curve, "UVs")
         remapped = _lerp(material, sampler, curve, remap_use, x - 120, y + 300)
@@ -419,16 +425,32 @@ def _build_master(surface_class, warnings):
         "_".join(part.capitalize() for part in surface_class.split("|")),
     )
     path = "{0}/{1}".format(MATERIAL_CONTENT_PATH, name)
+    material = None
     if unreal.EditorAssetLibrary.does_asset_exist(path):
-        existing = unreal.EditorAssetLibrary.load_asset(path)
-        if existing is not None:
-            return existing
+        # Reused, but never trusted. Keeping whatever is there means a master
+        # built by an older version of this plugin survives every later
+        # import, so a fixed graph never reaches a project that already had
+        # the broken one -- which is exactly how a compile error outlived two
+        # rebuilds. The asset is kept, so the instances that point at it stay
+        # pointed at it, and its graph is thrown away and built again.
+        material = unreal.EditorAssetLibrary.load_asset(path)
+        if material is not None:
+            try:
+                unreal.MaterialEditingLibrary.delete_all_material_expressions(
+                    material)
+            except Exception as exc:
+                warnings.append(
+                    'The master material "{0}" already existed and its old '
+                    "graph could not be cleared ({1}); it may still hold a "
+                    "previous build.".format(name, exc)
+                )
 
     tools = unreal.AssetToolsHelpers.get_asset_tools()
-    material = tools.create_asset(
-        name, MATERIAL_CONTENT_PATH, unreal.Material,
-        unreal.MaterialFactoryNew()
-    )
+    if material is None:
+        material = tools.create_asset(
+            name, MATERIAL_CONTENT_PATH, unreal.Material,
+            unreal.MaterialFactoryNew()
+        )
     if material is None:
         raise RuntimeError(
             "Unreal refused to create the master material {0}".format(name)
