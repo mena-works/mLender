@@ -854,6 +854,11 @@ Kullanıcının elle doğrulaması gereken adımlar:
   `set_range` ve oynatma konumu **tick**. Ölçüldü: 24 karede 100→900
   anahtarlanan sekans tick 12000'de 500, "kare 12"de 100.40 okuyor.
   Display rate yalnız cetveli adlandırır
+- ❌ `LevelSequenceEditorBlueprintLibrary.set_current_time`'i tick sanma; o da
+  **kare** alıyor. Ölçüldü: 260 verince cache 10.833 sn (21.7 sn'lik çekimin
+  tam ortası) okuyor. Tick'e çevirmek için 1000 ile çarpmak playhead'i kare
+  49000'e park ediyor, Sequencer görünümü oraya kayıyor ve cetvel yüz binlere
+  çıkıyor — "aralık yanlış geldi" diye iki tur bunun peşinde koşuldu
 - ❌ …ama `set_playback_start/end` bu ailenin **istisnası**: o **kare**
   alıyor. Ölçüldü: `set_playback_end(33000)` → `get_playback_end_seconds()`
   = 1375 s, `set_playback_end(33)` → 1.375 s. Tick verince 0-33'lük bir
