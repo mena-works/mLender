@@ -172,6 +172,24 @@ def create_sequence(package_data, warnings):
         sequence.set_playback_end(int(round(end)))
     except Exception:
         pass
+
+    # The ruler as well, in seconds, with a little air on each side. Sequencer
+    # remembers a view range per asset and fits it to whatever it finds; left
+    # to itself it has opened this shot on a span of tens of thousands of
+    # frames, which is the first thing a user sees and reads as the range
+    # having arrived wrong.
+    try:
+        margin = max(1.0, (end - start) * 0.05) / fps
+        unreal.MovieSceneSequenceExtensions.set_work_range_start(
+            sequence, start / fps)
+        unreal.MovieSceneSequenceExtensions.set_work_range_end(
+            sequence, end / fps)
+        unreal.MovieSceneSequenceExtensions.set_view_range_start(
+            sequence, start / fps - margin)
+        unreal.MovieSceneSequenceExtensions.set_view_range_end(
+            sequence, end / fps + margin)
+    except Exception:
+        pass
     return sequence, ticks_per_frame, first, last
 
 
