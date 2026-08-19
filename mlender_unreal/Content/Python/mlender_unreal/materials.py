@@ -235,6 +235,34 @@ def _texture_parameter(material, name, x, y, sampler_type=None):
     return node
 
 
+# Pins that would not connect while a master was being built. A wrong pin
+# name is answered with False rather than an exception, so without this the
+# graph looks built and the material simply never compiles.
+_UNWIRED = []
+
+
+def _wire(source, node, pin):
+    """Connect two expressions and record it when the pin refuses.
+
+    Two names were wrong here for months, and both were read off the engine
+    only after a whole level came in grey: the main input of a Clamp is called
+    "" rather than "Input", and a Power's exponent is "Exp" rather than
+    "Exponent". Each silently unconnected pin left the master uncompilable,
+    which shows up as the engine's default material on every object and as
+    nothing at all in any log this tool writes.
+    """
+    if source is None or node is None:
+        return False
+    try:
+        joined = bool(unreal.MaterialEditingLibrary
+                      .connect_material_expressions(source, "", node, pin))
+    except Exception:
+        joined = False
+    if not joined:
+        _UNWIRED.append(pin or "<the unnamed input>")
+    return joined
+
+
 def _lerp(material, flat, texture, switch, x, y):
     """flat when the switch is 0, the texture when it is 1."""
     node = _expression(
@@ -242,10 +270,9 @@ def _lerp(material, flat, texture, switch, x, y):
     )
     if node is None:
         return None
-    library = unreal.MaterialEditingLibrary
-    library.connect_material_expressions(flat, "", node, "A")
-    library.connect_material_expressions(texture, "", node, "B")
-    library.connect_material_expressions(switch, "", node, "Alpha")
+    _wire(flat, node, "A")
+    _wire(texture, node, "B")
+    _wire(switch, node, "Alpha")
     return node
 
 
@@ -317,9 +344,9 @@ def _correction_stack(material, parameter, sampler, x, y):
             half.set_editor_property("r", 0.5)
         except Exception:
             pass
-        library.connect_material_expressions(sampler, "", coordinate, "A")
-        library.connect_material_expressions(half, "", coordinate, "B")
-        library.connect_material_expressions(coordinate, "", curve, "UVs")
+        _wire(sampler, coordinate, "A")
+        _wire(half, coordinate, "B")
+        _wire(coordinate, curve, "UVs")
         remapped = _lerp(material, sampler, curve, remap_use, x - 120, y + 300)
         if remapped is not None:
             source = remapped
@@ -330,8 +357,8 @@ def _correction_stack(material, parameter, sampler, x, y):
     power = _expression(material, "MaterialExpressionPower", x, y)
     if exponent is None or power is None:
         return source
-    library.connect_material_expressions(source, "", power, "Base")
-    library.connect_material_expressions(exponent, "", power, "Exponent")
+    _wire(source, power, "Base")
+    _wire(exponent, power, "Exp")
 
     # Everything a colour correct node does after its gamma -- contrast,
     # exposure, multiply, add -- is affine, so the whole tail is one multiply
@@ -342,16 +369,16 @@ def _correction_stack(material, parameter, sampler, x, y):
     )
     times = _expression(material, "MaterialExpressionMultiply", x + 100, y)
     if scale is not None and times is not None:
-        library.connect_material_expressions(head, "", times, "A")
-        library.connect_material_expressions(scale, "", times, "B")
+        _wire(head, times, "A")
+        _wire(scale, times, "B")
         head = times
     offset = _scalar_parameter(
         material, parameter + CORRECTION_OFFSET_SUFFIX, 0.0, x - 200, y - 120
     )
     plus = _expression(material, "MaterialExpressionAdd", x + 160, y)
     if offset is not None and plus is not None:
-        library.connect_material_expressions(head, "", plus, "A")
-        library.connect_material_expressions(offset, "", plus, "B")
+        _wire(head, plus, "A")
+        _wire(offset, plus, "B")
         head = plus
 
     low = _scalar_parameter(
@@ -369,9 +396,9 @@ def _correction_stack(material, parameter, sampler, x, y):
     )
     if None in (low, high, clamp, use):
         return head
-    library.connect_material_expressions(head, "", clamp, "Input")
-    library.connect_material_expressions(low, "", clamp, "Min")
-    library.connect_material_expressions(high, "", clamp, "Max")
+    _wire(head, clamp, "")
+    _wire(low, clamp, "Min")
+    _wire(high, clamp, "Max")
     # Switched rather than always on: a clamp to 0..1 is not identity for a
     # channel that legitimately goes past one, and emission does.
     return _lerp(material, head, clamp, use, x + 400, y) or clamp
@@ -548,10 +575,22 @@ def _build_master(surface_class, warnings):
             x, y = place()
             node = _scalar_parameter(material, parameter, default, x - 400, y)
             if node is not None:
-                library.connect_material_expressions(
-                    node, "", attributes, pin
-                )
+                _wire(node, attributes, pin)
             row += 1
+
+    # Any pin that refused, said out loud. A master with an unconnected input
+    # does not compile, and a material that does not compile is drawn as the
+    # engine's grey default on every object that wears it -- which is a whole
+    # scene looking broken, from a mistyped pin name.
+    if _UNWIRED:
+        warnings.append(
+            'Master material "{0}" could not connect {1} input(s) ({2}); it '
+            "will not compile, and everything using it will draw with the "
+            "engine's default material.".format(
+                name, len(_UNWIRED), ", ".join(sorted(set(_UNWIRED))[:6])
+            )
+        )
+        del _UNWIRED[:]
 
     unreal.MaterialEditingLibrary.recompile_material(material)
     unreal.EditorAssetLibrary.save_loaded_asset(material, False)

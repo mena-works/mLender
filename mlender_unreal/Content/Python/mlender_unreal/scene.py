@@ -14,6 +14,7 @@ from .constants import (
     CONTENT_ROOT,
     GENERATED_TAG,
     LIGHTING_ACTOR_CLASSES,
+    PURGE_ONE_BY_ONE_LIMIT,
 )
 
 
@@ -158,9 +159,27 @@ def purge_generated_content(warnings):
 
     # One at a time, so that what survives can be named. A directory delete is
     # all or nothing and says only "no".
+    #
+    # Bounded, though. In a commandlet this costs seconds; in an open editor
+    # every delete walks references, the asset registry and the undo buffer,
+    # and a send into a level holding a previous one of this size sat on
+    # "Force Deleting 3761 Package(s)" for over half an hour at a full core
+    # and had not finished. Each send imports into a folder of its own, so
+    # leaving the old assets costs disk rather than correctness -- and disk
+    # is the cheaper of the two things to spend here.
+    remaining = unreal.EditorAssetLibrary.list_assets(
+        CONTENT_ROOT, recursive=True) or []
+    if len(remaining) > PURGE_ONE_BY_ONE_LIMIT:
+        warnings.append(
+            "{0} asset(s) from previous sends are still under {1}: removing "
+            "them one at a time is slow enough in an open editor to look like "
+            "a hang, so they were left. This send writes into a folder of its "
+            "own and does not reuse them; delete that folder by hand when it "
+            "is in the way.".format(len(remaining), CONTENT_ROOT)
+        )
+        return 0
     survivors = []
-    for path in (unreal.EditorAssetLibrary.list_assets(
-            CONTENT_ROOT, recursive=True) or []):
+    for path in remaining:
         try:
             gone = unreal.EditorAssetLibrary.delete_asset(path)
         except Exception:

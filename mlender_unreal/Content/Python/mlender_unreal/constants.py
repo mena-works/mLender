@@ -64,6 +64,12 @@ LIGHTING_ACTOR_CLASSES = (
 )
 CONTENT_ROOT = "/Game/mLender"
 MESH_CONTENT_PATH = CONTENT_ROOT + "/Meshes"
+
+# How many leftover assets are worth deleting one at a time when the folder
+# delete is refused. Measured in an open editor: 3761 of them held the game
+# thread for over half an hour without finishing, while the same work takes
+# seconds in a commandlet. Past this, they are named and left.
+PURGE_ONE_BY_ONE_LIMIT = 250
 MATERIAL_CONTENT_PATH = CONTENT_ROOT + "/Materials"
 TEXTURE_CONTENT_PATH = CONTENT_ROOT + "/Textures"
 SEQUENCE_CONTENT_PATH = CONTENT_ROOT + "/Sequences"

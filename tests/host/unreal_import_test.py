@@ -1584,6 +1584,47 @@ def main():
     # the meshes, it is the easier of the two to open by mistake, and it plays
     # nothing -- every key at its frame number as a tick, so the whole shot
     # happens inside the first fiftieth of a frame.
+    # --- every input the masters build must actually be connected.
+    #
+    # connect_material_expressions answers a wrong pin name with False rather
+    # than an exception. Two names were wrong: a Clamp's main input is "" and
+    # not "Input", and a Power's exponent is "Exp" and not "Exponent". Each
+    # left the master uncompilable, which a commandlet cannot notice -- it
+    # compiles no shaders -- and which the user sees as every object in the
+    # level wearing the engine's grey default.
+    check("no master reports an input it could not connect",
+          not [line for line in (result.get("warnings") or [])
+               if "could not connect" in str(line)],
+          [line for line in (result.get("warnings") or [])
+           if "could not connect" in str(line)][:2])
+
+    dangling = []
+    for path in (unreal.EditorAssetLibrary.list_assets(
+            "/Game/mLender/Materials", recursive=True) or []):
+        asset = unreal.EditorAssetLibrary.load_asset(path)
+        if not isinstance(asset, unreal.Material):
+            continue
+        for expression in (unreal.MaterialEditingLibrary
+                           .get_material_expressions(asset) or []):
+            kind = expression.get_class().get_name()
+            if kind not in ("MaterialExpressionClamp",
+                            "MaterialExpressionPower",
+                            "MaterialExpressionLinearInterpolate",
+                            "MaterialExpressionMultiply",
+                            "MaterialExpressionAdd"):
+                continue
+            try:
+                inputs = (unreal.MaterialEditingLibrary
+                          .get_inputs_for_material_expression(asset,
+                                                              expression))
+            except Exception:
+                continue
+            for index, wired in enumerate(inputs or []):
+                if wired is None:
+                    dangling.append((asset.get_name(), kind, index))
+    check("and no arithmetic node in a master is left with a loose input",
+          not dangling, dangling[:4])
+
     # --- every sampler must match the texture in it.
     #
     # Unreal refuses to compile a TextureSampleParameter2D whose texture is of
