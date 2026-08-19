@@ -844,9 +844,12 @@ def animate_geometry_caches(sequence, ticks_per_frame, first, last,
     for the whole shot, which is exactly what a simulation that did not
     travel looks like -- and this option exists to carry simulations.
 
-    The track goes on the component rather than the actor. Both are accepted,
-    but the component is what owns the cache, and every other component
-    property in this file is keyed the same way.
+    The track goes on the **actor**. The engine accepts either -- its
+    execution token calls GeometryMeshComponentFromObject, which takes an
+    actor and finds the component, or takes the component itself -- but the
+    actor is the binding Epic's own documentation describes adding the track
+    to, and it is one fewer thing to resolve: a component possessable only
+    resolves through its parent actor's binding anyway.
     """
     caches = []
     try:
@@ -871,7 +874,7 @@ def animate_geometry_caches(sequence, ticks_per_frame, first, last,
     tracks = 0
     for actor, component, asset in caches:
         try:
-            binding = sequence.add_possessable(component)
+            binding = sequence.add_possessable(actor)
             _track, section = _section(
                 binding, unreal.MovieSceneGeometryCacheTrack, first, last
             )
