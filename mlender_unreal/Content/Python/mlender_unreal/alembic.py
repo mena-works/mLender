@@ -125,31 +125,6 @@ def cache_component(actor):
         return None
 
 
-def track_key(name):
-    """A track name reduced to the Maya shape it came from.
-
-    Measured: ``simCubeShape`` arrives as ``simCubeShape_0``. The trailing
-    index is the importer's, not Maya's.
-    """
-    text = str(name or "")
-    parts = text.rsplit("_", 1)
-    if len(parts) == 2 and parts[1].isdigit():
-        text = parts[0]
-    return safe_asset_name(text)
-
-
-def cached_records(package_data):
-    """The mesh records the cache carries, keyed by the shape name it uses."""
-    index = {}
-    for record in (package_data or {}).get("meshes") or []:
-        if not record.get("alembic"):
-            continue
-        for key in (record.get("shape"), record.get("mesh"),
-                    record.get("mesh_full_name")):
-            if key:
-                index.setdefault(safe_asset_name(str(key)), record)
-    return index
-
 
 def _slot_names(cache, component):
     try:
@@ -159,14 +134,6 @@ def _slot_names(cache, component):
         pass
     try:
         return [""] * component.get_num_materials()
-    except Exception:
-        return []
-
-
-def _track_keys(cache):
-    try:
-        return [track_key(track.get_name())
-                for track in (cache.get_editor_property("tracks") or [])]
     except Exception:
         return []
 
@@ -181,70 +148,114 @@ def _material_for(item, material_cache, package_folder, build_material,
     return material
 
 
+def ordered_cached_records(package_data):
+    """The cached mesh records in the order the cache lists them.
+
+    By full DAG path, which was fitted rather than assumed. The named slots
+    are ground truth -- a slot called ``foo_shdSG`` belongs to whichever
+    object carries that shading group -- so each candidate order can be scored
+    by how many of them land on the right object. On a 574 object shot with
+    122 named slots: by path, 122 right and none wrong; by leaf name, 34
+    right and 88 wrong, whether or not case was folded, and the same for the
+    order the JSON happens to list.
+
+    The reader walks the hierarchy, in other words, and a leaf name says
+    nothing about where in that walk its object sits.
+    """
+    records = [
+        record for record in (package_data or {}).get("meshes") or []
+        if record.get("alembic")
+    ]
+    return sorted(
+        records,
+        key=lambda record: str(
+            record.get("mesh_path") or record.get("mesh") or ""
+        ),
+    )
+
+
+def _record_materials(record):
+    return [
+        item for item in ((record or {}).get("materials") or [])
+        if item.get("material")
+    ]
+
+
 def assign_cache_materials(actor, cache, package_data, material_cache,
                            package_folder, build_material, warnings):
     """Give a cache the materials the JSON says its objects had.
 
     A cached mesh never went through the FBX, so nothing has matched it to a
-    Maya material record and its slots hold the world grid checker. Two things
-    were measured to make this possible: the slot of a mesh split between
-    shaders is named after the shading group, and the slots run in track
-    order. So a named slot is looked up by name -- position independent -- and
-    an unnamed one, which only a single-material object produces, is resolved
-    by walking the tracks alongside the slots.
+    Maya material record and its slots hold the world grid checker.
+
+    Two measurements make this possible. A mesh split between shaders gets one
+    slot per shading group, named after it, and a mesh with a single shader
+    gets one unnamed slot; and the slots run in the order the reader walks the
+    hierarchy, which is the order of the full DAG paths.
+
+    So position places each slot and the names check the placing rather than
+    driving it. Driving by name was tried and is wrong: a shading group is
+    routinely shared by many objects, so a name says which *material* a slot
+    holds and never which object it belongs to.
     """
     component = cache_component(actor)
     if component is None:
         return 0
     slots = _slot_names(cache, component)
-    tracks = _track_keys(cache)
-    records = cached_records(package_data)
-    by_shading_engine = {}
-    for record in records.values():
-        for item in record.get("materials") or []:
-            engine = item.get("shading_engine")
-            if engine:
-                by_shading_engine.setdefault(safe_asset_name(str(engine)), item)
+    if not slots:
+        return 0
+    records = ordered_cached_records(package_data)
 
     assigned = 0
     unmatched = []
+    disagreed = 0
     slot_index = 0
-    track_index = 0
-    while slot_index < len(slots):
-        record = None
-        if track_index < len(tracks):
-            record = records.get(tracks[track_index])
-        items = [
-            item for item in ((record or {}).get("materials") or [])
-            if item.get("material")
-        ]
-        # A mesh with one shading group writes no face set, so it owns exactly
-        # one slot; a split mesh owns one per shading group.
+    for record in records:
+        if slot_index >= len(slots):
+            break
+        items = _record_materials(record)
         span = len(items) if len(items) > 1 else 1
         for offset in range(span):
-            index = slot_index + offset
-            if index >= len(slots):
+            if slot_index >= len(slots):
                 break
-            item = by_shading_engine.get(safe_asset_name(slots[index]))
-            if item is None and len(items) == 1:
-                item = items[0]
+            name = safe_asset_name(str(slots[slot_index]))
+            item = None
+            if name and name != NO_FACE_SET:
+                for candidate in items:
+                    engine = safe_asset_name(
+                        str(candidate.get("shading_engine") or "")
+                    )
+                    if engine and engine == name:
+                        item = candidate
+                        break
+                if item is None:
+                    # The slot names a shading group this object does not
+                    # carry, so the walk and the file disagree about where
+                    # this slot belongs.
+                    disagreed += 1
+            if item is None and items:
+                item = items[offset] if offset < len(items) else items[0]
             if item is None:
-                unmatched.append(slots[index] or str(index))
+                unmatched.append(str(slots[slot_index]) or str(slot_index))
+                slot_index += 1
                 continue
             try:
                 component.set_material(
-                    index,
+                    slot_index,
                     _material_for(item, material_cache, package_folder,
                                   build_material, warnings),
                 )
                 assigned += 1
             except Exception as exc:
                 warnings.append(
-                    'The cached object in slot {0} could not take its '
-                    "material: {1}".format(index, exc)
+                    "The cached object in slot {0} could not take its "
+                    "material: {1}".format(slot_index, exc)
                 )
-        slot_index += span
-        track_index += 1
+            slot_index += 1
+    while slot_index < len(slots):
+        unmatched.append(str(slots[slot_index]) or str(slot_index))
+        slot_index += 1
+
     if unmatched:
         # Counted, not sampled. An earlier version stopped walking when the
         # tracks ran out and reported one unmatched slot while 441 of them
@@ -255,6 +266,12 @@ def assign_cache_materials(actor, cache, package_data, material_cache,
                 len(unmatched), len(slots),
                 ", ".join(sorted(set(unmatched))[:6])
             )
+        )
+    if disagreed:
+        warnings.append(
+            "{0} material slot(s) on the cache name a shader their object "
+            "does not use, so some cached objects may be wearing each "
+            "other's materials.".format(disagreed)
         )
     return assigned
 

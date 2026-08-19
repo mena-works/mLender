@@ -1621,9 +1621,24 @@ def main():
                 record for record in cache_data.get("meshes") or []
                 if record.get("alembic")
             ]
-            check("one track per cached object",
-                  len(tracks) == len(cached_records),
-                  (len(tracks), len(cached_records)))
+            # One slot per cached object, which is what the material walk
+            # counts on. Tracks are not it: the importer merges them -- 574
+            # objects on a real shot arrived as 133 tracks -- so a check on
+            # track count would pass here and mean nothing there.
+            slot_names = [
+                str(name) for name in
+                (asset.get_editor_property("material_slot_names") or [])
+            ]
+            expected = 0
+            for record in cached_records:
+                items = [
+                    item for item in (record.get("materials") or [])
+                    if item.get("material")
+                ]
+                expected += len(items) if len(items) > 1 else 1
+            check("one material slot per cached object",
+                  len(slot_names) == expected,
+                  (len(slot_names), expected))
             frames = component.get_number_of_frames()
             check("and the cache holds the range, not a single frame",
                   frames > 1, frames)
