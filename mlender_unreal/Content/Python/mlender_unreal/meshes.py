@@ -55,11 +55,25 @@ def send_content_path(package_name):
     imported 3722 meshes and placed **no actors at all** -- it was updating a
     scene whose assets and actors were both gone.
 
-    A folder named after the package has no such history. Nothing accumulates:
-    the whole content root is purged at the start of every import anyway.
+    So the folder has to be one nothing has been imported into yet -- not
+    merely one named after the package. Two sends of the same package name
+    land in the same folder, and the second is a re-import again; and the
+    purge that used to clear the way is skipped when there are thousands of
+    assets, because deleting those one at a time in an open editor does not
+    finish. A free name costs a folder and settles both.
     """
-    name = safe_asset_name(str(package_name or ""), "")
-    return MESH_CONTENT_PATH + "/" + name if name else MESH_CONTENT_PATH
+    name = safe_asset_name(str(package_name or ""), "") or "Send"
+    base = MESH_CONTENT_PATH + "/" + name
+    try:
+        if not unreal.EditorAssetLibrary.does_directory_exist(base):
+            return base
+        for index in range(2, 1000):
+            candidate = "{0}_{1}".format(base, index)
+            if not unreal.EditorAssetLibrary.does_directory_exist(candidate):
+                return candidate
+    except Exception:
+        pass
+    return base
 
 
 def import_fbx_scene(fbx_path, warnings, package_name=""):
