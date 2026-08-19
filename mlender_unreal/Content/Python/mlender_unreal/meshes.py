@@ -45,7 +45,24 @@ def resolve_fbx_path(package_folder, package_data):
     )
 
 
-def import_fbx_scene(fbx_path, warnings):
+def send_content_path(package_name):
+    """Where this send's meshes go: a folder of its own.
+
+    Importing twice into the same folder is not a second import to
+    Interchange, it is a re-import. Measured on a level that had been saved
+    after an earlier send: the second one logged "Failed to find object
+    /Game/mLender/Meshes/..." for every asset the purge had just removed, then
+    imported 3722 meshes and placed **no actors at all** -- it was updating a
+    scene whose assets and actors were both gone.
+
+    A folder named after the package has no such history. Nothing accumulates:
+    the whole content root is purged at the start of every import anyway.
+    """
+    name = safe_asset_name(str(package_name or ""), "")
+    return MESH_CONTENT_PATH + "/" + name if name else MESH_CONTENT_PATH
+
+
+def import_fbx_scene(fbx_path, warnings, package_name=""):
     """Import the FBX into the open level, hierarchy and all.
 
     Uses Interchange's scene import, which was measured to spawn one
@@ -58,7 +75,8 @@ def import_fbx_scene(fbx_path, warnings):
     source = manager.create_source_data(fbx_path)
     parameters = unreal.ImportAssetParameters()
     parameters.is_automated = True
-    if not manager.import_scene(MESH_CONTENT_PATH, source, parameters):
+    if not manager.import_scene(
+            send_content_path(package_name), source, parameters):
         raise RuntimeError(
             "Interchange refused to import {0}".format(fbx_path)
         )

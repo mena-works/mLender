@@ -13,6 +13,7 @@ import unreal
 
 from .constants import (
     ACTOR_FOLDER_ROOT,
+    CONTENT_ROOT,
     SUPPORTED_SCHEMA_VERSIONS,
 )
 from .alembic import import_alembic
@@ -115,11 +116,17 @@ def import_scene_package(
     purge_generated_content(warnings)
 
     before = {id(actor) for actor in level_actors()}
-    import_fbx_scene(fbx_path, warnings)
+    import_fbx_scene(
+        fbx_path, warnings, package_data.get("package_name") or "")
 
     actors = imported_mesh_actors(before)
     if not actors:
-        raise RuntimeError("The FBX import produced no static mesh actors.")
+        raise RuntimeError(
+            "The FBX import produced no static mesh actors. Assets from a "
+            "previous send under {0} that could not be removed are the known "
+            "cause: the importer reuses assets of the same name and places "
+            "nothing. Delete that folder and send again.".format(CONTENT_ROOT)
+        )
 
     unreal_scale = position_scale(package_data, import_scale)
     # The energy model was measured against metres, so it keeps the metre

@@ -129,19 +129,54 @@ def purge_generated_content(warnings):
 
     Only under this tool's own content root, and only when nothing references
     them. A user who built something on top of a generated material keeps it.
+
+    The answer is read. delete_directory returns False when something still
+    holds the assets rather than raising, and the caller used to carry on into
+    an FBX import that then collided with the assets still sitting there and
+    produced no actors at all -- the failure a saved level and a second send
+    produce every time. The level is cleared before this runs, so the usual
+    holder is the editor itself: collecting garbage first drops what the
+    destroyed actors were keeping alive.
     """
     if not unreal.EditorAssetLibrary.does_directory_exist(CONTENT_ROOT):
         return 0
-    removed = 0
     try:
-        removed = unreal.EditorAssetLibrary.delete_directory(CONTENT_ROOT)
+        unreal.SystemLibrary.collect_garbage()
+    except Exception:
+        pass
+    removed = False
+    try:
+        removed = bool(
+            unreal.EditorAssetLibrary.delete_directory(CONTENT_ROOT))
     except Exception as exc:
         warnings.append(
             "Previously generated assets under {0} could not be removed: "
             "{1}".format(CONTENT_ROOT, exc)
         )
+    if removed:
+        return 1
+
+    # One at a time, so that what survives can be named. A directory delete is
+    # all or nothing and says only "no".
+    survivors = []
+    for path in (unreal.EditorAssetLibrary.list_assets(
+            CONTENT_ROOT, recursive=True) or []):
+        try:
+            gone = unreal.EditorAssetLibrary.delete_asset(path)
+        except Exception:
+            gone = False
+        if not gone:
+            survivors.append(path)
+    if survivors:
+        warnings.append(
+            "{0} asset(s) from a previous send under {1} could not be "
+            "removed, starting with {2}. The FBX import reuses assets of the "
+            "same name, so this is what leaves a send with no meshes in the "
+            "level; close anything referencing them, or delete the folder by "
+            "hand.".format(len(survivors), CONTENT_ROOT, survivors[0])
+        )
         return 0
-    return 1 if removed else 0
+    return 1
 
 
 def ensure_folders():
