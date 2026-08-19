@@ -2615,6 +2615,21 @@ Unreal:
   default, which flattens the whole file into a single track with a single
   material slot. Measured: six objects, one slot.
 
+Two things happen to the geometry on the way, both measured on a real shot:
+
+- **n-gons are triangulated for the cache.** Unreal's Alembic reader refuses
+  a face with more than four sides — *"expecting triangles (3) or quads
+  (4)"* — and fails the **entire file** over one of them, so a single n-gon
+  took all 574 cached objects of a shot down with it. Only the shapes that
+  actually have one are touched, so a quad model keeps its quads; and it is
+  done as construction history that is removed again, so the Maya scene is
+  unchanged.
+- **the FBX is written without a bake** when the cache took every mover and
+  nothing left behind is skinned or deformed. Baking evaluates the scene once
+  per frame per node, and on that same shot — 7106 meshes over a Bullet sim —
+  it was over an hour of baking objects that do not move. The cache itself
+  took 63 seconds.
+
 What it costs is worth knowing before turning it on:
 
 - a cached object arrives as **geometry per frame**. In Unreal that is a

@@ -763,6 +763,13 @@ Kullanıcının elle doğrulaması gereken adımlar:
 - ❌ Mesh'i olmayan bir mesh actor'ünde materyal atamasını sessizce atlama;
   daha önce gönderi barındıran content root'a yeniden import bunu üretiyor ve
   "2 mesh, 0 materyal, 0 uyarı" diye görünüyordu
+- ❌ Unreal'e n-gon taşıyan bir Alembic gönderme; okuyucu dört köşeden
+  fazlasını reddediyor ("expecting triangles (3) or quads (4)") ve **bütün
+  dosyayı** düşürüyor. Gerçek bir çekimde tek bir yüz 574 objeyi götürdü ve
+  import yalnız "cache okunamadı" dedi. Yalnız gerekeni üçgenleştir, history
+  olarak yap ve geri al
+- ❌ N-gon'u üçgen/yüz oranıyla arama; bir üçgen + bir beşgen, dörtgen
+  meshiyle aynı oranı veriyor. Yüzleri gez
 - ❌ Alembic'i face set yazmadan gönderip materyalin geleceğini sanma;
   ölçüldü, `-writeFaceSets` yoksa Unreal'de **her slot** `NoFaceSetName`
   ve hiçbir slot hangi shader'a ait olduğunu söylemiyor. Varken slot adı
