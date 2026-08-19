@@ -1584,6 +1584,81 @@ def main():
     # the meshes, it is the easier of the two to open by mistake, and it plays
     # nothing -- every key at its frame number as a tick, so the whole shot
     # happens inside the first fiftieth of a frame.
+    # --- every sampler must match the texture in it.
+    #
+    # Unreal refuses to compile a TextureSampleParameter2D whose texture is of
+    # another type than the sampler declares, and the refusal is not an
+    # exception anywhere Python can see: the material asset is written, every
+    # instance of it is written, and the level then draws all of them with the
+    # engine's grey checker because the compile failed. Nothing in a
+    # commandlet notices -- shaders are not compiled there at all -- so the
+    # engine's own rule is applied here instead, to the masters and to every
+    # texture an instance assigns.
+    def expected_sampler(texture):
+        types = unreal.MaterialSamplerType
+        settings = unreal.TextureCompressionSettings
+        compression = texture.get_editor_property("compression_settings")
+        srgb = bool(texture.get_editor_property("srgb"))
+        if compression == settings.TC_NORMALMAP:
+            return types.SAMPLERTYPE_NORMAL
+        if compression == settings.TC_MASKS:
+            return types.SAMPLERTYPE_MASKS
+        if compression == settings.TC_GRAYSCALE:
+            return (types.SAMPLERTYPE_GRAYSCALE if srgb
+                    else types.SAMPLERTYPE_LINEAR_GRAYSCALE)
+        if compression == settings.TC_ALPHA:
+            return types.SAMPLERTYPE_ALPHA
+        return (types.SAMPLERTYPE_COLOR if srgb
+                else types.SAMPLERTYPE_LINEAR_COLOR)
+
+    library = unreal.MaterialEditingLibrary
+    master_samplers = {}
+    master_mismatches = []
+    for path in (unreal.EditorAssetLibrary.list_assets(
+            "/Game/mLender/Materials", recursive=True) or []):
+        asset = unreal.EditorAssetLibrary.load_asset(path)
+        if not isinstance(asset, unreal.Material):
+            continue
+        for expression in (library.get_material_expressions(asset) or []):
+            if not isinstance(
+                    expression,
+                    unreal.MaterialExpressionTextureSampleParameter2D):
+                continue
+            declared = expression.get_editor_property("sampler_type")
+            texture = expression.get_editor_property("texture")
+            name = str(expression.get_editor_property("parameter_name"))
+            master_samplers[name] = declared
+            if texture is None:
+                master_mismatches.append((asset.get_name(), name, "no texture"))
+            elif expected_sampler(texture) != declared:
+                master_mismatches.append(
+                    (asset.get_name(), name, str(declared),
+                     texture.get_name(), str(expected_sampler(texture))))
+    check("every master sampler holds a texture of its own type",
+          not master_mismatches, master_mismatches[:4])
+
+    instance_mismatches = []
+    for path in (unreal.EditorAssetLibrary.list_assets(
+            "/Game/mLender/Materials", recursive=True) or []):
+        asset = unreal.EditorAssetLibrary.load_asset(path)
+        if not isinstance(asset, unreal.MaterialInstanceConstant):
+            continue
+        for name, declared in master_samplers.items():
+            try:
+                texture = library\
+                    .get_material_instance_texture_parameter_value(
+                        asset, unreal.Name(name))
+            except Exception:
+                continue
+            if texture is None:
+                continue
+            if expected_sampler(texture) != declared:
+                instance_mismatches.append(
+                    (asset.get_name(), name, texture.get_name(),
+                     str(declared), str(expected_sampler(texture))))
+    check("and every texture an instance assigns matches its sampler",
+          not instance_mismatches, instance_mismatches[:4])
+
     # The FBX importer makes a Level Sequence of its own, beside the meshes,
     # holding the same keys at one tick per frame -- so it plays the whole
     # shot inside the first fiftieth of a frame. It is the easier of the two

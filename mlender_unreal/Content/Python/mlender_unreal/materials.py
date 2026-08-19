@@ -59,10 +59,28 @@ from .utils import (
 )
 
 
-# A white texture the master's samplers can default to. A
-# TextureSampleParameter2D with no texture will not compile, and this is an
-# engine asset so nothing has to ship with the plugin.
+# A texture each sampler can default to. A TextureSampleParameter2D with no
+# texture will not compile -- and neither will one whose texture does not
+# match the sampler type it declares, which is the harder half. Measured, in a
+# real editor: giving the normal and grayscale samplers a colour texture
+# produced
+#
+#   (Node TextureSampleParameter2D) Sampler type is Linear Grayscale, should
+#   be Color for /Engine/EngineResources/WhiteSquareTexture
+#
+# and with it "Failed to compile Material Instance with Base ML_Master_Opaque
+# ... Default Material will be used in game". Every object in the level then
+# wears the engine's grey checker, which reads as a transfer that dropped all
+# its materials -- while every material asset in the project is correct.
+#
+# These are engine assets, so nothing has to ship with the plugin. Their
+# compression settings are what the sampler types demand: TC_NORMALMAP for
+# normal, TC_GRAYSCALE for the scalar channels, colour for the rest.
 DEFAULT_TEXTURE_PATH = "/Engine/EngineResources/WhiteSquareTexture"
+DEFAULT_NORMAL_TEXTURE_PATH = "/Engine/EngineMaterials/BaseFlattenNormalMap"
+DEFAULT_GRAYSCALE_TEXTURE_PATH = (
+    "/Engine/EngineMaterials/BaseFlattenGrayscaleMap"
+)
 
 SURFACE_OPAQUE = "opaque"
 SURFACE_MASKED = "masked"
@@ -186,6 +204,16 @@ def _vector_parameter(material, name, default, x, y):
     return node
 
 
+def _default_texture_path(sampler_type):
+    """The stand-in texture a sampler of this type will compile with."""
+    types = unreal.MaterialSamplerType
+    if sampler_type == types.SAMPLERTYPE_NORMAL:
+        return DEFAULT_NORMAL_TEXTURE_PATH
+    if sampler_type == types.SAMPLERTYPE_LINEAR_GRAYSCALE:
+        return DEFAULT_GRAYSCALE_TEXTURE_PATH
+    return DEFAULT_TEXTURE_PATH
+
+
 def _texture_parameter(material, name, x, y, sampler_type=None):
     node = _expression(
         material, "MaterialExpressionTextureSampleParameter2D", x, y
@@ -193,7 +221,10 @@ def _texture_parameter(material, name, x, y, sampler_type=None):
     if node is None:
         return None
     node.set_editor_property("parameter_name", name)
-    default = unreal.EditorAssetLibrary.load_asset(DEFAULT_TEXTURE_PATH)
+    default = unreal.EditorAssetLibrary.load_asset(
+        _default_texture_path(sampler_type))
+    if default is None:
+        default = unreal.EditorAssetLibrary.load_asset(DEFAULT_TEXTURE_PATH)
     if default is not None:
         node.set_editor_property("texture", default)
     if sampler_type is not None:

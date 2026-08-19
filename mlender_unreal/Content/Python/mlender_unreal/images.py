@@ -233,9 +233,15 @@ def _configure_texture(asset, channel, colour_data):
             return
         asset.set_editor_property("srgb", bool(colour_data))
         if not colour_data:
+            # Grayscale rather than masks, because the master samples these
+            # through a Linear Grayscale parameter and Unreal refuses to
+            # compile a sampler whose texture is of another type. TC_MASKS
+            # pairs with a Masks sampler; the mismatch fails the whole
+            # material, and every object wearing it falls back to the engine's
+            # grey checker.
             asset.set_editor_property(
                 "compression_settings",
-                unreal.TextureCompressionSettings.TC_MASKS,
+                unreal.TextureCompressionSettings.TC_GRAYSCALE,
             )
     except Exception:
         # A texture that refuses a setting is still a usable texture; the
