@@ -42,6 +42,7 @@ from .particles import (
 from .alembic import (
     animated_cache_roots,
     deformed_shapes,
+    triangulated,
     cache_roots,
     cache_only_shapes,
     export_alembic,
@@ -702,7 +703,27 @@ def _write_alembic(path, mesh_shapes, particle_list, particle_shapes,
             )
         return empty
 
-    if not export_alembic(roots, path, animation):
+    # Unreal's Alembic reader refuses a face with more than four sides and
+    # fails the entire file over one of them, so the shapes that are about to
+    # travel are triangulated first -- as history, undone below, leaving the
+    # Maya scene exactly as it was.
+    undo = triangulated(
+        [shape for shape in mesh_shapes
+         if under_roots(parent_of(shape), roots)],
+        warnings,
+    )
+    try:
+        written = export_alembic(roots, path, animation)
+    finally:
+        if undo:
+            try:
+                cmds.delete(undo)
+            except Exception:
+                warnings.append(
+                    "The temporary triangulation could not be removed from "
+                    "the Maya scene; undo it before saving."
+                )
+    if not written:
         warnings.append(
             "Alembic cache could not be written, so {0} object(s) that need "
             "one travel as a single frame.".format(len(roots))

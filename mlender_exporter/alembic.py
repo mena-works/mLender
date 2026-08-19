@@ -248,6 +248,78 @@ def cache_roots(shapes):
     return unique([root for root in map(cache_root, shapes) if root])
 
 
+def ngon_shapes(shapes):
+    """Mesh shapes carrying a face with more than four sides.
+
+    Exact rather than inferred from counts: a mesh of one triangle and one
+    pentagon has the same triangle-to-face ratio as a mesh of quads, so the
+    cheap arithmetic test misses precisely the mixed topology a modelled
+    scene is made of.
+    """
+    try:
+        from maya.api import OpenMaya
+    except ImportError:
+        return []
+    found = []
+    for shape in shapes or ():
+        try:
+            selection = OpenMaya.MSelectionList()
+            selection.add(shape)
+            iterator = OpenMaya.MItMeshPolygon(selection.getDagPath(0))
+        except Exception:
+            continue
+        while not iterator.isDone():
+            try:
+                sides = iterator.polygonVertexCount()
+            except Exception:
+                break
+            if sides > 4:
+                found.append(shape)
+                break
+            try:
+                iterator.next()
+            except TypeError:
+                # Older API builds want the argument this one refuses.
+                iterator.next(1)
+            except Exception:
+                break
+    return found
+
+
+def triangulated(shapes, warnings):
+    """Triangulate the given shapes as history, returning the nodes to undo.
+
+    Measured, and it costs the whole file: Unreal's Alembic reader refuses a
+    face with five sides -- "expecting triangles (3) or quads (4)" -- and one
+    such face fails the import outright, so a single n-gon anywhere took all
+    574 objects of a shot down with it. Nothing partial arrives, and the only
+    thing said out loud was that the cache could not be read.
+
+    History rather than geometry: polyTriangulate adds a node, and deleting it
+    puts the mesh back exactly as the artist built it. Only the shapes that
+    need it are touched, so a quad model keeps its quads in Blender, which has
+    never minded either.
+    """
+    ngons = ngon_shapes(shapes)
+    if not ngons:
+        return []
+    nodes = []
+    for shape in ngons:
+        try:
+            made = cmds.polyTriangulate(shape, constructionHistory=True) or []
+        except Exception:
+            continue
+        nodes.extend([node for node in made if node])
+    if nodes:
+        warnings.append(
+            "{0} cached mesh(es) had faces with more than four sides and were "
+            "triangulated for the cache; Unreal's Alembic reader refuses "
+            "those and fails the whole file over one of them. The Maya scene "
+            "is unchanged.".format(len(ngons))
+        )
+    return nodes
+
+
 def export_alembic(roots, path, animation):
     """Write one Alembic holding every root. True when a file was written.
 

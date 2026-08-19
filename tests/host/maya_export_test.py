@@ -1021,6 +1021,19 @@ def build_scene():
     # thirty units low -- measured, a cube at world x=100 arrived at x=0.
     sim_yard = cmds.group(sim_group, name="simYard")
     cmds.setAttr(sim_yard + ".translateY", 30)
+
+    # A moving mesh with a five-sided face. Unreal's Alembic reader refuses
+    # one -- "expecting triangles (3) or quads (4)" -- and fails the entire
+    # file over it, so a single n-gon in a shot took all 574 cached objects
+    # down with it and the only thing said was that the cache could not be
+    # read. Modelled scenes are full of them, so the fixture has one.
+    ngon = cmds.polyCreateFacet(
+        name="ngonSpinner",
+        point=[(0, 0, 0), (2, 0, 0), (2.5, 0, 1.5), (1, 0, 2.5), (-0.5, 0, 1.5)],
+    )[0]
+    cmds.setAttr(ngon + ".translateX", -26)
+    cmds.setKeyframe(ngon + ".translateY", time=1, value=0.0)
+    cmds.setKeyframe(ngon + ".translateY", time=25, value=4.0)
     cmds.setKeyframe(sim_group + ".translateZ", time=1, value=0.0)
     cmds.setKeyframe(sim_group + ".translateZ", time=25, value=9.0)
     rider_shader = cmds.shadingNode(
@@ -1556,7 +1569,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("63 meshes exported", payload["mesh_count"] == 63,
+    check("64 meshes exported", payload["mesh_count"] == 64,
           payload["mesh_count"])
     # The locator, the empty null, the nested locator, the group holding
     # only a curve, and the two shapeless FKIK switchers (root and NSRig:).
@@ -2702,6 +2715,16 @@ def main():
           [item.get("material") for item in rider_materials]
           == ["simRider_shd"],
           [item.get("material") for item in rider_materials])
+    check("a face with more than four sides is triangulated for the cache",
+          any("more than four sides" in str(line)
+              for line in animated_payload.get("export_warnings") or []),
+          animated_payload.get("export_warnings"))
+    # The scene has to come back exactly as the artist left it. The
+    # triangulation is history, and history that outlives the export is a
+    # modelling change nobody asked for.
+    check("and the Maya scene is put back afterwards",
+          not (cmds.ls(type="polyTriangulate") or []),
+          cmds.ls(type="polyTriangulate"))
     check("the cost of the trade is said out loud",
           any("not instanced" in str(line)
               for line in animated_payload.get("export_warnings") or []),
