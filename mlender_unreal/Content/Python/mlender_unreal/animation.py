@@ -99,8 +99,20 @@ def create_sequence(package_data, warnings):
         (package_data or {}).get("package_name") or "Scene", "Scene"
     )
     asset_name = "{0}_{1}".format(ANIMATION_SEQUENCE_NAME, label)
+    tools = unreal.AssetToolsHelpers.get_asset_tools()
+    asset_path = "{0}/{1}".format(SEQUENCE_CONTENT_PATH, asset_name)
+    # The previous send's sequence has to go first. create_asset will not
+    # write over an asset that is already loaded, and it does not raise when
+    # it refuses -- it returns None. So the second send into an open editor
+    # built no sequence at all, reported no animation, and said nothing: the
+    # level had every actor and a ruler that did nothing, which is exactly
+    # how it was first reported.
     try:
-        tools = unreal.AssetToolsHelpers.get_asset_tools()
+        if unreal.EditorAssetLibrary.does_asset_exist(asset_path):
+            unreal.EditorAssetLibrary.delete_asset(asset_path)
+    except Exception:
+        pass
+    try:
         sequence = tools.create_asset(
             asset_name, SEQUENCE_CONTENT_PATH, unreal.LevelSequence,
             unreal.LevelSequenceFactoryNew(),
@@ -112,11 +124,31 @@ def create_sequence(package_data, warnings):
         )
         return None, 0.0, 0, 0
     if sequence is None:
+        # Something still holds the old one. A sequence under a different
+        # name beats no sequence, so long as the user is told which one to
+        # open.
+        try:
+            unique_path, _unique_name = tools.create_unique_asset_name(
+                asset_path, ""
+            )
+            asset_name = unique_path.rsplit("/", 1)[-1]
+            sequence = tools.create_asset(
+                asset_name, SEQUENCE_CONTENT_PATH, unreal.LevelSequence,
+                unreal.LevelSequenceFactoryNew(),
+            )
+        except Exception:
+            sequence = None
+        if sequence is None:
+            warnings.append(
+                "The package carries animation but Unreal returned no Level "
+                "Sequence asset, so nothing on the timeline was rebuilt."
+            )
+            return None, 0.0, 0, 0
         warnings.append(
-            "The package carries animation but Unreal returned no Level "
-            "Sequence asset."
+            'The previous sequence is still in use, so this one was built as '
+            '"{0}". Close the old one and send again to reuse the '
+            "name.".format(asset_name)
         )
-        return None, 0.0, 0, 0
 
     try:
         sequence.set_display_rate(unreal.FrameRate(int(round(fps)), 1))
@@ -803,6 +835,62 @@ def _copy_channels(section, channels, scale):
     return written
 
 
+def animate_geometry_caches(sequence, ticks_per_frame, first, last,
+                            warnings):
+    """Put every geometry cache on the sequence, so scrubbing plays it.
+
+    A cache is not keyed by anything this tool writes: it plays on its own
+    clock, driven by a component. Without a track it holds its first frame
+    for the whole shot, which is exactly what a simulation that did not
+    travel looks like -- and this option exists to carry simulations.
+
+    The track goes on the component rather than the actor. Both are accepted,
+    but the component is what owns the cache, and every other component
+    property in this file is keyed the same way.
+    """
+    caches = []
+    try:
+        actors = unreal.get_editor_subsystem(
+            unreal.EditorActorSubsystem).get_all_level_actors() or []
+    except Exception:
+        return 0, 0
+    for actor in actors:
+        if actor.get_class().get_name() != "GeometryCacheActor":
+            continue
+        component = _component(actor, "geometry_cache_component")
+        if component is None:
+            continue
+        try:
+            asset = component.get_editor_property("geometry_cache")
+        except Exception:
+            asset = None
+        if asset is None:
+            continue
+        caches.append((actor, component, asset))
+
+    tracks = 0
+    for actor, component, asset in caches:
+        try:
+            binding = sequence.add_possessable(component)
+            _track, section = _section(
+                binding, unreal.MovieSceneGeometryCacheTrack, first, last
+            )
+            params = section.get_editor_property("params")
+            params.set_editor_property("geometry_cache_asset", asset)
+            section.set_editor_property("params", params)
+            tracks += 1
+        except Exception as exc:
+            warnings.append(
+                'The cache on "{0}" could not be put on the sequence, so it '
+                "holds its first frame: {1}".format(
+                    actor.get_actor_label(), exc
+                )
+            )
+    # No keys of ours: the cache carries its own frames, and counting them
+    # here would report geometry the sequence does not hold.
+    return tracks, 0
+
+
 def import_animation(package_data, unreal_scale, metre_scale, power_scale,
                      warnings):
     """Build the Level Sequence and place an actor that plays it."""
@@ -842,6 +930,8 @@ def import_animation(package_data, unreal_scale, metre_scale, power_scale,
         lambda: animate_materials(
             sequence, package_data, actors, ticks_per_frame, first, last,
             warnings),
+        lambda: animate_geometry_caches(
+            sequence, ticks_per_frame, first, last, warnings),
     )
     for builder in builders:
         try:

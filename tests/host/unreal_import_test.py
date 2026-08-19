@@ -1590,7 +1590,7 @@ def main():
         print("\nanimated objects carried as a cache")
         with open(os.path.join(animcache, "mLender_01_scene.json")) as handle:
             cache_data = json.load(handle)
-        mlender_unreal.import_scene_package(animcache)
+        cache_import = mlender_unreal.import_scene_package(animcache)
         actors = list(unreal.get_editor_subsystem(
             unreal.EditorActorSubsystem).get_all_level_actors() or [])
         # By asset name, not by class: a standin pointing at an .abc is a
@@ -1627,6 +1627,33 @@ def main():
             frames = component.get_number_of_frames()
             check("and the cache holds the range, not a single frame",
                   frames > 1, frames)
+            # A cache plays on its own clock, so without a track on the
+            # sequence it holds its first frame for the whole shot -- which
+            # looks exactly like a simulation that did not travel.
+            # By the path the import reported, not one written out here: a
+            # package path without the object suffix loads as None, and a
+            # None sequence counts zero tracks without failing.
+            sequence = unreal.EditorAssetLibrary.load_asset(
+                cache_import.get("sequence_path") or "")
+            print("DBG result", sorted(
+                (k, v) for k, v in cache_import.items()
+                if k in ("sequence_path", "animation_track_count",
+                         "animation_key_count", "alembic_count")))
+            # A sequence on the fourth import of a session, not just the
+            # first: create_asset returns None rather than raising when the
+            # previous one is still loaded, so the send that follows a send
+            # used to arrive with no timeline at all and no complaint.
+            check("a repeat send still builds a sequence",
+                  bool(cache_import.get("sequence_path")),
+                  cache_import.get("sequence_path"))
+            cache_tracks = 0
+            for binding in (sequence.get_bindings() if sequence else []):
+                for track in binding.get_tracks():
+                    if track.get_class().get_name() == (
+                            "MovieSceneGeometryCacheTrack"):
+                        cache_tracks += 1
+            check("the cache is on the sequence, so scrubbing plays it",
+                  cache_tracks >= 1, cache_tracks)
 
             names = []
             for index in range(component.get_num_materials()):
