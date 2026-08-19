@@ -778,10 +778,23 @@ Kullanıcının elle doğrulaması gereken adımlar:
 - ❌ GeometryCache'i importer varsayılanıyla alma; `flatten_tracks` varsayılan
   **True** ve altı objeyi tek track + **tek materyal slotu**na indiriyor.
   Obje başına track istiyorsan açıkça `False` yaz
-- ❌ Cache slotlarını konumdan bağımsız sanma; isimsiz slotlar yalnız track
-  sırasıyla çözülür. Ölçüldü: track sırası alfabetik (`alphaShape_0`,
-  `mikeShape_0`…) ve slotlar o sırayı izliyor; ortadaki çok materyalli obje
-  ardışık iki isimli slot üretiyor
+- ❌ Cache slotlarını track sayısına göre eşleştirme; Unreal 574 root'u **133
+  track**e indiriyor ama slot sayısı obje başına bir (çok materyalli olanda
+  SG başına bir) kalıyor. Track'e göre yürüyen eşleşme 441 slotu gri damada
+  bıraktı ve "1 slot eşleşmedi" diye rapor etti
+- ❌ Slot sırasını yaprak ada göre kurma; ölçüldü, sıra **tam DAG yolu**.
+  122 isimli slotta: yola göre 122 doğru 0 yanlış, yaprak ada göre 34 doğru
+  88 yanlış (büyük/küçük harf katlansa da), JSON sırasıyla 35/87
+- ❌ Shading group adını obje kimliği sanma; aynı SG onlarca objede
+  kullanılıyor. İsim hangi **materyal** olduğunu söyler, hangi objeye ait
+  olduğunu değil — konum yerleştirir, isim doğrular
+- ❌ Unreal'de `create_asset`'in var olan asset'in üzerine yazacağını sanma;
+  yüklüyse **fırlatmadan `None`** dönüyor. Aynı editörde ikinci gönderim
+  Level Sequence'i hiç kurmuyordu: level dolu, cetvel boş, tek iz kimsenin
+  basmadığı bir uyarıydı. Önce sil, olmazsa benzersiz adla kur ve söyle
+- ❌ GeometryCache'i sekansa bağlamadan bırakma; kendi saatiyle oynar, yani
+  track yoksa bütün çekim boyunca ilk karesinde durur — taşınmamış bir
+  simülasyondan ayırt edilemez
 - ❌ "Animasyonlu mu" sorusunu bağlantı yürüyerek cevaplama; Bullet, expression
   ve constraint hiçbir animCurve bırakmaz. Zaman çizgisini adımlayıp **dünya
   matrisini** oku — ve dünya, çünkü hareketsiz bir prop hareketli bir grubun
