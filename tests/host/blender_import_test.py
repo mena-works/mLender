@@ -31,6 +31,21 @@ if TOOL_ROOT not in sys.path:
 failures = []
 
 
+def action_fcurves_of(obj):
+    """The object's own animation curves, or nothing.
+
+    Through the add-on's helper rather than ``action.fcurves``, which 5.0
+    removed; a test reaching for it directly would fail on the one Blender
+    installed here for a reason that has nothing to do with what it is
+    testing.
+    """
+    action = getattr(getattr(obj, "animation_data", None), "action", None)
+    if action is None:
+        return []
+    from mlender_importer.animation import action_fcurves
+    return list(action_fcurves(action) or [])
+
+
 def check(label, condition, detail=""):
     if condition:
         print("  ok    {0}".format(label))
@@ -114,9 +129,9 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("68 meshes imported", result["mesh_count"] == 68,
+    check("69 meshes imported", result["mesh_count"] == 69,
           result["mesh_count"])
-    check("48 materials built", result["material_count"] == 48,
+    check("49 materials built", result["material_count"] == 49,
           result["material_count"])
     # Four of the eight cubes asked for subdivision in Maya, the displaced one
     # among them; the rest must arrive unmodified.
@@ -2811,6 +2826,22 @@ def main():
 
     # Last, because importing replaces the scene: everything above is read
     # from the baked package and would be gone after this.
+    # A name that still holds an FBX escape in Maya arrives decoded here too,
+    # so the record has to be findable under both spellings.
+    escaped = [
+        obj for obj in bpy.data.objects
+        if obj.type == "MESH" and "escaped" in obj.name
+    ]
+    check("the object with an escaped name arrived", len(escaped) == 1,
+          [obj.name for obj in escaped])
+    if escaped:
+        names = [slot.material.name for slot in escaped[0].material_slots
+                 if slot.material]
+        check("and it matched its record, so it wears its material",
+              any("escapedFBXASC046piece_shd" in name
+                  or "escaped.piece_shd" in name for name in names),
+              [escaped[0].name, names])
+
     print("\nanimated objects carried as a cache")
     cache_packages = sorted(
         glob.glob(os.path.join(TEST_ROOT, "animcache", "mLender_*"))
@@ -2819,38 +2850,71 @@ def main():
           TEST_ROOT)
     if cache_packages:
         zi.import_scene_package(cache_packages[-1], import_scale=1.0)
+        # A geometry cache is a stream of vertices, and a rigid body is a
+        # transform. Measured on the shot this was written for, 0 of 3384
+        # cached objects deformed -- so only what deforms is cached, and the
+        # rest arrive as ordinary meshes carrying a key per frame.
         cached = bpy.data.objects.get("simCube")
         check("an object moved by a solver arrives", cached is not None)
         if cached is not None:
-            # It came from the .abc rather than the FBX, which is the whole
-            # point: nothing keyed it, so the FBX had nothing to carry.
-            check("through the cache, not the FBX",
-                  bool(cached.get("ml_alembic")), dict(cached.items()))
+            check("as an ordinary mesh rather than a cache",
+                  not cached.get("ml_alembic"), dict(cached.items()))
             names = [slot.material.name for slot in cached.material_slots
                      if slot.material]
-            # Materials are why the JSON still describes a cached mesh. A
-            # cache with no material assignment renders grey and reads as a
-            # shading bug rather than a transfer that dropped the look.
             check("wearing the material Maya gave it",
                   any("simCube_shd" in name for name in names), names)
+            curves = list(action_fcurves_of(cached))
+            check("and keyed on its own transform",
+                  len(curves) >= 3, len(curves))
+            # The frames the keys land on, not only that keys exist: a run
+            # squeezed into the first frame reads as an object already at its
+            # end position before the shot starts.
+            frames = sorted(set(
+                int(round(point.co[0]))
+                for curve in curves for point in curve.keyframe_points
+            ))
+            check("over the exported range",
+                  len(frames) > 2 and (frames[-1] - frames[0]) >= 10,
+                  (frames[:3], frames[-3:]))
+            # And it moves. A key run that never changes value would pass
+            # every check above while the object stands still.
+            spans = [
+                max(point.co[1] for point in curve.keyframe_points)
+                - min(point.co[1] for point in curve.keyframe_points)
+                for curve in curves if curve.keyframe_points
+            ]
+            check("and travels while it is keyed",
+                  max(spans or [0.0]) > 0.05, max(spans or [0.0]))
         rider = bpy.data.objects.get("simRider")
         check("so does the prop inside the moving group", rider is not None)
         if rider is not None:
-            # The static group above the cache root sits thirty units up, and
-            # a root records its own matrix and nothing above it. Reading the
-            # evaluated vertices rather than the object origin, because the
-            # cache modifier is what places the geometry.
-            depsgraph = bpy.context.evaluated_depsgraph_get()
-            evaluated = rider.evaluated_get(depsgraph)
+            # The static group above it sits thirty units up, and the samples
+            # are world space -- so the prop carries that offset itself. A
+            # local sample would leave it on the floor and still look like a
+            # working transfer.
             heights = [
                 (rider.matrix_world @ vertex.co).z
-                for vertex in evaluated.data.vertices
+                for vertex in rider.data.vertices
             ]
             # Thirty Maya centimetres, in Blender metres: the scene arrives
             # at scene scale, so the number to beat is 0.2 rather than 20.
-            # Without the parent it sits at 0.005.
             check("at the height its static parent put it",
                   heights and max(heights) > 0.2, max(heights or [0.0]))
+        debris = bpy.data.objects.get("debrisChunk")
+        if debris is not None:
+            # The blink travels with it: a piece on screen before it breaks
+            # reads as a piece that never moved, which is how a real shot
+            # reported this.
+            hidden = [
+                curve for curve in action_fcurves_of(debris)
+                if "hide" in curve.data_path
+            ]
+            states = set(
+                round(point.co[1]) for curve in hidden
+                for point in curve.keyframe_points
+            )
+            check("and a mover that blinks carries its visibility",
+                  states == set([0, 1]), states)
 
     print("\nramp texture, unbaked package")
     packages = sorted(

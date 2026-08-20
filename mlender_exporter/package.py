@@ -16,6 +16,8 @@ from .bake import BakeContext
 from .constants import (
     BUILD_VERSION,
     ALEMBIC_FILE_SUFFIX,
+    MOTION_FILE_SUFFIX,
+    TRANSFORM_VISIBILITY_ATTRS,
     BAKE_FOLDER_NAME,
     DEFAULT_BAKE_RESOLUTION,
     EXPORT_SCHEMA_VERSION,
@@ -27,6 +29,7 @@ from .animation import (
     animation_info,
     frozen_animation_kinds,
     material_animation_entries,
+    sample_motion,
     sample_records,
 )
 from .cameras import camera_record, camera_sample, scene_camera_shapes
@@ -40,7 +43,7 @@ from .particles import (
     scene_particle_shapes,
 )
 from .alembic import (
-    animated_cache_roots,
+    motion_split,
     deformed_shapes,
     driven_visibility,
     outermost,
@@ -87,6 +90,7 @@ from .lights import (
     shadow_linked_mesh_names,
 )
 from .mayautils import (
+    attr_exists,
     color_management_info,
     current_frame,
     maya_linear_unit,
@@ -155,6 +159,9 @@ def export_scene(
     json_path = os.path.join(package_folder, package_name + "_scene.json")
     alembic_path = os.path.join(
         package_folder, package_name + ALEMBIC_FILE_SUFFIX
+    )
+    motion_path = os.path.join(
+        package_folder, package_name + MOTION_FILE_SUFFIX
     )
     # Named before the try, so the cleanup can remove it whether or not the
     # export got as far as writing one.
@@ -319,6 +326,15 @@ def export_scene(
                     )
                 )
 
+        # Which movers need a cache and which only need their transform.
+        # Measured before either channel runs, because the answer decides
+        # what the cache is even asked for.
+        deforming_movers, rigid_movers = [], []
+        if cache_animated_meshes:
+            deforming_movers, rigid_movers = motion_split(
+                mesh_shapes, animation
+            )
+
         # Sampling steps the timeline, so it runs after the static records are
         # read and before the FBX, which bakes its own animation.
         sample_records(
@@ -367,6 +383,32 @@ def export_scene(
             reference = root_motion_sample(record)
             reference["frame"] = current_frame()
             record["reference"] = reference
+        # A rigid mover travels as a transform per frame rather than a mesh
+        # per frame. Keyed by DAG path, which is what a receiver matches its
+        # own records on; a name would have to be guessed at.
+        rigid_paths = set(rigid_movers)
+        # What is actually asked for, kept, because the FBX bake decision
+        # below turns on whether every one of them came back. Counting the
+        # measured movers instead compares two different populations: a
+        # moving transform with no mesh record is not exported at all, and
+        # one such object left the bake on for a whole shot.
+        motion_entries = [
+            (record.get("mesh_path"), record.get("mesh_path"))
+            for record in mesh_records
+            if record.get("mesh_path") in rigid_paths
+        ]
+        motion = sample_motion(
+            animation, motion_entries, visible_at=_visibility_reader(),
+        )
+
+        if rigid_paths:
+            warnings.append(
+                "{0} moving object(s) do not deform, so they travel as their "
+                "own transform per frame on the mesh the FBX carries: "
+                "instanced, ray traced, and nothing to stream. Only what "
+                "deforms is worth a cache.".format(len(rigid_paths))
+            )
+
         # Renamed off the shared key: for a light this is a lighting sample
         # and for a particle object a set of positions, and a mesh carrying
         # something different under the same name invites a wrong reader.
@@ -374,6 +416,12 @@ def export_scene(
             samples = record.pop("samples", None)
             if samples:
                 record["visibility_samples"] = samples
+            # A mover carries its visibility inside its motion, so the
+            # standalone run would be a second copy of the same blink and
+            # nothing decides which of the two a receiver keys.
+            if (record.get("mesh_path") or "") in (
+                    motion.get("objects") or {}):
+                record.pop("visibility_samples", None)
         # Particles are the one sampled thing that can refuse the bake, so
         # the samples are judged before they are written out.
         baked_particles = resolve_samples(particle_list)
@@ -407,6 +455,7 @@ def export_scene(
             animation,
             warnings,
             cache_animated_meshes=cache_animated_meshes,
+            animated_roots=deforming_movers,
         )
         cached = list(alembic.get("roots") or [])
         # The flag is what stops the importer building a second, frozen copy
@@ -432,7 +481,8 @@ def export_scene(
             fbx_path,
             _fbx_animation(
                 animation,
-                cache_animated_meshes and not alembic.get("failed"),
+                (cache_animated_meshes and not alembic.get("failed")
+                 and len(motion.get("objects") or {}) >= len(motion_entries)),
                 fbx_shapes,
                 joints,
             ),
@@ -475,6 +525,11 @@ def export_scene(
                 "particle_count": alembic.get("particle_count") or 0,
                 "animated_count": alembic.get("animated_count") or 0,
             },
+            "motion": {
+                "file": maya_path(motion_path) if motion else "",
+                "object_count": len(motion.get("objects") or {}),
+                "frame_count": len(motion.get("frames") or []),
+            },
             "particles": particle_list,
             "transforms": transform_list,
             "light_count": len(light_records),
@@ -488,6 +543,11 @@ def export_scene(
             "animation": animation,
             "color_management": color_management_info(),
         }
+        if motion:
+            # Its own file, and written compactly. The scene JSON is indented
+            # for reading, and a shot's worth of motion indented one number
+            # per line is larger than the motion itself.
+            write_motion(motion_path, motion)
         collected = {"collected": 0, "missing": 0, "textures": 0,
                      "files": 0, "folder": ""}
         if collect_textures_into_package:
@@ -508,6 +568,7 @@ def export_scene(
         remove_file(fbx_path)
         remove_file(json_path)
         remove_file(alembic_path)
+        remove_file(motion_path)
         remove_file(archive_path)
         try:
             # rmtree rather than rmdir: baking may already have written
@@ -642,18 +703,23 @@ def _fbx_animation(animation, cache_animated_meshes, fbx_shapes, joints):
 
 
 def _write_alembic(path, mesh_shapes, particle_list, particle_shapes,
-                   animation, warnings, cache_animated_meshes=False):
+                   animation, warnings, cache_animated_meshes=False,
+                   animated_roots=None):
     """Cache what FBX loses. Returns what the payload should say about it.
 
     Two things qualify on their own, and both were measured to need it: a mesh
     whose points are moved by a deformer, which FBX delivers frozen, and a
     particle object whose count changes, which no fixed vertex count can hold.
 
-    ``cache_animated_meshes`` widens that to everything that moves, which is a
-    different kind of need. A simulation is not lost by the FBX so much as by
-    being a simulation: the solver writes a transform per frame with nothing
-    keyed behind it, so what travels depends on whether the scene happened to
-    be baked first. The cache carries the result either way.
+    ``cache_animated_meshes`` widens that to the movers that deform, and only
+    those. A simulation is not lost by the FBX so much as by being a
+    simulation: the solver writes a transform per frame with nothing keyed
+    behind it, so what travels depends on whether the scene happened to be
+    baked first. But a rigid body *is* a transform, and a cache is a stream of
+    vertices: measured on the shot this was written for, 0 of 3384 cached
+    objects deformed. Those travel as sampled motion instead, which arrives
+    ray traced and instanced rather than as 452 MB that can be neither. The
+    caller measures the split and passes the deforming half in.
     """
     empty = {
         "roots": [],
@@ -682,25 +748,24 @@ def _write_alembic(path, mesh_shapes, particle_list, particle_shapes,
         if record.get("count_varies") or record.get("bake_too_large")
     ]
     mesh_roots = cache_roots(deformed)
-    animated_roots = []
+    cached_movers = []
     if cache_animated_meshes:
-        # Measured rather than inferred, and measured over the whole
-        # hierarchy: see moving_transforms. A root the deformed pass already
-        # names is not repeated, and a moving group swallows the deformed
-        # shapes hanging inside it.
-        animated_roots = [
-            root for root in animated_cache_roots(mesh_shapes, animation)
+        # Measured by the caller rather than inferred here: see motion_split.
+        # A root the deformed pass already names is not repeated, and a moving
+        # group swallows the deformed shapes hanging inside it.
+        cached_movers = [
+            root for root in (animated_roots or [])
             if root not in mesh_roots
         ]
         mesh_roots = [
             root for root in mesh_roots
-            if not under_roots(root, animated_roots)
+            if not under_roots(root, cached_movers)
         ]
     particle_roots = cache_roots(varying)
     # One last pass over the union: a deformed mesh or a particle object can
     # sit inside a moving group just as easily, and AbcExport refuses the job
     # over any nested pair, not only the ones this option found.
-    roots = outermost(mesh_roots + animated_roots + particle_roots)
+    roots = outermost(mesh_roots + cached_movers + particle_roots)
     if not roots:
         if cache_animated_meshes:
             warnings.append(
@@ -752,24 +817,55 @@ def _write_alembic(path, mesh_shapes, particle_list, particle_shapes,
             "the cache holds the deformed result, and their rig cannot be "
             "posed in Blender.".format(len(rigged))
         )
-    if animated_roots:
+    if cached_movers:
         # Worth saying rather than discovering. A cached object is geometry
         # per frame: it arrives as a cache rather than as a mesh with a
         # transform, so it is not instanced, it is larger on disk, and nobody
-        # downstream can re-time it. That is the trade this option is.
+        # downstream can re-time it. That is the trade, and it is only paid
+        # for the movers that genuinely deform -- the rest are sampled.
         warnings.append(
-            "{0} moving object(s) travel as an Alembic cache rather than as "
-            "keyed geometry, simulations included. They arrive as cached "
-            "geometry, so they are not instanced and cannot be "
-            "re-animated.".format(len(animated_roots))
+            "{0} moving object(s) deform, so they travel as an Alembic cache "
+            "rather than as keyed geometry. They arrive as cached geometry, "
+            "so they are not instanced and cannot be "
+            "re-animated.".format(len(cached_movers))
         )
     return {
         "roots": roots,
         "file": maya_path(path),
-        "mesh_count": len(mesh_roots) + len(animated_roots),
+        "mesh_count": len(mesh_roots) + len(cached_movers),
         "particle_count": len(particle_roots),
-        "animated_count": len(animated_roots),
+        "animated_count": len(cached_movers),
     }
+
+
+def _visibility_reader():
+    """Read a transform's visibility per frame without re-asking what it has.
+
+    ``visibility_sample`` asks whether each candidate attribute exists before
+    reading it, which is right for a handful of objects read once. Sampling a
+    shot asks the same question 3384 times a frame for 520 frames, and the
+    answer never changes -- so it is asked once per object and remembered.
+    """
+    plugs = {}
+
+    def read(path):
+        found = plugs.get(path)
+        if found is None:
+            found = []
+            for attrs in TRANSFORM_VISIBILITY_ATTRS.values():
+                for attr in attrs:
+                    if attr_exists(path, attr):
+                        found.append(path + "." + attr)
+            plugs[path] = found
+        for plug in found:
+            try:
+                if not bool(cmds.getAttr(plug)):
+                    return False
+            except Exception:
+                continue
+        return True
+
+    return read
 
 
 def _sampler(function, shape):
@@ -850,6 +946,32 @@ def archive_folder(package_folder):
 def write_json(path, data):
     with io.open(path, "w", encoding="utf-8") as handle:
         json.dump(data, handle, ensure_ascii=False, indent=2, sort_keys=True)
+
+
+def _rounded(values):
+    """A sampled channel as json numbers, at a precision worth writing.
+
+    The samples are single precision, so spelling one out in full gives
+    1.2000000476837158 where the measurement only ever said 1.2 -- eighteen
+    characters of noise per number, on millions of numbers.
+    """
+    return [round(value, 4) for value in values]
+
+
+def write_motion(path, motion):
+    """The motion file: compact, and arrays rather than a record per frame.
+
+    ``array`` is what the sampler fills, and json will not serialise it, so
+    the encoder is told to spell one as a list. The lists are built one
+    channel at a time this way rather than all at once, which is the
+    difference between a transient few kilobytes and a gigabyte of Python
+    floats on a shot-sized export.
+    """
+    with io.open(path, "w", encoding="utf-8") as handle:
+        json.dump(
+            motion, handle, ensure_ascii=False, sort_keys=True,
+            separators=(",", ":"), default=_rounded,
+        )
 
 
 def remove_file(path):

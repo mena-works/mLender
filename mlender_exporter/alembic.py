@@ -30,7 +30,13 @@ from .constants import (
     ALEMBIC_MOTION_TOLERANCE,
     DEFORMER_NODE_TYPE,
 )
-from .mayautils import current_frame, parent_of, unique, world_matrix
+from .mayautils import (
+    current_frame,
+    parent_of,
+    parents_of,
+    unique,
+    world_matrix,
+)
 
 # Deformers whose result is a rig's, not a shape edit's. They are listed so
 # the caller can say what it found, not so they are treated differently:
@@ -125,86 +131,185 @@ def probe_frames(animation, count):
     return [start + step * index for index in range(count)]
 
 
-def moving_transforms(transforms, animation):
-    """Which transforms actually move, measured rather than inferred.
+def shape_signature(shape):
+    """What this mesh's own points look like, in its own frame.
 
-    A rigid body simulation has no animation curve, no keyed plug and no
-    upstream connection worth walking: Bullet solves the transform each frame
-    and writes the answer. So does an expression, and so does a constraint
-    whose driver sits outside the export. Asking "is anything keyed above
-    this" answers a different question, and answers it wrong for exactly the
-    objects this option exists for -- the scene that prompted it had every one
-    of its rigid bodies reported still.
+    Object space, because a rigid body's points sit exactly where they always
+    sat however far it has flown; only a deformer moves them. The mesh's
+    ``boundingBoxMin``/``Max`` are that frame and cost two getAttr calls --
+    measured, because ``polyEvaluate -boundingBox`` reads *world* space and
+    reported every moving object as deforming, which sent a whole shot into
+    the cache the first time this was written.
 
-    Stepping the timeline and reading the world matrix asks the real question.
-    World, not local, because a prop that never moves in its own right still
-    travels when the group holding it does.
+    The count comes along because a mesh that gains vertices is deforming in
+    the way that matters most to a receiver, and two corners come along
+    because a deformation can leave a bounding box alone -- a twist does.
     """
-    paths = [path for path in unique(transforms or []) if path]
-    frames = probe_frames(animation, ALEMBIC_MOTION_PROBES)
-    if not paths or len(frames) < 2:
-        return []
+    try:
+        count = cmds.polyEvaluate(shape, vertex=True)
+    except Exception:
+        return None
+    if not isinstance(count, int) or count < 1:
+        return None
+    values = [float(count)]
+    for attr in (".boundingBoxMin", ".boundingBoxMax"):
+        try:
+            corner = cmds.getAttr(shape + attr)[0]
+        except Exception:
+            continue
+        values.extend(float(value) for value in corner)
+    for index in (0, count // 2):
+        try:
+            point = cmds.xform("{0}.vtx[{1}]".format(shape, index),
+                               query=True, objectSpace=True, translation=True)
+        except Exception:
+            continue
+        values.extend(float(value) for value in point)
+    return values
 
+
+def _walk(frames, visit):
+    """Step the timeline once, calling ``visit`` at each probe frame.
+
+    The user's frame is restored whatever happened; parking their scene
+    somewhere else is not something an export may leave behind.
+    """
     original = current_frame()
-    first = {}
-    moving = set()
     try:
         for frame in frames:
             try:
                 cmds.currentTime(frame, edit=True)
             except Exception:
                 continue
-            for path in paths:
-                if path in moving:
-                    continue
-                matrix = world_matrix(path)
-                if not matrix:
-                    continue
-                reference = first.get(path)
-                if reference is None:
-                    first[path] = matrix
-                    continue
-                for before, now in zip(reference, matrix):
-                    if abs(before - now) > ALEMBIC_MOTION_TOLERANCE:
-                        moving.add(path)
-                        break
+            visit()
     finally:
-        # The user's frame is restored whatever happened; parking their scene
-        # somewhere else is not something an export may leave behind.
         try:
             cmds.currentTime(original, edit=True)
         except Exception:
             pass
-    return [path for path in paths if path in moving]
 
 
-def animated_cache_roots(shapes, animation):
-    """One root per mesh whose world transform moves.
+def _moving(transforms, frames):
+    """Which of these transforms change their world matrix over the probes.
 
-    Deformation is not the question here: this is the option that carries a
-    simulation, and a rigid body deforms nothing.
+    Measured rather than inferred. A rigid body simulation has no animation
+    curve, no keyed plug and no upstream connection worth walking: Bullet
+    solves the transform each frame and writes the answer. So does an
+    expression, and so does a constraint whose driver sits outside the
+    export. Asking "is anything keyed above this" answers a different
+    question, and answers it wrong for exactly the objects this option exists
+    for -- the scene that prompted it had every one of its rigid bodies
+    reported still.
 
-    Per mesh rather than per moving hierarchy, and only because the job is
-    written in world space. A root records its own matrix and nothing above
-    it, so in local space a prop inside a moving group had to be cached *with*
-    the group or it arrived still; in world space it carries the journey on
-    its own. Measured both ways: a still child of a group keyed 0 to 7 arrives
-    keyed 0 to 7.
-
-    What that buys is the receiving end. One root is one track and one
-    material slot, named after the shape, so a cached object can be matched
-    back to the material Maya gave it. Rooting at groups put 574 objects into
-    133 tracks and 575 slots, and nothing could say which slot was whose.
+    World, not local, because a prop that never moves in its own right still
+    travels when the group holding it does.
     """
-    transforms = unique([
-        transform for transform in
-        (cache_root(shape) for shape in (shapes or [])) if transform
+    first = {}
+    moving = set()
+
+    def visit():
+        for transform in transforms:
+            if transform in moving:
+                continue
+            matrix = world_matrix(transform)
+            if not matrix:
+                continue
+            reference = first.get(transform)
+            if reference is None:
+                first[transform] = matrix
+                continue
+            for before, now in zip(reference, matrix):
+                if abs(before - now) > ALEMBIC_MOTION_TOLERANCE:
+                    moving.add(transform)
+                    break
+
+    _walk(frames, visit)
+    return moving
+
+
+def _deforming(shapes, frames):
+    """Which of these shapes move their own points over the probes."""
+    first = {}
+    deforming = set()
+
+    def visit():
+        for shape in shapes:
+            if shape in deforming:
+                continue
+            points = shape_signature(shape)
+            if points is None:
+                continue
+            reference = first.get(shape)
+            if reference is None:
+                first[shape] = points
+                continue
+            if len(reference) != len(points):
+                deforming.add(shape)
+                continue
+            for before, now in zip(reference, points):
+                if abs(before - now) > ALEMBIC_MOTION_TOLERANCE:
+                    deforming.add(shape)
+                    break
+
+    _walk(frames, visit)
+    return deforming
+
+
+def motion_split(shapes, animation):
+    """Which movers need a cache, and which only need their transform.
+
+    A geometry cache is a stream of vertices, and for a rigid body that is
+    the wrong container. It spends a mesh per frame on what a transform per
+    frame carries, it cannot be instanced, and its ray tracing geometry is
+    sized from the frame it first saw -- so a track whose vertex buffer grows
+    mid shot asserts and takes the editor with it.
+
+    Measured on the shot this was written for: of 3384 cached objects, 0
+    changed vertex count and 0 of 200 sampled deformed, while 60 of 60
+    sampled travelled. That is 452 MB of vertex stream for movement that a
+    transform carries in kilobytes -- and it arrives ray traced, instanced
+    and without a streaming window to widen.
+
+    Two questions, so two passes. The first asks every transform whether its
+    world matrix changes, which is cheap. The second asks whether a shape's
+    own points move, which is not: it evaluates the mesh, and asking it of a
+    whole scene cost more than the rest of the export put together. So it is
+    asked only of the shapes that can answer yes to any purpose -- the ones
+    that move, and the ones carrying a deformer.
+
+    Returns ``(deforming, rigid)`` as transform paths.
+    """
+    # Every transform of every shape, not the first one: an instanced shape
+    # hangs under several, each with a world matrix of its own, and taking
+    # only the first leaves the other instances still while a record for each
+    # of them exists and expects to be carried.
+    pairs = []
+    for shape in (shapes or []):
+        for transform in (parents_of(shape) or []):
+            if transform:
+                pairs.append((transform, shape))
+    frames = probe_frames(animation, ALEMBIC_MOTION_PROBES)
+    if not pairs or len(frames) < 2:
+        return [], []
+
+    moving = _moving(unique([transform for transform, _s in pairs]), frames)
+    candidates = unique([
+        shape for transform, shape in pairs
+        if transform in moving or shape_deformers(shape)
     ])
-    if not transforms:
-        return []
-    # The mesh's own world matrix already carries every group above it, so
-    # there is nothing else to probe.
-    return outermost(moving_transforms(transforms, animation))
+    deformed = _deforming(candidates, frames) if candidates else set()
+
+    travelling = unique([
+        transform for transform, shape in pairs
+        if transform in moving or shape in deformed
+    ])
+    deforming = set(
+        transform for transform, shape in pairs if shape in deformed
+    )
+    return (
+        [path for path in travelling if path in deforming],
+        [path for path in travelling if path not in deforming],
+    )
 
 
 def outermost(paths):

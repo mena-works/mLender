@@ -17,7 +17,13 @@ from .aovs import rebuild_aovs
 from .empties import import_empties
 from .fbx import import_fbx, read_package_json, resolve_fbx_path
 from .alembic import cached_particle_names, import_alembic
-from .animation import animate_visibility, apply_scene_range
+from .animation import (
+    animate_object,
+    animate_visibility,
+    apply_scene_range,
+    motion_samples,
+    read_motion,
+)
 from .colormanagement import apply_color_management
 from .lights import import_lights
 from .merge import (
@@ -210,6 +216,17 @@ def import_scene_package(
     visibility_count = 0
     visibility_animation_count = 0
     attribute_count = 0
+    # The movers that only move: one world matrix per frame each, keyed onto
+    # the mesh the FBX already brought rather than streamed as a cache.
+    motion = read_motion(package_folder, package_data, warnings)
+    motion_frames = list(motion.get("frames") or [])
+    motion_tracks = motion.get("objects") or {}
+    motion_objects = 0
+    motion_keys = 0
+    motion_scale = (
+        scalar(package_data.get("meters_per_maya_unit"), 0.01)
+        * max(scalar(import_scale, 1.0), 0.000001)
+    )
 
     for obj in imported_meshes:
         mesh_record = find_mesh_record(obj, record_index, used_record_ids)
@@ -231,6 +248,32 @@ def import_scene_package(
             visibility_count += 1
         # After the static flags, so a mesh that blinks ends up keyed rather
         # than pinned to whatever it was on the exported frame.
+        track = motion_tracks.get(mesh_record.get("mesh_path"))
+        if track:
+            # A rigid mover carries its own transform per frame rather than a
+            # mesh per frame. The samples are spelled out into the shape the
+            # light and camera paths already key from, visibility included,
+            # so there is one keying path rather than two.
+            samples = motion_samples(track, motion_frames)
+            if len(samples) >= 2:
+                mesh_record["samples"] = samples
+                blinks = [
+                    sample for sample in samples if "visible" in sample
+                ]
+                if blinks:
+                    mesh_record["visibility_samples"] = blinks
+                # World space, so whatever group Maya had it under is
+                # already in the numbers; keeping the parent would apply it
+                # twice.
+                if obj.parent is not None:
+                    matrix = obj.matrix_world.copy()
+                    obj.parent = None
+                    obj.matrix_world = matrix
+                motion_keys += animate_object(
+                    obj, mesh_record, motion_scale
+                )
+                motion_objects += 1
+                mesh_record.pop("samples", None)
         if animate_visibility(obj, mesh_record):
             visibility_animation_count += 1
         assignments.append(
@@ -409,6 +452,8 @@ def import_scene_package(
         "group_collection_count": len(group_cache),
         "visibility_count": visibility_count,
         "visibility_animation_count": visibility_animation_count,
+        "motion_object_count": motion_objects,
+        "motion_key_count": motion_keys,
         "aov_mapped": aov_result["mapped"],
         "aov_custom": aov_result["custom"],
         "view_transform": view_transform,

@@ -30,6 +30,9 @@ Maya's frame numbers are kept. Blender keys at the same numbers, and a package
 that starts at frame 1 in one receiver and frame 0 in the other is a bug report
 nobody can read.
 """
+import json
+import os
+
 import unreal
 
 from .constants import (
@@ -49,7 +52,7 @@ from .constants import (
 )
 from .materials import channel_value
 from .meshes import mesh_component
-from .transforms import unreal_transform
+from .transforms import unreal_object_transform, unreal_transform
 from .utils import safe_asset_name, scalar
 
 
@@ -779,7 +782,8 @@ def _channel_keys(section):
     return read
 
 
-def adopt_object_animation(sequence, ticks_per_frame, first, last, warnings):
+def adopt_object_animation(sequence, ticks_per_frame, first, last, warnings,
+                           skip_labels=None):
     """Object motion from the FBX, retimed into the sequence we built.
 
     Meshes carry their animation inside the FBX rather than in the package,
@@ -808,6 +812,12 @@ def adopt_object_animation(sequence, ticks_per_frame, first, last, warnings):
             label = str(binding.get_display_name() or "")
             actor = actors.get(label)
             if actor is None:
+                continue
+            # Whatever the FBX happened to bake for an object the package
+            # measured is not a second opinion worth having: two transform
+            # tracks on one binding fight, and the sampled one is the one
+            # that caught the solver.
+            if label in (skip_labels or set()):
                 continue
             for track in binding.get_tracks() or []:
                 if not isinstance(track, unreal.MovieScene3DTransformTrack):
@@ -976,8 +986,228 @@ def animate_geometry_caches(sequence, ticks_per_frame, first, last,
     return tracks, 0
 
 
+def read_motion(package_folder, package_data, warnings):
+    """The sampled motion beside the scene file, or nothing.
+
+    Beside rather than inside: a shot's worth of matrices indented for
+    reading is larger than the matrices themselves. Resolved by name inside
+    the package folder, because a package is routinely opened from somewhere
+    other than the machine that wrote it.
+    """
+    record = (package_data or {}).get("motion") or {}
+    name = os.path.basename(str(record.get("file") or "").replace("\\", "/"))
+    if not name:
+        return {}
+    path = os.path.join(package_folder or "", name)
+    if not os.path.isfile(path):
+        warnings.append(
+            "{0} object(s) travel as sampled motion but {1} is not in the "
+            "package, so they arrive still.".format(
+                record.get("object_count") or 0, name)
+        )
+        return {}
+    try:
+        handle = open(path, "r")
+        try:
+            return json.load(handle)
+        finally:
+            handle.close()
+    except Exception as exc:
+        warnings.append(
+            "The sampled motion could not be read ({0}), so the objects it "
+            "carries arrive still.".format(exc)
+        )
+        return {}
+
+
+def _unwound(previous, angles):
+    """The same rotation, told so it does not jump between frames.
+
+    Every sample is an independent world matrix, and resolving each to Euler
+    on its own turns a full revolution into a jump from 179 to -179. A
+    tumbling piece of debris does that several times a shot, and the keys
+    either side of such a sample spin it backwards through the whole turn.
+    """
+    if previous is None:
+        return list(angles)
+    result = []
+    for before, angle in zip(previous, angles):
+        while angle - before > 180.0:
+            angle -= 360.0
+        while before - angle > 180.0:
+            angle += 360.0
+        result.append(angle)
+    return result
+
+
+def _parent_inverse(actor):
+    """The inverse of whatever the actor hangs from, or nothing.
+
+    A Sequencer transform track keys an actor's *relative* transform, so an
+    actor the FBX left attached to a group would be keyed inside that group
+    and arrive somewhere else entirely. The parent does not move -- nothing
+    in this package keys a group -- so one inverse, taken once, is the whole
+    correction. Once per object rather than once per frame: a shot of 3384
+    movers over 520 frames would otherwise ask the same actor who its parent
+    is 1.7 million times.
+    """
+    try:
+        parent = actor.get_attach_parent_actor()
+    except Exception:
+        return None
+    if parent is None:
+        return None
+    try:
+        return unreal.MathLibrary.invert_transform(
+            parent.get_actor_transform())
+    except Exception:
+        return None
+
+
+def _relative_to_parent(inverse, location, rotation, scale):
+    """A world transform expressed in the frame the keys are read in."""
+    if inverse is None:
+        return location, rotation, scale
+    try:
+        relative = unreal.MathLibrary.compose_transforms(
+            unreal.Transform(location, rotation, scale), inverse)
+        return (relative.translation, relative.rotation.rotator(),
+                relative.scale3d)
+    except Exception:
+        return location, rotation, scale
+
+
+def _keyable(values, tolerance=1.0e-4):
+    """The indices worth a key, given that the keys interpolate linearly.
+
+    A sample sitting between two identical neighbours is already on the line
+    those two draw, so keying it changes nothing and costs a call. The ends of
+    a run are kept, so an object that settles and later moves again still
+    starts moving on the right frame.
+
+    It is not a micro-optimisation at this scale: a shot of 3384 movers over
+    520 frames is 15.8 million channel keys written one call at a time, and
+    debris that comes to rest halfway through is most of them.
+    """
+    keep = []
+    count = len(values)
+    for index in range(count):
+        if index == 0 or index == count - 1:
+            keep.append(index)
+            continue
+        before = values[index - 1]
+        after = values[index + 1]
+        value = values[index]
+        if (abs(value - before) <= tolerance
+                and abs(after - value) <= tolerance):
+            continue
+        keep.append(index)
+    return keep
+
+
+def animate_sampled_motion(sequence, motion, actors_by_path, unreal_scale,
+                           ticks_per_frame, first, last, warnings,
+                           keyed_labels=None):
+    """Transform and visibility keys for the movers that only move.
+
+    This is the half of a simulation that does not belong in a geometry
+    cache. It arrives as one world matrix per frame per object, which is what
+    a rigid body is, and it lands on the static mesh the FBX already brought
+    -- ray traced, instanced, and with nothing to stream.
+    """
+    frames = list((motion or {}).get("frames") or [])
+    objects = (motion or {}).get("objects") or {}
+    if keyed_labels is None:
+        keyed_labels = set()
+    if not frames or not objects:
+        return 0, 0
+
+    tracks = 0
+    keys = 0
+    missing = 0
+    for path, track in objects.items():
+        actor = actors_by_path.get(path)
+        if actor is None:
+            missing += 1
+            continue
+        values = track.get("matrix") or []
+        if len(values) < len(frames) * 12:
+            missing += 1
+            continue
+        binding = sequence.add_possessable(actor)
+        _track, section = _section(
+            binding, unreal.MovieScene3DTransformTrack, first, last
+        )
+        channels = section.get_all_channels()
+        if len(channels) < 9:
+            continue
+        previous = None
+        counted = 0
+        inverse = _parent_inverse(actor)
+        lanes = [[] for _index in range(9)]
+        for index, frame in enumerate(frames):
+            row = values[index * 12:(index + 1) * 12]
+            # The fourth column the exporter dropped, put back: Maya never
+            # varies it, so it was not worth a quarter of the file.
+            matrix = [
+                row[0], row[1], row[2], 0.0,
+                row[3], row[4], row[5], 0.0,
+                row[6], row[7], row[8], 0.0,
+                row[9], row[10], row[11], 1.0,
+            ]
+            location, rotation, scale = unreal_object_transform(
+                {"world_matrix": matrix}, unreal_scale
+            )
+            location, rotation, scale = _relative_to_parent(
+                inverse, location, rotation, scale
+            )
+            angles = _unwound(
+                previous, (rotation.roll, rotation.pitch, rotation.yaw)
+            )
+            previous = angles
+            for lane, value in zip(lanes, (
+                location.x, location.y, location.z,
+                angles[0], angles[1], angles[2],
+                scale.x, scale.y, scale.z,
+            )):
+                lane.append(float(value))
+        ticks = [int(round(float(frame) * ticks_per_frame))
+                 for frame in frames]
+        for channel, lane in zip(channels, lanes):
+            for index in _keyable(lane):
+                if _add_key(channel, ticks[index], lane[index]):
+                    counted += 1
+        visible = track.get("visible") or []
+        if len(visible) >= len(frames):
+            _vis_track, vis_section = _section(
+                binding, unreal.MovieSceneVisibilityTrack, first, last
+            )
+            vis_channels = vis_section.get_all_channels()
+            if vis_channels:
+                for index, frame in enumerate(frames):
+                    # True is visible here; the engine's own flag is hidden,
+                    # and passing that value through inverts every blink.
+                    if _add_key(vis_channels[0],
+                                int(round(float(frame) * ticks_per_frame)),
+                                bool(visible[index])):
+                        counted += 1
+        if counted:
+            tracks += 1
+            keys += counted
+            try:
+                keyed_labels.add(str(actor.get_actor_label()))
+            except Exception:
+                pass
+    if missing:
+        warnings.append(
+            "{0} object(s) carry sampled motion but no actor in the level "
+            "matched them, so they arrive still.".format(missing)
+        )
+    return tracks, keys
+
+
 def import_animation(package_data, unreal_scale, metre_scale, power_scale,
-                     warnings):
+                     warnings, package_folder="", actors_by_path=None):
     """Build the Level Sequence and place an actor that plays it."""
     sequence, ticks_per_frame, first, last = create_sequence(
         package_data, warnings
@@ -995,6 +1225,8 @@ def import_animation(package_data, unreal_scale, metre_scale, power_scale,
     actors = actors_by_label()
     tracks = 0
     keys = 0
+    # Filled by the sampled motion pass and read by the adopt pass below.
+    sampled_labels = set()
     try:
         skeletal = assign_skeletal_animation(warnings)
     except Exception as exc:
@@ -1017,6 +1249,10 @@ def import_animation(package_data, unreal_scale, metre_scale, power_scale,
             warnings),
         lambda: animate_geometry_caches(
             sequence, ticks_per_frame, first, last, warnings),
+        lambda: animate_sampled_motion(
+            sequence, read_motion(package_folder, package_data, warnings),
+            actors_by_path or {}, unreal_scale, ticks_per_frame, first, last,
+            warnings, sampled_labels),
     )
     for builder in builders:
         try:
@@ -1034,7 +1270,7 @@ def import_animation(package_data, unreal_scale, metre_scale, power_scale,
     # else on one timeline.
     try:
         adopted, adopted_keys = adopt_object_animation(
-            sequence, ticks_per_frame, first, last, warnings
+            sequence, ticks_per_frame, first, last, warnings, sampled_labels
         )
         tracks += adopted
         keys += adopted_keys

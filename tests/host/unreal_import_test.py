@@ -1868,6 +1868,14 @@ def main():
             check("one material slot per cached object",
                   len(slot_names) == expected,
                   (len(slot_names), expected))
+            # Out of the ray tracing scene. A cache whose objects blink on
+            # and off changes its segment vertex counts between frames, and
+            # the engine asserts on that -- it took the editor down mid-scrub
+            # on a shot that was otherwise playing correctly.
+            check("the cache is kept out of ray tracing",
+                  component.get_editor_property("visible_in_ray_tracing")
+                  is False,
+                  component.get_editor_property("visible_in_ray_tracing"))
             frames = component.get_number_of_frames()
             check("and the cache holds the range, not a single frame",
                   frames > 1, frames)
@@ -1911,27 +1919,141 @@ def main():
             check("every slot took a rebuilt material",
                   names and all(str(name).startswith("ML_") for name in names),
                   (slots, names))
-            # By name rather than by count: the objects this scene cached each
-            # have their own shader, and a mapping that put them in the wrong
-            # order would still fill every slot.
-            check("the simulated cube got its own material",
-                  any("simCube_shd" in str(name) for name in names), names)
-            check("and the prop inside the moving group got its own",
-                  any("simRider_shd" in str(name) for name in names), names)
+            # By name rather than by count: a mapping that put the slots in
+            # the wrong order would still fill every one of them.
+            cached_shaders = []
+            for record in cached_records:
+                for item in record.get("materials") or []:
+                    if item.get("material"):
+                        cached_shaders.append(str(item["material"]))
+            check("the deformed mesh got its own material",
+                  all(any(shader in str(name) for name in names)
+                      for shader in cached_shaders),
+                  (cached_shaders, names))
 
-            # Where the cache sits, not just that it is there. The prop in
-            # the moving group hangs under a static group thirty units up,
-            # and that group is above the cache root: if the export wrote
-            # only the root's own matrix, everything in the cache would sit
-            # near the floor and still look like a working transfer.
-            bounds = cache_actors[0].get_actor_bounds(False)
-            top = bounds[0].z + bounds[1].z
-            # Thirty Maya units up, in Unreal centimetres. Everything else in
-            # the cache tops out around twelve, so the threshold sits between
-            # the two rather than at either.
-            unit = float(cache_data.get("meters_per_maya_unit") or 0.01) * 100.0
-            check("the offset of a static parent above the root survives",
-                  top > 20.0 * unit, (top, unit))
+        # --- the other half of a simulation: movers that do not deform.
+        #
+        # A geometry cache is a stream of vertices, and a rigid body is a
+        # transform. Measured on the shot this was written for, 0 of 3384
+        # cached objects deformed: all of them were paying for a container
+        # that can be neither instanced nor ray traced, and whose growing
+        # vertex counts asserted the editor out mid-scrub.
+        motion_file = os.path.join(
+            animcache,
+            os.path.basename(str(
+                (cache_data.get("motion") or {}).get("file") or "")),
+        )
+        motion = {}
+        if os.path.isfile(motion_file):
+            with open(motion_file) as handle:
+                motion = json.load(handle)
+        check("the package carries sampled motion",
+              len(motion.get("objects") or {}) >= 5,
+              len(motion.get("objects") or {}))
+
+        by_path = {}
+        for record in cache_data.get("meshes") or []:
+            if record.get("mesh_path"):
+                by_path[record["mesh_path"]] = record
+        # The actors by the label the record carries, which is how the
+        # importer found them too.
+        actors_by_label_test = {}
+        for actor in actors:
+            try:
+                actors_by_label_test[actor.get_actor_label()] = actor
+            except Exception:
+                continue
+        actors_by_path_test = {}
+        for path, record in by_path.items():
+            found = actors_by_label_test.get(record.get("mesh"))
+            if found is not None:
+                actors_by_path_test[path] = found
+        sequence = unreal.EditorAssetLibrary.load_asset(
+            cache_import.get("sequence_path") or "")
+        keyed = {}
+        for binding in (sequence.get_bindings() if sequence else []):
+            label = str(binding.get_display_name() or "")
+            for track in binding.get_tracks() or []:
+                name = track.get_class().get_name()
+                if name not in ("MovieScene3DTransformTrack",
+                                "MovieSceneVisibilityTrack"):
+                    continue
+                for section in track.get_sections() or []:
+                    channels = mlender_unreal.animation._channel_keys(section)
+                    if channels:
+                        keyed.setdefault(label, {})[name] = channels
+
+        def sampled(mesh_name):
+            """The keyed channels of a sampled mover, by Maya mesh name."""
+            for path, record in by_path.items():
+                if record.get("mesh") != mesh_name:
+                    continue
+                if path in (motion.get("objects") or {}):
+                    return keyed.get(mesh_name) or {}
+            return {}
+
+        sim = sampled("simCube").get("MovieScene3DTransformTrack") or []
+        check("a mover that does not deform is keyed on the sequence",
+              len(sim) >= 3, len(sim))
+        # By name, not by position: the read only returns channels that hold
+        # keys, so an object falling in Z alone comes back as a single
+        # channel and a positional read would write it into X.
+        spans = {}
+        for name, pairs in sim:
+            values = [value for _tick, value in pairs]
+            spans[str(name)] = max(values) - min(values) if values else 0.0
+        check("and it travels rather than sitting at one value",
+              max(spans.values() or [0.0]) > 0.5, spans)
+        # The frames the keys land on, which is the half a value check
+        # cannot see: a key run compressed into the first tick reads as an
+        # object already at its end position before frame one.
+        ticks = sorted(set(
+            tick for _name, pairs in sim for tick, _value in pairs))
+        check("over the range rather than inside one frame",
+              len(ticks) > 2 and (ticks[-1] - ticks[0]) >= 10,
+              (ticks[:3], ticks[-3:] if len(ticks) > 3 else None))
+        # The blink travels as a visibility track, because a piece that is on
+        # screen before it breaks reads as a piece that never moved.
+        blink = sampled("debrisChunk").get("MovieSceneVisibilityTrack") or []
+        states = set()
+        for _name, pairs in blink:
+            for _tick, value in pairs:
+                states.add(bool(value))
+        check("and a mover that blinks carries its visibility",
+              states == set([True, False]), states)
+        # Where the keys put it, not only that they move. The prop in the
+        # moving group hangs under a static group thirty units up, and the
+        # samples are world space -- so the prop carries that offset itself.
+        # A local sample would leave it near the floor and still look like a
+        # working transfer.
+        rider = sampled("simRider").get("MovieScene3DTransformTrack") or []
+        rider_z = [
+            value for name, pairs in rider if str(name).startswith("Location.Z")
+            for _tick, value in pairs
+        ]
+        # A Sequencer transform track keys an actor's *relative* transform,
+        # so whatever the FBX attached it to counts towards the height.
+        rider_actor = None
+        for path, record in by_path.items():
+            if record.get("mesh") == "simRider":
+                rider_actor = actors_by_path_test.get(path)
+        parent_z = 0.0
+        if rider_actor is not None:
+            parent = rider_actor.get_attach_parent_actor()
+            if parent is not None:
+                parent_z = parent.get_actor_location().z
+        unit = float(cache_data.get("meters_per_maya_unit") or 0.01) * 100.0
+        check("a sampled mover keeps the offset of its static parent",
+              rider_z and (max(rider_z) + parent_z) > 20.0 * unit,
+              (max(rider_z or [0.0]), parent_z, unit))
+
+        # The mover arrives as an ordinary mesh actor, which is the whole
+        # point: a static mesh is instanced and ray traced, and a cache track
+        # is neither.
+        movers_in_level = [
+            record.get("mesh") for path, record in by_path.items()
+            if path in (motion.get("objects") or {})
+        ]
 
         labels = set()
         for actor in actors:
@@ -1939,6 +2061,9 @@ def main():
                 labels.add(actor.get_actor_label())
             except Exception:
                 continue
+        check("a sampled mover arrives as a mesh actor, not a cache track",
+              all(name in labels for name in movers_in_level),
+              [name for name in movers_in_level if name not in labels])
         # The same object arriving twice -- once cached and moving, once from
         # the FBX and frozen -- is the failure this flag exists to prevent.
         cached_names = [
@@ -1951,6 +2076,35 @@ def main():
         # And the rest of the scene still came the ordinary way.
         check("objects that hold still still arrive as meshes",
               len(labels) > 20, len(labels))
+
+    # An object whose Maya name still holds an FBX escape. Unreal is handed
+    # the decoded spelling, so a record indexed only under Maya's spelling
+    # matches nothing -- and the object arrives with a placeholder material
+    # and, if it moves, no motion. Measured on a shot: 232 of 7106 objects.
+    escaped_actors = []
+    for actor in unreal.get_editor_subsystem(
+            unreal.EditorActorSubsystem).get_all_level_actors() or []:
+        try:
+            label = actor.get_actor_label()
+        except Exception:
+            continue
+        if "escaped" in label:
+            escaped_actors.append(actor)
+    check("the object with an escaped name is in the level",
+          len(escaped_actors) == 1,
+          [actor.get_actor_label() for actor in escaped_actors])
+    if escaped_actors:
+        component = mlender_unreal.meshes.mesh_component(escaped_actors[0])
+        names = []
+        if component is not None:
+            for index in range(component.get_num_materials()):
+                material = component.get_material(index)
+                names.append(material.get_name() if material else None)
+        # Wearing its own material is the proof that it matched a record:
+        # an unmatched actor keeps the FBX placeholder.
+        check("and it matched its record, so it wears its material",
+              any(str(name).startswith("ML_") for name in names),
+              [escaped_actors[0].get_actor_label(), names])
 
     # --- a second package, exported with baking off.
     #

@@ -13,7 +13,7 @@ from __future__ import absolute_import
 # here rather than in __init__ so package.py can reach it without
 # importing the package root, which would be circular. The importer keeps
 # its own in constants.py for the same reason.
-BUILD_VERSION = "2.66.0"
+BUILD_VERSION = "2.67.0"
 
 TOOL_NAME = "mLender"
 WINDOW_NAME = "mLenderWindow"
@@ -701,6 +701,11 @@ MAX_ANIMATION_FRAMES = 2000
 ALEMBIC_EXPORT_PLUGIN = "AbcExport"
 DEFORMER_NODE_TYPE = "geometryFilter"
 ALEMBIC_FILE_SUFFIX = "_cache.abc"
+
+# Sampled transforms travel beside the scene file rather than inside it: the
+# scene JSON is indented so a person can read it, and a shot's worth of
+# motion indented one number to a line is larger than the motion.
+MOTION_FILE_SUFFIX = "_motion.json"
 
 # uvWrite and writeUVSets so a cached mesh keeps the UVs the FBX would have
 # carried.

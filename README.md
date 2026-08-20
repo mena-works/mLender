@@ -230,7 +230,7 @@ light counts) and check the System Console for lines beginning
 | Export Scope | off | Send only the selected objects |
 | Export Animation | off | Send a frame range instead of a single frame |
 | Alembic Cache | off | Cache deforming meshes and emitting particles |
-| Cache everything that moves | off | Also cache every object whose transform moves, simulations included |
+| Carry everything that moves | off | Carry every object whose transform moves, simulations included: deforming ones as a cache, the rest as sampled transforms |
 | Bake Procedurals | off | Bake fileless shading networks to UVs |
 | Bake Resolution | 1024 | Resolution of those bakes |
 | Light Power Scale | 1.0 | Artistic multiplier over the measured conversion |
@@ -2583,10 +2583,11 @@ stays in the FBX, and a particle object with a constant count still travels as
 a vertex bake. Only the objects that need a cache get one, so turning the
 option on does not turn every package into a cache.
 
-#### Cache everything that moves
+#### Carry everything that moves
 
-The second box widens the cache to **every object whose world transform moves
-over the exported range** — which is how a simulation travels.
+The second box carries **every object whose world transform moves over the
+exported range** — which is how a simulation travels — and it splits them into
+two, because a simulation is two different problems wearing one name.
 
 A rigid body sim is not lost by the FBX so much as by being a sim: Bullet
 solves the transform each frame and writes the answer, with no animation curve
@@ -2597,9 +2598,45 @@ from the exporter's side there was never any animation to carry.
 
 So this option does not ask what is keyed. It **steps the timeline and reads
 the world matrix**, at twelve frames spread across the range, and anything
-whose matrix changed is cached. That catches Bullet, expressions, constraints,
-IK, and a prop parented under something that moves — all of which report "not
-animated" to any test that walks connections.
+whose matrix changed is carried. That catches Bullet, expressions,
+constraints, IK, and a prop parented under something that moves — all of which
+report "not animated" to any test that walks connections.
+
+The same pass asks a second question of each mesh: **do its own points move**,
+in its own frame. That is what decides which of two channels carries it:
+
+- a mesh whose points move is **cached**, because only a stream of vertices
+  can carry a deformation;
+- a mesh whose points hold still is **sampled** — one world matrix per frame,
+  written beside the scene file, keyed onto the mesh the FBX already carried.
+
+The difference is not academic. On the shot this was written for, **0 of 3384
+moving objects deformed**: every one of them was a rigid body, and all of them
+were paying for a container that cannot be instanced, cannot be ray traced,
+and has to stream 452 MB off disk to play back. As sampled transforms the same
+motion is a few megabytes of matrices on ordinary static meshes.
+
+There is a measurement behind "cannot be ray traced". A geometry cache's ray
+tracing geometry is sized from the frame it first saw, and a track whose
+vertex buffer grows mid shot trips an assertion that takes the editor with
+it:
+
+```text
+Assertion failed: P.Segments[i].MaxVertices <=
+Geometry->Initializer.Segments[i].MaxVertices
+Maximum number of vertices in a segment (125) must not be larger than what
+was declared during FRHIRayTracingGeometry creation (123)
+```
+
+Blinking objects — a fractured piece that appears when it breaks — are exactly
+what makes a buffer grow. The cache the tool imports is now optimised once
+rather than per frame, which removes that growth, and the cache actor is kept
+out of the ray tracing scene as well; what is lost there is the cache's
+contribution to hardware ray traced reflections and shadows, not the cache.
+With the split above, most shots have nothing in the cache to lose it for.
+
+Sampled motion carries **visibility** too, keyed per frame, because a piece
+that is on screen before it breaks reads as a piece that never moved.
 
 Materials come with them. A cached object is still described in the JSON, so
 the receiver still builds its Maya materials and assigns them; the geometry is
@@ -2624,29 +2661,34 @@ Two things happen to the geometry on the way, both measured on a real shot:
   actually have one are touched, so a quad model keeps its quads; and it is
   done as construction history that is removed again, so the Maya scene is
   unchanged.
-- **the FBX is written without a bake** when the cache took every mover and
-  nothing left behind is skinned or deformed. Baking evaluates the scene once
+- **the FBX is written without a bake** when both channels took every mover
+  and nothing left behind is skinned or deformed. Baking evaluates the scene once
   per frame per node, and on that same shot — 7106 meshes over a Bullet sim —
   it was over an hour of baking objects that do not move. The cache itself
   took 63 seconds.
 
 What it costs is worth knowing before turning it on:
 
-- a cached object arrives as **geometry per frame**. In Unreal that is a
+- a **cached** object arrives as geometry per frame. In Unreal that is a
   Geometry Cache, not a static mesh, so it is not instanced and cannot be
   re-timed; in Blender it is a Mesh Sequence Cache modifier reading the `.abc`
-  from disk.
-- the file is larger than the same motion carried as keys.
-- an object inside a moving group is cached **with the group**, because the
-  root of a cache records its own matrix and nothing above it. Rooting at the
-  prop would deliver it in the wrong place, holding still.
+  from disk. Only deforming objects pay this now.
+- a **sampled** object costs a key per frame per channel instead. That is
+  small next to a cache, but a scene where thousands of objects move is still
+  thousands of tracks in the Sequencer.
+- sampling is done in **world space**, so a prop inside a moving group carries
+  its journey itself; the receiver takes it off its parent before keying it,
+  or the group's motion would be applied twice.
 
-The export says how many objects took this route:
+The export says which objects took which route:
 
 ```text
-mLender warning: 12 moving object(s) travel as an Alembic cache rather than
-as keyed geometry, simulations included. They arrive as cached geometry, so
-they are not instanced and cannot be re-animated.
+mLender warning: 12 moving object(s) deform, so they travel as an Alembic
+cache rather than as keyed geometry. They arrive as cached geometry, so they
+are not instanced and cannot be re-animated.
+mLender warning: 3384 moving object(s) do not deform, so they travel as their
+own transform per frame on the mesh the FBX carries: instanced, ray traced,
+and nothing to stream. Only what deforms is worth a cache.
 ```
 
 Blender receives these objects with a **Mesh Sequence Cache** modifier pointing

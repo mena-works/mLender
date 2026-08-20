@@ -131,7 +131,7 @@ def show_ui():
         numberOfCheckBoxes=2,
         label="Alembic Cache",
         label1="Cache deforming meshes and emitting particles",
-        label2="Cache everything that moves, simulations included",
+        label2="Carry everything that moves, simulations included",
         value1=False,
         value2=False,
         annotation=(
@@ -140,9 +140,11 @@ def show_ui():
             "through an Alembic cache instead. The second box widens that to "
             "every object whose world transform moves over the range, which "
             "is how a Bullet simulation travels: the solver keys nothing, so "
-            "there is nothing for the FBX to carry. Materials still come "
-            "from the JSON either way. Cached objects arrive as geometry per "
-            "frame, so they are not instanced and cannot be re-timed."
+            "there is nothing for the FBX to carry. Each mover is measured "
+            "again for deformation: the ones whose points move are cached, "
+            "and the rest travel as a transform per frame on the mesh the "
+            "FBX already carries, which stays instanced and ray traced. "
+            "Materials come from the JSON either way."
         ),
         columnWidth3=(120, 400, 400),
     )

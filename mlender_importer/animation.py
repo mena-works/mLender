@@ -16,6 +16,9 @@ Two things here are easy to get wrong and both ruin a turntable specifically:
   frame boundary.
 """
 
+import json
+import os
+
 import bpy
 
 from .constants import ANIMATION_INTERPOLATION, DEFAULT_FPS
@@ -51,6 +54,103 @@ def _apply_fps(scene, fps):
         scene.render.fps_base = 1.0 if abs(fps - nearest) < 1e-4 else nearest / fps
     except Exception:
         pass
+
+
+def read_motion(package_folder, package_data, warnings):
+    """The sampled motion beside the scene file, or nothing.
+
+    Beside rather than inside: a shot's worth of matrices indented for
+    reading is larger than the matrices themselves. Resolved by name inside
+    the package folder, because a package is routinely opened from somewhere
+    other than the machine that wrote it.
+    """
+    record = (package_data or {}).get("motion") or {}
+    name = os.path.basename(str(record.get("file") or "").replace("\\", "/"))
+    if not name:
+        return {}
+    path = os.path.join(package_folder or "", name)
+    if not os.path.isfile(path):
+        warnings.append(
+            "{0} object(s) travel as sampled motion but {1} is not in the "
+            "package, so they arrive still.".format(
+                record.get("object_count") or 0, name)
+        )
+        return {}
+    try:
+        with open(path, "r") as handle:
+            return json.load(handle)
+    except Exception as exc:
+        warnings.append(
+            "The sampled motion could not be read ({0}), so the objects it "
+            "carries arrive still.".format(exc)
+        )
+        return {}
+
+
+def _still_frames(values, visible, tolerance=1.0e-4):
+    """Frame indices whose matrix matches both neighbours, and that blink.
+
+    Visibility is checked alongside because it is keyed from the same run: a
+    frame dropped for holding still must not be the frame the object appears
+    on.
+    """
+    count = len(values) // 12
+    still = set()
+    for index in range(1, count - 1):
+        here = values[index * 12:(index + 1) * 12]
+        before = values[(index - 1) * 12:index * 12]
+        after = values[(index + 1) * 12:(index + 2) * 12]
+        if any(abs(a - b) > tolerance for a, b in zip(here, before)):
+            continue
+        if any(abs(a - b) > tolerance for a, b in zip(after, here)):
+            continue
+        if index < len(visible) and (
+                visible[index] != visible[index - 1]
+                or (index + 1 < len(visible)
+                    and visible[index + 1] != visible[index])):
+            continue
+        still.add(index)
+    return still
+
+
+def motion_samples(track, frames):
+    """A sampled track spelled back out as the samples everything else takes.
+
+    The file holds flat arrays because a dict per frame spends more on
+    repeating the word "matrix" than on the motion -- 3384 movers over 520
+    frames on the shot this was written for. Spelling one object's arrays
+    back out is a few hundred numbers, and it means the keying path is the
+    same one lights and cameras have always used.
+    """
+    values = (track or {}).get("matrix") or []
+    visible = (track or {}).get("visible") or []
+    still = _still_frames(values, visible)
+    samples = []
+    for index, frame in enumerate(frames or []):
+        # A frame identical to both its neighbours sits on the line the two
+        # of them already draw, and these keys interpolate linearly -- so
+        # keying it changes nothing and costs three keyframe inserts. Debris
+        # that comes to rest halfway through a shot is most of them.
+        if index in still:
+            continue
+        row = values[index * 12:(index + 1) * 12]
+        if len(row) < 12:
+            break
+        sample = {
+            "frame": frame,
+            # The fourth column the exporter dropped, put back: Maya never
+            # varies it, so it was not worth a quarter of the file.
+            "matrix": [
+                row[0], row[1], row[2], 0.0,
+                row[3], row[4], row[5], 0.0,
+                row[6], row[7], row[8], 0.0,
+                row[9], row[10], row[11], 1.0,
+            ],
+        }
+        if index < len(visible):
+            sample["visible"] = bool(visible[index])
+        samples.append(sample)
+    return samples
 
 
 def animate_object(obj, record, position_scale, apply_sample=None):

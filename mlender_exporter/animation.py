@@ -13,6 +13,7 @@ count.
 """
 from __future__ import absolute_import
 
+import array
 import math
 
 import maya.cmds as cmds
@@ -140,6 +141,94 @@ def sample_records(settings, entries):
         except Exception:
             pass
     return len(frames)
+
+
+def sample_motion(settings, entries, visible_at=None):
+    """World matrices and visibility per frame, for movers that only move.
+
+    A rigid body needs a transform per frame, not a mesh per frame, so this
+    is what replaces a geometry cache for everything that does not deform.
+
+    Matrices rather than translate/rotate/scale, because every receiver
+    already has a measured way to turn a Maya world matrix into its own
+    frame, and Maya's Euler angles would need a second, unmeasured one --
+    Unreal's object axes are not its light axes, and getting that wrong is a
+    silent mirror rather than an error.
+
+    Flat arrays rather than a record per frame: the shot this was written for
+    has 3384 movers over 520 frames, and a dict per sample spends more on
+    repeating the word "matrix" than on the motion. The fourth column is
+    dropped because Maya never varies it -- it is 0, 0, 0, 1 on every sample
+    of every object -- and a quarter of a shot's motion is worth not writing.
+
+    World space, matching what the cache did, so a prop inside a moving group
+    carries its journey without the group having to travel with it.
+    """
+    frames = frame_list(settings)
+    pairs = [(key, path) for key, path in (entries or []) if key and path]
+    if not frames or not pairs:
+        return {}
+
+    tracks = {}
+    for key, _path in pairs:
+        tracks[key] = {
+            "matrix": array.array("f"),
+            "visible": array.array("b"),
+        }
+
+    original = current_frame()
+    try:
+        for frame in frames:
+            try:
+                cmds.currentTime(frame, edit=True)
+            except Exception:
+                continue
+            for key, path in pairs:
+                track = tracks[key]
+                try:
+                    matrix = cmds.xform(path, query=True, worldSpace=True,
+                                        matrix=True)
+                except Exception:
+                    matrix = None
+                if not matrix or len(matrix) < 16:
+                    continue
+                for index, value in enumerate(matrix):
+                    if index % 4 != 3:
+                        track["matrix"].append(value)
+                visible = True
+                if visible_at is not None:
+                    try:
+                        visible = bool(visible_at(path))
+                    except Exception:
+                        visible = True
+                track["visible"].append(1 if visible else 0)
+    finally:
+        try:
+            cmds.currentTime(original, edit=True)
+        except Exception:
+            pass
+
+    objects = {}
+    for key, track in tracks.items():
+        if len(track["matrix"]) < 24:
+            continue
+        written = {"matrix": track["matrix"]}
+        # A run that never changes is not animation, and a visibility channel
+        # of 520 identical ones is the common case.
+        if not _channel_constant(track["visible"], 1):
+            written["visible"] = track["visible"]
+        objects[key] = written
+    if not objects:
+        return {}
+    return {"frames": frames, "objects": objects}
+
+
+def _channel_constant(values, width):
+    """Whether every sample in a flat channel equals the first one."""
+    for index in range(width, len(values)):
+        if values[index] != values[index % width]:
+            return False
+    return True
 
 
 def is_animated(node):

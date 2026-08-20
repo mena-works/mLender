@@ -17,7 +17,7 @@ import os
 import unreal
 
 from .constants import GENERATED_TAG, HIDDEN_LAYER_NAME, MESH_CONTENT_PATH
-from .utils import safe_asset_name
+from .utils import decoded_name, safe_asset_name
 
 
 def resolve_fbx_path(package_folder, package_data):
@@ -173,6 +173,12 @@ def build_record_index(mesh_records):
             record.get("mesh_full_name"),
             safe_asset_name(record.get("mesh") or ""),
             safe_asset_name(record.get("mesh_full_name") or ""),
+            # And the same names with their FBX escapes decoded: the actor
+            # arrives spelled the way the format spells it, not the way Maya
+            # stored it.
+            decoded_name(record.get("mesh") or ""),
+            safe_asset_name(decoded_name(record.get("mesh") or "")),
+            safe_asset_name(decoded_name(record.get("mesh_full_name") or "")),
         ):
             if not key:
                 continue

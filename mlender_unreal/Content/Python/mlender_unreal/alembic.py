@@ -86,6 +86,16 @@ def _import_cache(path, warnings):
     try:
         geometry = settings.get_editor_property("geometry_cache_settings")
         geometry.set_editor_property("flatten_tracks", False)
+        # And optimised once rather than per frame. Left off, the codec
+        # decides frame by frame whether to reorder a track's vertices, so a
+        # track's vertex buffer can grow mid-shot -- and the ray tracing
+        # geometry was sized from the frame it first saw. The engine asserts
+        # on the difference and takes the editor with it. The cache this was
+        # measured on never varies at the source: 0 of 3384 objects change
+        # vertex count and 0 of 200 sampled deform, with 60 of 60 travelling
+        # to prove the probe was live.
+        geometry.set_editor_property(
+            "apply_constant_topology_optimizations", True)
         settings.set_editor_property("geometry_cache_settings", geometry)
     except Exception as exc:
         warnings.append(
@@ -389,6 +399,47 @@ def _write_project_settings(settings, warnings):
         return False
 
 
+def _keep_out_of_ray_tracing(component, warnings):
+    """Take the cache out of the ray tracing scene.
+
+    A cache whose objects appear and disappear changes how many vertices a
+    segment holds from frame to frame, and the ray tracing acceleration
+    structure is sized once from the frame it first saw. The engine does not
+    survive the difference:
+
+        Assertion failed: P.Segments[i].MaxVertices <=
+        Geometry->Initializer.Segments[i].MaxVertices
+        Maximum number of vertices in a segment (125) must not be larger than
+        what was declared during FRHIRayTracingGeometry creation (123)
+
+    -- which takes the editor with it, mid-scrub, on a shot that was playing
+    correctly. Raster rendering is unaffected; what is lost is the cache's
+    contribution to hardware ray traced reflections and shadows. That is the
+    cheaper half of the trade, and it is said out loud rather than chosen
+    quietly.
+    """
+    try:
+        component.set_visible_in_ray_tracing(False)
+    except Exception:
+        try:
+            component.set_editor_property("visible_in_ray_tracing", False)
+        except Exception as exc:
+            warnings.append(
+                "The cache could not be taken out of ray tracing ({0}); if "
+                "the editor crashes on a segment vertex count, set "
+                "r.RayTracing.Geometry.GeometryCache 0.".format(exc)
+            )
+            return False
+    warnings.append(
+        "The cache is excluded from ray tracing: a cache whose objects blink "
+        "on and off changes its segment vertex counts, and the engine "
+        "asserts on that mid-playback. It still renders; it no longer "
+        "contributes to hardware ray traced reflections and shadows. Set "
+        "Visible In Ray Tracing back on the actor to try it."
+    )
+    return True
+
+
 def import_alembic(package_data, package_folder, material_cache, warnings,
                    build_material=None):
     """Import the package cache and put it in the level.
@@ -456,6 +507,7 @@ def import_alembic(package_data, package_folder, material_cache, warnings,
                     "take it.".format(label)
                 )
                 continue
+            _keep_out_of_ray_tracing(component, warnings)
             actor.set_actor_label(safe_asset_name(label, "Cache"))
             try:
                 actor.set_folder_path(FOLDER)

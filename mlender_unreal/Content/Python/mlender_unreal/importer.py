@@ -144,6 +144,10 @@ def import_scene_package(
     used = set()
     material_cache = {}
     assignments = []
+    # Keyed on the Maya DAG path, which is what the sampled motion names its
+    # objects by. A label would have to be guessed back into a path, and two
+    # meshes of one short name in different groups would be indistinguishable.
+    actors_by_path = {}
     hidden_actors = 0
     matched = 0
 
@@ -158,6 +162,8 @@ def import_scene_package(
             continue
         used.add(id(record))
         matched += 1
+        if record.get("mesh_path"):
+            actors_by_path[record["mesh_path"]] = actor
         organise_actor(actor, record, ACTOR_FOLDER_ROOT)
         if apply_visibility(actor, record):
             hidden_actors += 1
@@ -249,7 +255,8 @@ def import_scene_package(
     # Last, and it has to be: every track binds an actor by its label, so
     # nothing that spawns one may run after this.
     animation_result = import_animation(
-        package_data, unreal_scale, metre_scale, power_scale, warnings
+        package_data, unreal_scale, metre_scale, power_scale, warnings,
+        package_folder=package_folder, actors_by_path=actors_by_path,
     )
 
     # Render passes are Movie Render Queue configuration, not level contents,

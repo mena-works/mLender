@@ -133,6 +133,13 @@ def build_scene():
     cmds.setAttr(pbr + ".fuzzWeight", 0.4)
     cmds.setAttr(pbr + ".fuzzRoughness", 0.25)
 
+    # A name carrying an FBX character escape, which is what an asset that
+    # once travelled through an FBX keeps in Maya forever. The receivers are
+    # handed the decoded spelling and the package carries this one; on a real
+    # shot that mismatch left 232 of 7106 objects with no material and no
+    # motion.
+    shaded_cube("escapedFBXASC046piece", "lambert")
+
     _, flat = shaded_cube("flatCube", "aiFlat")
     cmds.setAttr(flat + ".color", 0.1, 0.9, 0.4, type="double3")
 
@@ -1604,7 +1611,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("68 meshes exported", payload["mesh_count"] == 68,
+    check("69 meshes exported", payload["mesh_count"] == 69,
           payload["mesh_count"])
     # The locator, the empty null, the nested locator, the group holding
     # only a curve, and the two shapeless FKIK switchers (root and NSRig:).
@@ -2708,25 +2715,59 @@ def main():
     for mesh in animated_payload.get("meshes") or []:
         animated_records[mesh.get("mesh") or ""] = mesh
 
+    animated_motion = {}
+    motion_section = animated_payload.get("motion") or {}
+    if motion_section.get("file") and os.path.isfile(motion_section["file"]):
+        with open(motion_section["file"], "r") as handle:
+            animated_motion = json.load(handle)
+    motion_objects = animated_motion.get("objects") or {}
+
+    def moves(name):
+        """The sampled motion for a mesh, found by its DAG path."""
+        path = (animated_records.get(name) or {}).get("mesh_path") or ""
+        return motion_objects.get(path) or {}
+
     check("caching animated objects writes a cache",
           bool(animated_section.get("file"))
           and os.path.isfile(animated_section["file"]),
           animated_section.get("file"))
-    check("and says how many moving objects are in it",
-          (animated_section.get("animated_count") or 0) >= 3,
+    # The split is the point: a cache is a stream of vertices, and a rigid
+    # body is a transform. Measured on the shot this was written for, 0 of
+    # 3384 cached objects deformed, so all of them were paying for a
+    # container that could be neither instanced nor ray traced.
+    check("only what deforms is cached",
+          (animated_section.get("animated_count") or 0) == 1,
           animated_section.get("animated_count"))
+    check("and the movers that do not deform are sampled instead",
+          len(motion_objects) >= 5, len(motion_objects))
+    check("with a sample per frame of the exported range",
+          len(animated_motion.get("frames") or [])
+          == (animated_payload.get("animation") or {}).get("frame_count"),
+          len(animated_motion.get("frames") or []))
     # The whole point of measuring instead of reading connections: this cube
     # is driven by an expression, so there is no animation curve anywhere
     # above it. A keyed-plug test reports it still.
-    check("an object moved by a solver rather than a key is cached",
-          animated_records.get("simCube", {}).get("alembic") is True,
+    check("an object moved by a solver rather than a key is carried",
+          len(moves("simCube").get("matrix") or []) ==
+          len(animated_motion.get("frames") or []) * 12,
+          len(moves("simCube").get("matrix") or []))
+    check("and it is not in the cache as well",
+          animated_records.get("simCube", {}).get("alembic") is not True,
           animated_records.get("simCube", {}).get("alembic"))
     check("so is a keyed one",
-          animated_records.get("dropCube", {}).get("alembic") is True,
-          animated_records.get("dropCube", {}).get("alembic"))
-    check("and a still prop travels with the group carrying it",
-          animated_records.get("simRider", {}).get("alembic") is True,
-          animated_records.get("simRider", {}).get("alembic"))
+          bool(moves("dropCube").get("matrix")),
+          bool(moves("dropCube").get("matrix")))
+    check("and a still prop carried by a moving group travels too",
+          bool(moves("simRider").get("matrix")),
+          bool(moves("simRider").get("matrix")))
+    # World space is what makes that last one work, and a local sample would
+    # pass every check above while leaving the prop at the origin of a group
+    # that has flown away.
+    rider = moves("simRider").get("matrix") or []
+    check("and it travels, rather than sitting where it started",
+          len(rider) >= 24
+          and rider[9:12] != rider[-3:],
+          [rider[9:12], rider[-3:]] if len(rider) >= 24 else None)
     # A scene where everything is cached would pass every check above while
     # being useless, so something that does not move has to stay put.
     still = [
@@ -2752,32 +2793,57 @@ def main():
           [item.get("material") for item in rider_materials])
     # Both of the nested pair travel, and the cache exists at all -- which is
     # the part that was failing: the refusal takes the whole file with it.
-    check("a mesh parented under another moving mesh is cached",
-          animated_records.get("passengerBox", {}).get("alembic") is True,
-          animated_records.get("passengerBox", {}).get("alembic"))
+    check("a mesh parented under another moving mesh is carried",
+          bool(moves("passengerBox").get("matrix")),
+          bool(moves("passengerBox").get("matrix")))
     check("so is the one carrying it",
-          animated_records.get("carrierBox", {}).get("alembic") is True,
-          animated_records.get("carrierBox", {}).get("alembic"))
+          bool(moves("carrierBox").get("matrix")),
+          bool(moves("carrierBox").get("matrix")))
+    # An object that holds still has nothing to sample, and a scene where
+    # everything is sampled would pass every check above while spending the
+    # whole cost of this feature on objects that never move.
+    still_records = [
+        name for name in animated_records
+        if not moves(name).get("matrix")
+    ]
+    check("and the objects that hold still are not sampled",
+          len(still_records) > 5, len(still_records))
     hidden_record = next(
         (mesh for mesh in payload["meshes"]
          if mesh.get("mesh") == "hiddenCollider"), {})
+    escaped = next(
+        (mesh for mesh in payload["meshes"]
+         if "FBXASC" in (mesh.get("mesh") or "")), {})
+    check("a name with an FBX escape is carried as Maya spells it",
+          escaped.get("mesh") == "escapedFBXASC046piece",
+          escaped.get("mesh"))
+
     check("a hidden object is recorded as hidden",
           (hidden_record.get("visibility") or {}).get("visible") is False,
           hidden_record.get("visibility"))
-    check("a face with more than four sides is triangulated for the cache",
-          any("more than four sides" in str(line)
-              for line in animated_payload.get("export_warnings") or []),
-          animated_payload.get("export_warnings"))
+    # Only the cached shapes are triangulated, and with the rigid movers out
+    # of the cache the n-gon spinner is one of them only if it deforms. The
+    # warning is asserted where the shape is genuinely cached.
+    check("a deformed mesh is the one that gets a cache",
+          animated_records.get("wobblePlane", {}).get("alembic") is True,
+          animated_records.get("wobblePlane", {}).get("alembic"))
     # The scene has to come back exactly as the artist left it. The
     # triangulation is history, and history that outlives the export is a
     # modelling change nobody asked for.
-    check("debris that blinks on is cached",
-          animated_records.get("debrisChunk", {}).get("alembic") is True,
-          animated_records.get("debrisChunk", {}).get("alembic"))
-    check("and the export says it carried its visibility",
-          any("visibility was written onto the mesh" in str(line)
-              for line in animated_payload.get("export_warnings") or []),
-          animated_payload.get("export_warnings"))
+    check("debris that blinks on is carried",
+          bool(moves("debrisChunk").get("matrix")),
+          bool(moves("debrisChunk").get("matrix")))
+    # The blink travels with it. Without this the piece is on screen from the
+    # first frame, sitting still inside the block it has not broken out of
+    # yet -- which is exactly how a shot reported "the pieces never move".
+    debris_visible = moves("debrisChunk").get("visible") or []
+    check("and so does its visibility",
+          len(debris_visible) == len(animated_motion.get("frames") or [])
+          and 0 in debris_visible and 1 in debris_visible,
+          debris_visible[:8])
+    check("while an object that never blinks carries no visibility channel",
+          not moves("dropCube").get("visible"),
+          moves("dropCube").get("visible"))
     # Driving a shape's visibility is a connection, and a connection that
     # outlives the export is a change to the artist's scene.
     debris_shape = cmds.listRelatives("debrisChunk", shapes=True,
@@ -2794,6 +2860,14 @@ def main():
           any("not instanced" in str(line)
               for line in animated_payload.get("export_warnings") or []),
           animated_payload.get("export_warnings"))
+    # A package that says nothing about the motion file is a package whose
+    # receiver has no reason to look for it.
+    check("and the payload names the motion file",
+          os.path.isfile(motion_section.get("file") or ""),
+          motion_section.get("file"))
+    check("and counts what is in it",
+          motion_section.get("object_count") == len(motion_objects),
+          [motion_section.get("object_count"), len(motion_objects)])
     # Whether the FBX still bakes is decided from what is left in it, and it
     # is worth asking directly: the export that prompted this spent over an
     # hour baking seven thousand objects that do not move, and the answer is
@@ -2808,7 +2882,7 @@ def main():
     check("with a deformed mesh left in it, it still bakes",
           _fbx_animation(span, True, ["|wobblePlane|wobblePlaneShape"],
                          [])["enabled"])
-    check("but with every mover cached there is nothing left to bake",
+    check("but with every mover carried there is nothing left to bake",
           not _fbx_animation(span, True, ["|flatCube|flatCubeShape"],
                              [])["enabled"])
 
@@ -2821,6 +2895,9 @@ def main():
               for mesh in payload.get("meshes") or []
               if mesh.get("mesh") in ("simCube", "dropCube", "simRider")
           ))
+    check("nor is anything sampled",
+          not (payload.get("motion") or {}).get("file"),
+          (payload.get("motion") or {}).get("file"))
 
     # With baking off there is nothing to reference, and this is where the
     # gradient itself has to travel. Its own folder, so the package the
