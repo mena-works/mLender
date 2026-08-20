@@ -763,6 +763,14 @@ Kullanıcının elle doğrulaması gereken adımlar:
 - ❌ Mesh'i olmayan bir mesh actor'ünde materyal atamasını sessizce atlama;
   daha önce gönderi barındıran content root'a yeniden import bunu üretiyor ve
   "2 mesh, 0 materyal, 0 uyarı" diye görünüyordu
+- ❌ Unreal'de bir actor'ü yalnız `set_is_temporarily_hidden_in_editor` ile
+  gizleme; adı gibi **geçici**, level yeniden açılınca actor geri geliyor.
+  Kalıcı olan editör bayrağı Python'a açık değil; gizli objeleri bir **Layer**'a
+  koyup katmanı kapat, o level ile kaydediliyor
+- ❌ Geometry cache'i varsayılan streaming penceresiyle bırakma; motor 5 sn
+  ileri, 2.5 sn geri tutuyor. 431 MB / 21.7 sn'lik bir cache oynatırken
+  ışınlanıyor ("Tried to map an unavailabe non-requested chunk"), sürüklerken
+  düzgün görünüyor çünkü streamer yetişiyor. Pencereyi çekim uzunluğuna aç
 - ❌ Cache'e giden bir objenin görünürlüğünü transform'da bırakma; Maya onu
   transform'da tutuyor (ölçüldü: transform False iken shape True), Unreal ise
   **mesh**ten okuyor (`AbcPolyMesh::GetVisibility`; importer görünmez kareleri

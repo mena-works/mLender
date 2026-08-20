@@ -71,6 +71,11 @@ MESH_CONTENT_PATH = CONTENT_ROOT + "/Meshes"
 # came back on the next open.
 HIDDEN_LAYER_NAME = "mLender Hidden"
 
+# How large a geometry cache may be before keeping the whole thing resident
+# stops being a kindness. Under this the streaming window is widened to the
+# shot so playback stops jumping; past it the size is reported instead.
+CACHE_RESIDENT_BUDGET_MB = 2048
+
 # How many leftover assets are worth deleting one at a time when the folder
 # delete is refused. Measured in an open editor: 3761 of them held the game
 # thread for over half an hour without finishing, while the same work takes

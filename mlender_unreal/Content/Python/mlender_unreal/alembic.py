@@ -21,7 +21,11 @@ import os
 
 import unreal
 
-from .constants import CONTENT_ROOT, GENERATED_TAG
+from .constants import (
+    CACHE_RESIDENT_BUDGET_MB,
+    CONTENT_ROOT,
+    GENERATED_TAG,
+)
 from .utils import resolve_recorded_path, safe_asset_name
 
 
@@ -276,6 +280,115 @@ def assign_cache_materials(actor, cache, package_data, material_cache,
     return assigned
 
 
+def _console(command):
+    try:
+        world = unreal.EditorLevelLibrary.get_editor_world()
+        unreal.SystemLibrary.execute_console_command(world, command)
+        return True
+    except Exception:
+        return False
+
+
+def keep_the_cache_resident(seconds, megabytes, warnings):
+    """Widen the streaming window to the shot, now and for next time.
+
+    Unreal streams a geometry cache five seconds ahead and two and a half
+    behind. A shot longer than that plays back by teleporting between
+    whichever parts happen to be resident, while scrubbing looks perfect
+    because it gives the streamer time to catch up. Measured on a 431 MB,
+    21.7 second cache: the log fills with "Tried to map an unavailabe
+    non-requested chunk".
+
+    The window is set to the shot rather than to a number picked here, and it
+    is written into the project so the next session starts that way. Past a
+    couple of gigabytes it is left alone and said out loud instead: keeping
+    the whole thing resident is the fix, and it is only a fix while it fits
+    in memory.
+    """
+    if seconds <= 0:
+        return False
+    if megabytes > CACHE_RESIDENT_BUDGET_MB:
+        warnings.append(
+            "The cache is {0} MB, too much to keep resident, so playback may "
+            "jump while it streams. Scrubbing shows the truth; for a render, "
+            "set GeometryCache.Streamer.BlockTillFinishStreaming 1.".format(
+                megabytes)
+        )
+        return False
+
+    window = round(seconds + 1.0, 2)
+    settings = (
+        ("GeometryCache.LookaheadSeconds", window),
+        ("GeometryCache.TrailingSeconds", window),
+        ("GeometryCache.PrefetchSeconds", min(window, 2.0)),
+    )
+    for name, value in settings:
+        _console("{0} {1:g}".format(name, value))
+
+    written = _write_project_settings(settings, warnings)
+    warnings.append(
+        "The cache is {0} MB over {1:g} seconds, so the streaming window was "
+        "widened to cover it{2}. Without that, playback jumps between the "
+        "parts that happen to be resident while scrubbing looks "
+        "right.".format(megabytes, seconds,
+                         " and written to DefaultEngine.ini" if written
+                         else " for this session only")
+    )
+    return True
+
+
+def _write_project_settings(settings, warnings):
+    """Put the console variables in the project's own config.
+
+    Only these keys, and only under [SystemSettings]: a config file carries
+    everything else the project is, and an importer rewriting any of that
+    would be a worse bargain than a cache that stutters.
+    """
+    try:
+        path = os.path.join(
+            unreal.Paths.convert_relative_path_to_full(
+                unreal.Paths.project_config_dir()),
+            "DefaultEngine.ini",
+        )
+    except Exception:
+        return False
+    try:
+        text = ""
+        if os.path.isfile(path):
+            handle = open(path, "r")
+            try:
+                text = handle.read()
+            finally:
+                handle.close()
+        lines = text.splitlines()
+        wanted = dict(("{0}=".format(name), "{0}={1:g}".format(name, value))
+                      for name, value in settings)
+        kept = []
+        for line in lines:
+            stripped = line.strip()
+            if any(stripped.startswith(key) for key in wanted):
+                continue
+            kept.append(line)
+        if "[SystemSettings]" not in kept:
+            kept.append("")
+            kept.append("[SystemSettings]")
+        index = kept.index("[SystemSettings]") + 1
+        for line in reversed(list(wanted.values())):
+            kept.insert(index, line)
+        handle = open(path, "w")
+        try:
+            handle.write("\n".join(kept) + "\n")
+        finally:
+            handle.close()
+        return True
+    except Exception as exc:
+        warnings.append(
+            "The streaming settings could not be written to the project "
+            "config ({0}); they hold for this session only.".format(exc)
+        )
+        return False
+
+
 def import_alembic(package_data, package_folder, material_cache, warnings,
                    build_material=None):
     """Import the package cache and put it in the level.
@@ -374,14 +487,15 @@ def import_alembic(package_data, package_folder, material_cache, warnings,
             megabytes = int(os.path.getsize(path) / 1048576)
         except Exception:
             pass
-        warnings.append(
-            "The cache is {0} MB. Unreal streams it five seconds ahead by "
-            "default, so a longer shot plays back in jumps: raise "
-            "GeometryCache.LookaheadSeconds and GeometryCache.TrailingSeconds "
-            "past the shot length, and set "
-            "GeometryCache.Streamer.BlockTillFinishStreaming 1 before "
-            "rendering.".format(megabytes)
-        )
+        seconds = 0.0
+        for cache in caches:
+            try:
+                seconds = max(seconds, float(
+                    cache.get_editor_property("end_frame")
+                    - cache.get_editor_property("start_frame")) / 24.0)
+            except Exception:
+                continue
+        keep_the_cache_resident(seconds, megabytes, warnings)
 
     if created and record.get("particle_count"):
         warnings.append(
