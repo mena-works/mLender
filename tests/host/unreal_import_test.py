@@ -1606,6 +1606,20 @@ def main():
         check("which the import counted",
               (result.get("hidden_count") or 0) >= 1,
               result.get("hidden_count"))
+        # In the layer, and the layer switched off -- the only hiding the
+        # editor keeps. The actor flag Python can set for the viewport is
+        # "temporarily" hidden and is gone when the level is opened again,
+        # which is how a collider hidden at import time came back on the
+        # next open.
+        layers = unreal.get_editor_subsystem(unreal.LayersSubsystem)
+        in_layer = [
+            actor.get_actor_label() for actor in
+            (layers.get_actors_from_layer("mLender Hidden") or [])
+        ]
+        check("the hidden object is in the hidden layer",
+              "hiddenCollider" in in_layer, in_layer[:4])
+        check("and the editor has it hidden",
+              hidden_actor.is_hidden_ed(), hidden_actor.is_hidden_ed())
 
     # --- the sections must cover the shot and not a thousand times it.
     #

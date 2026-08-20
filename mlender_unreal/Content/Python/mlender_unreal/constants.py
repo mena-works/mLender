@@ -65,6 +65,12 @@ LIGHTING_ACTOR_CLASSES = (
 CONTENT_ROOT = "/Game/mLender"
 MESH_CONTENT_PATH = CONTENT_ROOT + "/Meshes"
 
+# Hidden objects go in a layer of their own, because that is the only hiding
+# the editor keeps. The actor flag Python can set is "temporarily" hidden and
+# does not survive reopening the level, so a collider hidden at import time
+# came back on the next open.
+HIDDEN_LAYER_NAME = "mLender Hidden"
+
 # How many leftover assets are worth deleting one at a time when the folder
 # delete is refused. Measured in an open editor: 3761 of them held the game
 # thread for over half an hour without finishing, while the same work takes

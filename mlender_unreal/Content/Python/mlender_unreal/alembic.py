@@ -362,6 +362,27 @@ def import_alembic(package_data, package_folder, material_cache, warnings,
                 )
             )
 
+    if created:
+        # A cache is streamed, and the default window is five seconds ahead.
+        # A shot longer than that plays back by teleporting between the parts
+        # that happen to be resident -- measured on a 431 MB, 21.7 second
+        # cache, whose log filled with "Tried to map an unavailabe
+        # non-requested chunk". Scrubbing looks right because it gives the
+        # streamer time; playing does not.
+        megabytes = 0
+        try:
+            megabytes = int(os.path.getsize(path) / 1048576)
+        except Exception:
+            pass
+        warnings.append(
+            "The cache is {0} MB. Unreal streams it five seconds ahead by "
+            "default, so a longer shot plays back in jumps: raise "
+            "GeometryCache.LookaheadSeconds and GeometryCache.TrailingSeconds "
+            "past the shot length, and set "
+            "GeometryCache.Streamer.BlockTillFinishStreaming 1 before "
+            "rendering.".format(megabytes)
+        )
+
     if created and record.get("particle_count"):
         warnings.append(
             "The Alembic cache carries {0} cached particle system(s). They "

@@ -16,7 +16,7 @@ import os
 
 import unreal
 
-from .constants import GENERATED_TAG, MESH_CONTENT_PATH
+from .constants import GENERATED_TAG, HIDDEN_LAYER_NAME, MESH_CONTENT_PATH
 from .utils import safe_asset_name
 
 
@@ -321,10 +321,18 @@ def apply_visibility(actor, record):
         hidden = True
     except Exception:
         pass
+    # And into the layer, which is what makes it stay hidden. The actor flag
+    # Python can reach for the editor is "temporarily" hidden: it holds for
+    # the session and is gone when the level is opened again, so a collider
+    # hidden at import time was back in view on the next open.
     try:
-        actor.set_is_temporarily_hidden_in_editor(True)
+        unreal.get_editor_subsystem(unreal.LayersSubsystem).add_actor_to_layer(
+            actor, HIDDEN_LAYER_NAME)
     except Exception:
-        pass
+        try:
+            actor.set_is_temporarily_hidden_in_editor(True)
+        except Exception:
+            pass
     return hidden
 
 

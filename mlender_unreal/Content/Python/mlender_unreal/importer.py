@@ -14,6 +14,7 @@ import unreal
 from .constants import (
     ACTOR_FOLDER_ROOT,
     CONTENT_ROOT,
+    HIDDEN_LAYER_NAME,
     SUPPORTED_SCHEMA_VERSIONS,
 )
 from .alembic import import_alembic
@@ -228,6 +229,19 @@ def import_scene_package(
     # After the meshes are named and materialled: the manifest is attached to
     # the skeletal actors the FBX brought.
     as_result = apply_as_rigs(package_data, actors, warnings)
+
+    # The layer holding what Maya hid, switched off once everything is in it.
+    if hidden_actors:
+        try:
+            unreal.get_editor_subsystem(
+                unreal.LayersSubsystem).set_layer_visibility(
+                    HIDDEN_LAYER_NAME, False)
+        except Exception as exc:
+            warnings.append(
+                "{0} object(s) Maya had hidden are in the \"{1}\" layer but "
+                "it could not be switched off ({2}); hide it by hand in the "
+                "Layers panel.".format(hidden_actors, HIDDEN_LAYER_NAME, exc)
+            )
 
     # Sets name actors, so this runs after everything that creates them.
     set_result = import_sets(package_data, warnings)
