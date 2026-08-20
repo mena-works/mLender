@@ -33,6 +33,7 @@ from .sets import import_sets
 from .standins import import_standins
 from .volumes import import_volumes
 from .meshes import (
+    apply_visibility,
     assign_materials,
     build_record_index,
     find_mesh_record,
@@ -142,6 +143,7 @@ def import_scene_package(
     used = set()
     material_cache = {}
     assignments = []
+    hidden_actors = 0
     matched = 0
 
     for actor in actors:
@@ -156,6 +158,8 @@ def import_scene_package(
         used.add(id(record))
         matched += 1
         organise_actor(actor, record, ACTOR_FOLDER_ROOT)
+        if apply_visibility(actor, record):
+            hidden_actors += 1
         names = assign_materials(
             actor, record, material_cache, package_folder,
             build_material, warnings,
@@ -251,6 +255,7 @@ def import_scene_package(
         "fbx_path": fbx_path,
         "actor_count": len(actors),
         "mesh_count": matched,
+        "hidden_count": hidden_actors,
         "material_count": len(material_cache),
         "light_count": light_result["light_count"],
         "dome_count": light_result["dome_count"],

@@ -325,6 +325,61 @@ def triangulated(shapes, warnings):
     return nodes
 
 
+def driven_visibility(shapes, warnings):
+    """Put each shape's visibility where a cache reader looks for it.
+
+    Maya keeps visibility on the transform, and the shape under a hidden
+    transform still reports itself visible -- measured: at a frame where the
+    transform reads False, the shape reads True. Unreal reads a cached
+    object's visibility off the **mesh**
+    (AbcPolyMesh::GetVisibility, and the importer skips mesh samples for
+    frames it calls invisible), so a shot whose debris is hidden until it
+    breaks arrives with every piece on screen from the first frame, sitting
+    still. That is what "some broken pieces never move" looks like.
+
+    Driving the shape from its transform for the duration of the export puts
+    the flag on the mesh, where it gets written per frame like everything
+    else. The connection is undone afterwards; a shape that already had one
+    is left alone, since something else owns it.
+
+    Returns the connections to undo.
+    """
+    made = []
+    for shape in shapes or ():
+        transform = parent_of(shape)
+        if not transform:
+            continue
+        source = transform + ".visibility"
+        target = shape + ".visibility"
+        try:
+            if cmds.listConnections(target, source=True, destination=False):
+                continue
+            if bool(cmds.getAttr(source)) and not cmds.listConnections(
+                    source, type="animCurve"):
+                # Visible throughout and not keyed: nothing to carry.
+                continue
+            cmds.connectAttr(source, target, force=True)
+            made.append((source, target))
+        except Exception:
+            continue
+    if made:
+        warnings.append(
+            "{0} cached mesh(es) are hidden or blink in Maya; their "
+            "visibility was written onto the mesh so a cache reader can see "
+            "it. The Maya scene is unchanged.".format(len(made))
+        )
+    return made
+
+
+def release_visibility(connections):
+    """Undo what driven_visibility did, whatever else happened."""
+    for source, target in connections or ():
+        try:
+            cmds.disconnectAttr(source, target)
+        except Exception:
+            pass
+
+
 def export_alembic(roots, path, animation):
     """Write one Alembic holding every root. ``(ok, reason)``.
 

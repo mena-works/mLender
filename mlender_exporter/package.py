@@ -42,7 +42,9 @@ from .particles import (
 from .alembic import (
     animated_cache_roots,
     deformed_shapes,
+    driven_visibility,
     outermost,
+    release_visibility,
     triangulated,
     cache_roots,
     cache_only_shapes,
@@ -711,14 +713,18 @@ def _write_alembic(path, mesh_shapes, particle_list, particle_shapes,
     # fails the entire file over one of them, so the shapes that are about to
     # travel are triangulated first -- as history, undone below, leaving the
     # Maya scene exactly as it was.
-    undo = triangulated(
-        [shape for shape in mesh_shapes
-         if under_roots(parent_of(shape), roots)],
-        warnings,
-    )
+    cached_shapes = [
+        shape for shape in mesh_shapes
+        if under_roots(parent_of(shape), roots)
+    ]
+    undo = triangulated(cached_shapes, warnings)
+    # Visibility travels on the transform in Maya and is read off the mesh by
+    # Unreal, so it is put on the mesh for the length of the export.
+    visibility_links = driven_visibility(cached_shapes, warnings)
     try:
         written, reason = export_alembic(roots, path, animation)
     finally:
+        release_visibility(visibility_links)
         if undo:
             try:
                 cmds.delete(undo)

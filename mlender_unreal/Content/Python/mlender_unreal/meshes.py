@@ -297,6 +297,37 @@ def assign_materials(actor, record, material_cache, package_folder,
     return assigned
 
 
+def apply_visibility(actor, record):
+    """Hide an actor the Maya scene had hidden.
+
+    The package has said so all along -- 4843 of the 7106 meshes in one shot
+    carry visibility.visible false, colliders among them -- and this receiver
+    never read it, so every collision hull and every hidden proxy arrived in
+    the level in plain sight. The Blender side has read it from the start.
+
+    Both flags, because they are not the same thing: hidden-in-game is saved
+    with the level and is what a render obeys, and the editor's own flag is
+    what stops it being drawn in the viewport. Measured: the second one is
+    only exposed as "temporarily" hidden, so it holds for this session and a
+    reopened level shows the actor again -- which is worth knowing rather
+    than pretending.
+    """
+    visibility = (record or {}).get("visibility") or {}
+    if visibility.get("visible") is not False:
+        return False
+    hidden = False
+    try:
+        actor.set_actor_hidden_in_game(True)
+        hidden = True
+    except Exception:
+        pass
+    try:
+        actor.set_is_temporarily_hidden_in_editor(True)
+    except Exception:
+        pass
+    return hidden
+
+
 def organise_actor(actor, record, folder_root):
     """Put an actor in a folder mirroring its Maya group trail."""
     groups = [

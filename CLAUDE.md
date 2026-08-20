@@ -763,6 +763,15 @@ Kullanıcının elle doğrulaması gereken adımlar:
 - ❌ Mesh'i olmayan bir mesh actor'ünde materyal atamasını sessizce atlama;
   daha önce gönderi barındıran content root'a yeniden import bunu üretiyor ve
   "2 mesh, 0 materyal, 0 uyarı" diye görünüyordu
+- ❌ Cache'e giden bir objenin görünürlüğünü transform'da bırakma; Maya onu
+  transform'da tutuyor (ölçüldü: transform False iken shape True), Unreal ise
+  **mesh**ten okuyor (`AbcPolyMesh::GetVisibility`; importer görünmez kareleri
+  atlıyor). Sonuç: kırılana kadar gizli olan 2862 parça ilk kareden itibaren
+  ekranda, hareketsiz duruyor — "parçalar hiç kıpırdamıyor" diye bildirildi.
+  Export sırasında shape'i transform'a bağla, sonra çöz
+- ❌ Unreal alıcısında `record["visibility"]`'yi okumayı unutma; Blender
+  baştan beri okuyor, Unreal hiç okumuyordu ve bir çekimdeki 7106 mesh'in
+  4843'ü (collider'lar dahil) gizli olması gerekirken görünür geliyordu
 - ❌ Unreal'e n-gon taşıyan bir Alembic gönderme; okuyucu dört köşeden
   fazlasını reddediyor ("expecting triangles (3) or quads (4)") ve **bütün
   dosyayı** düşürüyor. Gerçek bir çekimde tek bir yüz 574 objeyi götürdü ve

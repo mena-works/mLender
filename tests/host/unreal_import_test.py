@@ -1584,6 +1584,29 @@ def main():
     # the meshes, it is the easier of the two to open by mistake, and it plays
     # nothing -- every key at its frame number as a tick, so the whole shot
     # happens inside the first fiftieth of a frame.
+    # --- what Maya hid must arrive hidden.
+    #
+    # The package has carried visibility from the start and this receiver read
+    # none of it, so collision hulls and hidden proxies came in visible: 4843
+    # of 7106 meshes in one shot, colliders among them.
+    hidden_actor = None
+    for actor in (unreal.get_editor_subsystem(
+            unreal.EditorActorSubsystem).get_all_level_actors() or []):
+        try:
+            if actor.get_actor_label() == "hiddenCollider":
+                hidden_actor = actor
+                break
+        except Exception:
+            continue
+    check("the hidden collider is in the level", hidden_actor is not None)
+    if hidden_actor is not None:
+        check("and it arrived hidden",
+              bool(hidden_actor.get_editor_property("hidden")),
+              hidden_actor.get_editor_property("hidden"))
+        check("which the import counted",
+              (result.get("hidden_count") or 0) >= 1,
+              result.get("hidden_count"))
+
     # --- the sections must cover the shot and not a thousand times it.
     #
     # Measured: set_range takes display frames while add_key takes ticks, so

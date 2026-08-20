@@ -1041,6 +1041,27 @@ def build_scene():
     cmds.setKeyframe(carrier + ".translateZ", time=1, value=0.0)
     cmds.setKeyframe(carrier + ".translateZ", time=25, value=7.0)
 
+    # Debris: hidden until it breaks, then it moves. Maya keeps that flag on
+    # the transform and Unreal reads it off the mesh, so a cache written the
+    # obvious way puts every piece on screen from the first frame, sitting
+    # still until its moment -- which is what a shot full of static rubble
+    # looked like.
+    debris = cmds.polyCube(name="debrisChunk")[0]
+    cmds.setAttr(debris + ".translateX", -38)
+    cmds.setKeyframe(debris + ".visibility", time=1, value=0)
+    cmds.setKeyframe(debris + ".visibility", time=12, value=0)
+    cmds.setKeyframe(debris + ".visibility", time=13, value=1)
+    cmds.setKeyframe(debris + ".translateY", time=13, value=6.0)
+    cmds.setKeyframe(debris + ".translateY", time=25, value=0.0)
+
+    # A hidden collision hull. Maya scenes are full of them and the package
+    # has always recorded visibility, but the Unreal side never read it, so
+    # every collider arrived in the level in plain sight -- reported from a
+    # shot where 4843 of 7106 meshes are hidden.
+    collider = cmds.polyCube(name="hiddenCollider")[0]
+    cmds.setAttr(collider + ".translateX", -34)
+    cmds.setAttr(collider + ".visibility", False)
+
     ngon = cmds.polyCreateFacet(
         name="ngonSpinner",
         point=[(0, 0, 0), (2, 0, 0), (2.5, 0, 1.5), (1, 0, 2.5), (-0.5, 0, 1.5)],
@@ -1583,7 +1604,7 @@ def main():
 
     print("\npackage")
     check("FBX written", os.path.isfile(result["fbx_path"]))
-    check("66 meshes exported", payload["mesh_count"] == 66,
+    check("68 meshes exported", payload["mesh_count"] == 68,
           payload["mesh_count"])
     # The locator, the empty null, the nested locator, the group holding
     # only a curve, and the two shapeless FKIK switchers (root and NSRig:).
@@ -2737,6 +2758,12 @@ def main():
     check("so is the one carrying it",
           animated_records.get("carrierBox", {}).get("alembic") is True,
           animated_records.get("carrierBox", {}).get("alembic"))
+    hidden_record = next(
+        (mesh for mesh in payload["meshes"]
+         if mesh.get("mesh") == "hiddenCollider"), {})
+    check("a hidden object is recorded as hidden",
+          (hidden_record.get("visibility") or {}).get("visible") is False,
+          hidden_record.get("visibility"))
     check("a face with more than four sides is triangulated for the cache",
           any("more than four sides" in str(line)
               for line in animated_payload.get("export_warnings") or []),
@@ -2744,6 +2771,22 @@ def main():
     # The scene has to come back exactly as the artist left it. The
     # triangulation is history, and history that outlives the export is a
     # modelling change nobody asked for.
+    check("debris that blinks on is cached",
+          animated_records.get("debrisChunk", {}).get("alembic") is True,
+          animated_records.get("debrisChunk", {}).get("alembic"))
+    check("and the export says it carried its visibility",
+          any("visibility was written onto the mesh" in str(line)
+              for line in animated_payload.get("export_warnings") or []),
+          animated_payload.get("export_warnings"))
+    # Driving a shape's visibility is a connection, and a connection that
+    # outlives the export is a change to the artist's scene.
+    debris_shape = cmds.listRelatives("debrisChunk", shapes=True,
+                                      fullPath=True)[0]
+    check("and left no connection behind on the shape",
+          not (cmds.listConnections(debris_shape + ".visibility",
+                                    source=True, destination=False) or []),
+          cmds.listConnections(debris_shape + ".visibility", source=True,
+                               destination=False))
     check("and the Maya scene is put back afterwards",
           not (cmds.ls(type="polyTriangulate") or []),
           cmds.ls(type="polyTriangulate"))

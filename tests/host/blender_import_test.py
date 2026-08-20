@@ -114,7 +114,7 @@ def main():
         print("  warn: {0}".format(warning))
 
     print("\nscene")
-    check("66 meshes imported", result["mesh_count"] == 66,
+    check("68 meshes imported", result["mesh_count"] == 68,
           result["mesh_count"])
     check("48 materials built", result["material_count"] == 48,
           result["material_count"])
@@ -1094,8 +1094,10 @@ def main():
           ordinary is not None
           and ordinary.visible_camera and ordinary.visible_shadow
           and not ordinary.is_holdout and not ordinary.hide_render)
-    check("three meshes reported as having flags",
-          result["visibility_count"] == 3, result["visibility_count"])
+    # Five now: the two the flags were written for, plus the hidden collider
+    # and the debris that blinks on, which a real shot is made of.
+    check("five meshes reported as having flags",
+          result["visibility_count"] == 5, result["visibility_count"])
 
     print("\nanimation")
     scene = bpy.context.scene
@@ -1467,8 +1469,8 @@ def main():
               places == [0.0, 0.02, 0.04], places)
 
     print("\nanimated visibility")
-    check("the import reported one animated visibility",
-          result["visibility_animation_count"] == 1,
+    check("the import reported two animated visibilities",
+          result["visibility_animation_count"] == 2,
           result["visibility_animation_count"])
     blink = bpy.data.objects.get("blinkCube")
     check("the blinking mesh arrived", blink is not None)
