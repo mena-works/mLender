@@ -2638,6 +2638,20 @@ With the split above, most shots have nothing in the cache to lose it for.
 Sampled motion carries **visibility** too, keyed per frame, because a piece
 that is on screen before it breaks reads as a piece that never moved.
 
+It is applied **on top of where the receiver put the object**, not instead of
+it. Measured: Unreal's FBX import places every actor with a 90 degree roll —
+that is where the format's up-axis conversion ends up, with the mesh left in
+the converted frame — so a world transform written over it turned every
+moving object by exactly that much. Each mover therefore carries the pose it
+was in at a reference frame, and the receiver composes each sample onto its
+own placement with that pose divided out. At the reference frame the object
+does not move at all, which is what both receivers' tests check.
+
+The reference is the **first frame of the exported range**, and the FBX is
+written from there, because that is the frame both receivers show. The
+package records it as `motion.reference_frame`, and the export puts the
+artist's frame back afterwards.
+
 Materials come with them. A cached object is still described in the JSON, so
 the receiver still builds its Maya materials and assigns them; the geometry is
 what moved into the cache, not the look. Two measurements make that work in
