@@ -850,6 +850,13 @@ Kullanıcının elle doğrulaması gereken adımlar:
   panel de 3968 üçgenlik küre de 256 okundu, yani sayı mesh'i değil
   bütçeyi anlatıyor. `get_num_nanite_triangles()` kaynağı verir.
   Nanite'ı bu araç açmıyor — motorun import varsayılanı
+- ❌ Sekansı motorun varsayılan tick çözünürlüğüyle bırakma; 24000'e karşı 24
+  fps'te motorun iki yarısı **birbiriyle çelişiyor**: değerlendirme section
+  aralığını tick okuyor, editörün cetveli ve `get_end_frame_seconds` aynı
+  sayıyı kare okuyor. Ölçüldü: `set_range(0, 24000)` → 0..1000 saniye,
+  `set_range_seconds(0, 1)` → 0..24. Sonuç, 520 karelik çekimin 520000'lik
+  cetvelle açılması. `set_tick_resolution(fps)` ile bire bir yapınca ikisi de
+  aynı sayıyı okuyor (0..25 → 0..1.042 sn, anahtar 0/24 → 0/50/100)
 - ❌ Sequencer'da display frame ile tick'i karıştırma; `add_key`,
   `set_range` ve oynatma konumu **tick**. Ölçüldü: 24 karede 100→900
   anahtarlanan sekans tick 12000'de 500, "kare 12"de 100.40 okuyor.

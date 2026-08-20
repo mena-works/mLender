@@ -1584,6 +1584,31 @@ def main():
     # the meshes, it is the easier of the two to open by mistake, and it plays
     # nothing -- every key at its frame number as a tick, so the whole shot
     # happens inside the first fiftieth of a frame.
+    # --- the sections must cover the shot and not a thousand times it.
+    #
+    # Measured: set_range takes display frames while add_key takes ticks, so
+    # handing a section the tick times of its own keys makes it a thousand
+    # times too long. Everything still plays -- the keys are right -- but
+    # Sequencer fits its ruler to the sections, and a 25 frame shot opens on a
+    # timeline of 25000. That is what a user reports as the range arriving
+    # wrong, twice.
+    sequence_asset = unreal.load_asset(
+        (result.get("sequence_path") or "").split(".")[0])
+    spans = []
+    if sequence_asset is not None:
+        end_seconds = float(animation.get("end") or 1.0) / float(
+            animation.get("fps") or 24.0)
+        for binding in sequence_asset.get_bindings():
+            for track in binding.get_tracks():
+                for section in track.get_sections():
+                    try:
+                        spans.append(round(section.get_end_frame_seconds(), 2))
+                    except Exception:
+                        continue
+        check("no section runs past the shot it belongs to",
+              spans and max(spans) <= end_seconds + 1.0,
+              (max(spans) if spans else None, round(end_seconds, 2)))
+
     # --- and the masters must actually compile.
     #
     # Only visible when the commandlet is allowed to render: with -nullrhi no

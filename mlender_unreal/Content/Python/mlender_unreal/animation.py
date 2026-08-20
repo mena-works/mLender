@@ -154,6 +154,18 @@ def create_sequence(package_data, warnings):
         sequence.set_display_rate(unreal.FrameRate(int(round(fps)), 1))
     except Exception:
         pass
+    # One tick per frame. The engine's default is 24000 ticks to a second
+    # against a display rate of 24, and at that ratio its own halves disagree:
+    # evaluation treats a section range as ticks, while the editor's ruler and
+    # get_end_frame_seconds treat the same numbers as frames. Measured with
+    # the resolutions equal: a section of 0..25 reads back as 0..25 frames and
+    # 0..1.042 seconds, and keys at 0 and 24 evaluate to 0, 50 and 100 at
+    # frames 0, 12 and 24. Everything agrees, and a per-frame sample has no
+    # use for sub-frame ticks.
+    try:
+        sequence.set_tick_resolution(unreal.FrameRate(int(round(fps)), 1))
+    except Exception:
+        pass
     resolution = sequence.get_tick_resolution()
     ticks_per_frame = float(resolution.numerator) / (
         float(resolution.denominator or 1) * float(fps)
@@ -194,7 +206,17 @@ def create_sequence(package_data, warnings):
 
 
 def _section(binding, track_class, first, last):
-    """A track's single section, spanning the whole range."""
+    """A track's single section, spanning the whole range.
+
+    The numbers are ticks, which are frames here: create_sequence sets the
+    sequence's tick resolution equal to its display rate. Measured at the
+    engine's default resolution of 24000 against a display rate of 24, the two
+    disagreed -- evaluation read a section range as ticks while the editor and
+    get_end_frame_seconds read the same numbers as frames, so a section
+    covering the shot drew a ruler a thousand times too long. Making one tick
+    one frame leaves nothing to disagree about; sub-frame precision is not
+    something a per-frame sample has to offer anyway.
+    """
     track = binding.add_track(track_class)
     section = track.add_section()
     section.set_range(first, last)
