@@ -21,6 +21,7 @@ from .animation import (
     animate_object,
     animate_visibility,
     apply_scene_range,
+    motion_anchor,
     motion_samples,
     read_motion,
 )
@@ -262,17 +263,23 @@ def import_scene_package(
                 ]
                 if blinks:
                     mesh_record["visibility_samples"] = blinks
-                # World space, so whatever group Maya had it under is
-                # already in the numbers; keeping the parent would apply it
-                # twice.
+                # The samples are deltas from the frame the FBX holds, so
+                # where the FBX put this object is the pose they build on.
+                # Read before anything of ours moves it.
+                # Read once and kept: clearing the parent leaves the
+                # object's evaluated matrix stale until the depsgraph catches
+                # up, so reading it back gives the pose before the group was
+                # folded in and every delta builds on the wrong place.
+                kept = obj.matrix_world.copy()
                 if obj.parent is not None:
-                    matrix = obj.matrix_world.copy()
                     obj.parent = None
-                    obj.matrix_world = matrix
-                motion_keys += animate_object(
-                    obj, mesh_record, motion_scale
-                )
-                motion_objects += 1
+                    obj.matrix_world = kept
+                anchor = motion_anchor(track, kept, motion_scale)
+                if anchor is not None:
+                    motion_keys += animate_object(
+                        obj, mesh_record, motion_scale, base=anchor,
+                    )
+                    motion_objects += 1
                 mesh_record.pop("samples", None)
         if animate_visibility(obj, mesh_record):
             visibility_animation_count += 1

@@ -2862,6 +2862,25 @@ def main():
           animated_payload.get("export_warnings"))
     # A package that says nothing about the motion file is a package whose
     # receiver has no reason to look for it.
+    # The samples are deltas from the frame the FBX holds, so at that frame
+    # the delta has to be nothing at all. Anything else and the receiver
+    # starts the shot by moving every object off the pose the FBX put it in.
+    reference = motion_section.get("reference_frame")
+    check("the payload names the frame the motion is measured from",
+          reference in (animated_motion.get("frames") or []), reference)
+    if reference in (animated_motion.get("frames") or []):
+        index = (animated_motion.get("frames") or []).index(reference)
+        # Every object carries the pose the FBX was written from, so a
+        # receiver never has to find it among the samples or trust that the
+        # frame it was told about was sampled at all.
+        anchor = moves("simCube").get("reference") or []
+        at_reference = (moves("simCube").get("matrix")
+                        or [])[index * 12:(index + 1) * 12]
+        check("and every mover carries the pose it is measured from",
+              len(anchor) == 12
+              and all(abs(a - b) < 1.0e-3
+                      for a, b in zip(anchor, at_reference)),
+              [anchor[:3], at_reference[:3]])
     check("and the payload names the motion file",
           os.path.isfile(motion_section.get("file") or ""),
           motion_section.get("file"))

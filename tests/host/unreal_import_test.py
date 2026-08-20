@@ -2021,6 +2021,43 @@ def main():
                 states.add(bool(value))
         check("and a mover that blinks carries its visibility",
               states == set([True, False]), states)
+        # At the frame the FBX holds, the keys must put the object exactly
+        # where Interchange put it. Measured, and the reason the samples are
+        # deltas at all: Interchange places every FBX actor with a 90 degree
+        # roll, and a world transform of our own written over that turned
+        # every moving object by exactly that much.
+        reference = (cache_data.get("motion") or {}).get("reference_frame")
+        frames = motion.get("frames") or []
+        if reference in frames:
+            tick = int(round(float(reference)))
+            for name in ("simCube", "dropCube"):
+                channels = sampled(name).get("MovieScene3DTransformTrack") or []
+                actor = None
+                for path, record in by_path.items():
+                    if record.get("mesh") == name:
+                        actor = actors_by_path_test.get(path)
+                if actor is None or not channels:
+                    continue
+                placed = actor.get_actor_transform()
+                wanted = {
+                    "Location.X": placed.translation.x,
+                    "Location.Y": placed.translation.y,
+                    "Location.Z": placed.translation.z,
+                    "Rotation.X": placed.rotation.rotator().roll,
+                    "Rotation.Y": placed.rotation.rotator().pitch,
+                    "Rotation.Z": placed.rotation.rotator().yaw,
+                }
+                off = []
+                for channel, pairs in channels:
+                    expected = wanted.get(str(channel).rsplit("_", 1)[0])
+                    if expected is None:
+                        continue
+                    at = [value for time, value in pairs if time == tick]
+                    if at and abs(at[0] - expected) > 0.01:
+                        off.append((str(channel), at[0], expected))
+                check("{0} sits where the FBX put it at the reference "
+                      "frame".format(name), not off, off)
+
         # Where the keys put it, not only that they move. The prop in the
         # moving group hangs under a static group thirty units up, and the
         # samples are world space -- so the prop carries that offset itself.

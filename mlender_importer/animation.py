@@ -113,6 +113,37 @@ def _still_frames(values, visible, tolerance=1.0e-4):
     return still
 
 
+def motion_anchor(track, placed, position_scale):
+    """The object's placement with its reference pose divided out.
+
+    Composing a sample onto this leaves the reference frame exactly where the
+    FBX put the object, which is the whole point: the exchange's own idea of
+    where and which way up the object goes is kept, and only the movement
+    since then is ours.
+    """
+    reference = (track or {}).get("reference") or []
+    if len(reference) < 12:
+        return None
+    row = list(reference[:12])
+    matrix = maya_matrix_to_blender(
+        {
+            "world_matrix": [
+                row[0], row[1], row[2], 0.0,
+                row[3], row[4], row[5], 0.0,
+                row[6], row[7], row[8], 0.0,
+                row[9], row[10], row[11], 1.0,
+            ]
+        },
+        position_scale,
+    )
+    if matrix is None:
+        return None
+    try:
+        return matrix.inverted() @ placed
+    except ValueError:
+        return None
+
+
 def motion_samples(track, frames):
     """A sampled track spelled back out as the samples everything else takes.
 
@@ -153,12 +184,19 @@ def motion_samples(track, frames):
     return samples
 
 
-def animate_object(obj, record, position_scale, apply_sample=None):
+def animate_object(obj, record, position_scale, apply_sample=None,
+                   base=None):
     """Key an object's transform, and optionally its data, from the samples.
 
     ``apply_sample(sample)`` is called with the object already moved to that
     frame and should set and key whatever data values change; returning the
     transform work to one place keeps the light and camera paths identical.
+
+    ``base`` is an anchor each sample is composed onto rather than replacing
+    the object's transform outright. Sampled mesh motion arrives that way, so
+    that whatever the FBX exchange did to the object on the way in is kept:
+    measured, Unreal's importer places every FBX actor with a 90 degree roll,
+    and writing a world transform over that turns every moving object.
     """
     samples = record.get("samples") or []
     if len(samples) < 2:
@@ -175,6 +213,8 @@ def animate_object(obj, record, position_scale, apply_sample=None):
         )
         if matrix is None:
             continue
+        if base is not None:
+            matrix = matrix @ base
         frame = int(round(scalar(sample.get("frame"), 0.0)))
 
         translation, rotation, scale = matrix.decompose()

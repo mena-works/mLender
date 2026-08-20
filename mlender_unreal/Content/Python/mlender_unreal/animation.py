@@ -1105,15 +1105,60 @@ def _keyable(values, tolerance=1.0e-4):
     return keep
 
 
+def _expanded(reference):
+    """A twelve float reference back into a full Maya world matrix."""
+    if not reference or len(reference) < 12:
+        return None
+    row = list(reference[:12])
+    return [
+        row[0], row[1], row[2], 0.0,
+        row[3], row[4], row[5], 0.0,
+        row[6], row[7], row[8], 0.0,
+        row[9], row[10], row[11], 1.0,
+    ]
+
+
+def _anchor_transform(placed, reference, unreal_scale):
+    """Where the FBX put the object, with the reference pose divided out.
+
+    A sample says where the object was in Maya; the anchor turns that into
+    where the actor should be, by asking what has changed since the pose the
+    FBX carries. Composing a sample onto this leaves the reference frame
+    exactly where Interchange put it -- roll and all.
+    """
+    matrix = _expanded(reference)
+    if matrix is None:
+        return None
+    try:
+        location, rotation, scale = unreal_object_transform(
+            {"world_matrix": matrix}, unreal_scale)
+        return unreal.MathLibrary.compose_transforms(
+            placed,
+            unreal.MathLibrary.invert_transform(
+                unreal.Transform(location, rotation, scale)),
+        )
+    except Exception:
+        return None
+
+
 def animate_sampled_motion(sequence, motion, actors_by_path, unreal_scale,
                            ticks_per_frame, first, last, warnings,
                            keyed_labels=None):
     """Transform and visibility keys for the movers that only move.
 
     This is the half of a simulation that does not belong in a geometry
-    cache. It arrives as one world matrix per frame per object, which is what
-    a rigid body is, and it lands on the static mesh the FBX already brought
-    -- ray traced, instanced, and with nothing to stream.
+    cache. It arrives as one transform per frame per object, which is what a
+    rigid body is, and it lands on the static mesh the FBX already brought --
+    ray traced, instanced, and with nothing to stream.
+
+    What arrives is a *delta* from the frame the FBX holds, not a world
+    transform, and it is applied on top of where Interchange put the actor.
+    Measured, and the reason: Interchange places every FBX actor with a 90
+    degree roll -- that is where the format's up-axis conversion lands, with
+    the mesh left in the converted frame. Writing our own world transform
+    over that discarded it and turned every moving object by exactly that
+    much. A delta keeps whatever the format did and adds only the movement,
+    so at the reference frame the object does not move at all.
     """
     frames = list((motion or {}).get("frames") or [])
     objects = (motion or {}).get("objects") or {}
@@ -1144,6 +1189,15 @@ def animate_sampled_motion(sequence, motion, actors_by_path, unreal_scale,
         previous = None
         counted = 0
         inverse = _parent_inverse(actor)
+        # Where Interchange put it, read before anything of ours touches
+        # the actor -- and with the sampled pose of the same frame divided
+        # out, so a sample composes straight onto it.
+        placed = actor.get_actor_transform()
+        anchor = _anchor_transform(placed, track.get("reference"),
+                                   unreal_scale)
+        if anchor is None:
+            missing += 1
+            continue
         lanes = [[] for _index in range(9)]
         for index, frame in enumerate(frames):
             row = values[index * 12:(index + 1) * 12]
@@ -1158,8 +1212,14 @@ def animate_sampled_motion(sequence, motion, actors_by_path, unreal_scale,
             location, rotation, scale = unreal_object_transform(
                 {"world_matrix": matrix}, unreal_scale
             )
+            # The sample, composed onto the anchor: A then B, which is
+            # what compose_transforms means by its order.
+            world = unreal.MathLibrary.compose_transforms(
+                anchor, unreal.Transform(location, rotation, scale)
+            )
             location, rotation, scale = _relative_to_parent(
-                inverse, location, rotation, scale
+                inverse, world.translation, world.rotation.rotator(),
+                world.scale3d,
             )
             angles = _unwound(
                 previous, (rotation.roll, rotation.pitch, rotation.yaw)

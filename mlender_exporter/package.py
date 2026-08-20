@@ -29,6 +29,7 @@ from .animation import (
     animation_info,
     frozen_animation_kinds,
     material_animation_entries,
+    anchor_motion,
     sample_motion,
     sample_records,
 )
@@ -472,6 +473,13 @@ def export_scene(
             shape for shape in mesh_shapes
             if not under_roots(parent_of(shape), cached)
         ]
+        # The FBX is written from the frame the motion is anchored to, so
+        # what it carries is the pose every delta is measured from. The
+        # user's frame is put back below whatever happens.
+        anchor_frame = current_frame()
+        motion = anchor_motion(
+            motion, dict((path, path) for path, _p in motion_entries), warnings
+        )
         export_fbx(
             [
                 transform
@@ -487,6 +495,10 @@ def export_scene(
                 joints,
             ),
         )
+        try:
+            cmds.currentTime(anchor_frame, edit=True)
+        except Exception:
+            pass
 
         payload = {
             "schema_version": EXPORT_SCHEMA_VERSION,
@@ -529,6 +541,10 @@ def export_scene(
                 "file": maya_path(motion_path) if motion else "",
                 "object_count": len(motion.get("objects") or {}),
                 "frame_count": len(motion.get("frames") or []),
+                # The frame the FBX holds, which is where every delta is
+                # measured from. A receiver that lands elsewhere at this
+                # frame has applied them to the wrong pose.
+                "reference_frame": motion.get("reference_frame"),
             },
             "particles": particle_list,
             "transforms": transform_list,

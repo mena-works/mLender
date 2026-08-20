@@ -223,6 +223,56 @@ def sample_motion(settings, entries, visible_at=None):
     return {"frames": frames, "objects": objects}
 
 
+def anchor_motion(motion, paths, warnings):
+    """Move to the first sampled frame and record the pose found there.
+
+    Called immediately before the FBX is written, and it leaves the timeline
+    where it put it, because that is the pose the FBX must carry: the
+    receivers apply every sample as a delta from this reference, and they see
+    the FBX's first frame. The caller restores the user's frame afterwards.
+
+    The reference is stored per object rather than as a frame number alone,
+    so a receiver never has to find it among the samples or trust that the
+    frame it was told about was sampled at all.
+    """
+    objects = (motion or {}).get("objects") or {}
+    frames = (motion or {}).get("frames") or []
+    if not objects or not frames:
+        return motion
+    try:
+        cmds.currentTime(frames[0], edit=True)
+    except Exception:
+        warnings.append(
+            "The timeline could not be moved to frame {0:g}, so sampled "
+            "motion may start from the wrong pose.".format(frames[0])
+        )
+    lost = 0
+    for key in list(objects):
+        path = paths.get(key) if hasattr(paths, "get") else key
+        try:
+            matrix = cmds.xform(path, query=True, worldSpace=True, matrix=True)
+        except Exception:
+            matrix = None
+        if not matrix or len(matrix) < 16:
+            del objects[key]
+            lost += 1
+            continue
+        reference = array.array("f")
+        for index, value in enumerate(matrix):
+            if index % 4 != 3:
+                reference.append(value)
+        objects[key]["reference"] = reference
+    if lost:
+        warnings.append(
+            "{0} moving object(s) could not be read at the reference frame, "
+            "so they arrive still.".format(lost)
+        )
+    if not objects:
+        return {}
+    motion["reference_frame"] = frames[0]
+    return motion
+
+
 def _channel_constant(values, width):
     """Whether every sample in a flat channel equals the first one."""
     for index in range(width, len(values)):
