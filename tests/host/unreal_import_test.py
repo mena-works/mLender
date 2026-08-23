@@ -2161,6 +2161,37 @@ def main():
               not parked, parked[:4])
         check("and there was one to check", bool(blinkers), blinkers[:3])
 
+        # Splitting the shot, exercised at a threshold the fixture can reach.
+        # A binding is a row in the outliner, and a real shot of 7562 of them
+        # made a 349 MB asset the editor would not open at all; the same data
+        # at 400 opened at once. Below the threshold nothing is split, which
+        # is what every small scene relies on.
+        master = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
+            "ML_SplitProbe", "/Game/mLenderProbe", unreal.LevelSequence,
+            unreal.LevelSequenceFactoryNew())
+        master.set_display_rate(unreal.FrameRate(24, 1))
+        master.set_tick_resolution(unreal.FrameRate(24, 1))
+        master.set_playback_start(0)
+        master.set_playback_end(24)
+        few = mlender_unreal.animation._motion_parts(
+            master, "Probe", 10, 0, 24, [])
+        check("a small shot is not split", few == [], len(few))
+        many = mlender_unreal.animation._motion_parts(
+            master, "Probe",
+            mlender_unreal.constants.MOTION_BINDINGS_PER_SEQUENCE * 3 + 1,
+            0, 24, [])
+        check("a large one is cut into parts", len(many) == 4, len(many))
+        check("and the master carries a section for each",
+              sum(len(track.get_sections() or [])
+                  for track in master.get_tracks()
+                  if isinstance(track, unreal.MovieSceneSubTrack)) == 4,
+              [t.get_class().get_name() for t in master.get_tracks()])
+        check("each part shares the master's time base",
+              all(part.get_tick_resolution().numerator ==
+                  master.get_tick_resolution().numerator for part in many),
+              [p.get_tick_resolution().numerator for p in many[:2]])
+        unreal.EditorAssetLibrary.delete_directory("/Game/mLenderProbe")
+
         check("a sampled mover arrives as a mesh actor, not a cache track",
               all(name in labels for name in movers_in_level),
               [name for name in movers_in_level if name not in labels])

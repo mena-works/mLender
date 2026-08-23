@@ -38,6 +38,7 @@ import unreal
 from .constants import (
     ANIMATION_SEQUENCE_NAME,
     MESH_CONTENT_PATH,
+    MOTION_BINDINGS_PER_SEQUENCE,
     GENERATED_TAG,
     SEQUENCE_CONTENT_PATH,
 )
@@ -1139,9 +1140,66 @@ def _anchor_transform(placed, reference, unreal_scale):
         return None
 
 
+def _motion_parts(master, label, count, first, last, warnings):
+    """Sub-sequences for the movers, hung off the master, or nothing.
+
+    Nothing when the shot is small enough to hold in one sequence, which
+    keeps the common case exactly as it was. Above that the objects are cut
+    into parts and the master carries a section per part, so opening it costs
+    one row per few hundred objects rather than one per object.
+    """
+    if count <= MOTION_BINDINGS_PER_SEQUENCE:
+        return []
+    wanted = (count + MOTION_BINDINGS_PER_SEQUENCE - 1)         // MOTION_BINDINGS_PER_SEQUENCE
+    tools = unreal.AssetToolsHelpers.get_asset_tools()
+    try:
+        track = master.add_track(unreal.MovieSceneSubTrack)
+    except Exception as exc:
+        warnings.append(
+            "The shot is {0} objects but could not be split into "
+            "sub-sequences ({1}), so it is one sequence and may be slow to "
+            "open.".format(count, exc)
+        )
+        return []
+    parts = []
+    for index in range(wanted):
+        name = "{0}_{1}_Part{2:02d}".format(
+            ANIMATION_SEQUENCE_NAME, label, index + 1)
+        path = "{0}/{1}".format(SEQUENCE_CONTENT_PATH, name)
+        try:
+            if unreal.EditorAssetLibrary.does_asset_exist(path):
+                unreal.EditorAssetLibrary.delete_asset(path)
+            part = tools.create_asset(
+                name, SEQUENCE_CONTENT_PATH, unreal.LevelSequence,
+                unreal.LevelSequenceFactoryNew(),
+            )
+        except Exception:
+            part = None
+        if part is None:
+            warnings.append(
+                'Sub-sequence "{0}" could not be built, so the objects it '
+                "would have carried stay on the main sequence.".format(name)
+            )
+            break
+        # The parts share the master's time base, or a section that spans the
+        # shot on one reads as a fraction of it on the other.
+        try:
+            part.set_display_rate(master.get_display_rate())
+            part.set_tick_resolution(master.get_tick_resolution())
+            part.set_playback_start(master.get_playback_start())
+            part.set_playback_end(master.get_playback_end())
+        except Exception:
+            pass
+        section = track.add_section()
+        section.set_sequence(part)
+        section.set_range(first, last)
+        parts.append(part)
+    return parts
+
+
 def animate_sampled_motion(sequence, motion, actors_by_path, unreal_scale,
                            ticks_per_frame, first, last, warnings,
-                           keyed_labels=None):
+                           keyed_labels=None, package_label="Scene"):
     """Transform and visibility keys for the movers that only move.
 
     This is the half of a simulation that does not belong in a geometry
@@ -1165,10 +1223,19 @@ def animate_sampled_motion(sequence, motion, actors_by_path, unreal_scale,
     if not frames or not objects:
         return 0, 0
 
+    # One sequence per few hundred objects rather than one for the shot. A
+    # binding is a row, and a shot of 7562 of them made an asset the editor
+    # would not open: measured, 349 MB and 14383 tracks hung on opening,
+    # while the same data at 400 bindings and 21 MB opened at once. The
+    # master keeps one row per part, so the outliner stays a page long.
+    parts = _motion_parts(sequence, package_label, len(objects), first, last,
+                          warnings)
     tracks = 0
     keys = 0
     missing = 0
-    for path, track in objects.items():
+    for index, (path, track) in enumerate(objects.items()):
+        target = (parts[index // MOTION_BINDINGS_PER_SEQUENCE]
+                  if parts else sequence)
         actor = actors_by_path.get(path)
         if actor is None:
             missing += 1
@@ -1177,7 +1244,7 @@ def animate_sampled_motion(sequence, motion, actors_by_path, unreal_scale,
         if len(values) < len(frames) * 12:
             missing += 1
             continue
-        binding = sequence.add_possessable(actor)
+        binding = target.add_possessable(actor)
         _track, section = _section(
             binding, unreal.MovieScene3DTransformTrack, first, last
         )
@@ -1313,7 +1380,7 @@ def import_animation(package_data, unreal_scale, metre_scale, power_scale,
             motion if motion is not None
             else read_motion(package_folder, package_data, warnings),
             actors_by_path or {}, unreal_scale, ticks_per_frame, first, last,
-            warnings, sampled_labels),
+            warnings, sampled_labels, sequence_label(package_data)),
     )
     for builder in builders:
         try:

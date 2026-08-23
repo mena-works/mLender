@@ -115,6 +115,13 @@ CAMERA_FOLDER = ACTOR_FOLDER_ROOT + "/mLender Cameras"
 # The Level Sequence that carries light, camera and visibility keys.
 ANIMATION_SEQUENCE_NAME = "ML_Sequence"
 
+# How many objects one Level Sequence carries before the shot is split into
+# sub-sequences. Measured: a shot of 7562 bindings in one sequence -- 14383
+# tracks, a 349 MB asset -- would not open at all, the editor hung on it,
+# while the same data cut to 400 bindings and 21 MB opened at once. The
+# master then holds one row per part instead of one per object.
+MOTION_BINDINGS_PER_SEQUENCE = 400
+
 # The Movie Render Queue config that carries the scene AOVs.
 RENDER_CONFIG_NAME = "ML_RenderConfig"
 
