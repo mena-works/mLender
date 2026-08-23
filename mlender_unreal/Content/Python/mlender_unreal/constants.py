@@ -65,6 +65,18 @@ LIGHTING_ACTOR_CLASSES = (
 CONTENT_ROOT = "/Game/mLender"
 MESH_CONTENT_PATH = CONTENT_ROOT + "/Meshes"
 
+# Copies of the engine's scene import pipelines live here, so the import can
+# be told to keep the normals the file carries. Both are copied: the second
+# is what creates the actors, and overriding the stack with one pipeline
+# returns True and produces an empty level.
+PIPELINE_CONTENT_PATH = CONTENT_ROOT + "/Pipelines"
+SCENE_IMPORT_PIPELINES = (
+    "/Interchange/Pipelines/DefaultSceneAssetsPipeline"
+    ".DefaultSceneAssetsPipeline",
+    "/Interchange/Pipelines/DefaultSceneLevelPipeline"
+    ".DefaultSceneLevelPipeline",
+)
+
 # Hidden objects go in a layer of their own, because that is the only hiding
 # the editor keeps. The actor flag Python can set is "temporarily" hidden and
 # does not survive reopening the level, so a collider hidden at import time

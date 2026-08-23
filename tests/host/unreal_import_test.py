@@ -2114,6 +2114,27 @@ def main():
         check("objects that hold still still arrive as meshes",
               len(labels) > 20, len(labels))
 
+    # The file's own normals, kept. Interchange recomputes them by default
+    # from the edge smoothing rather than the normals, and Maya writes the
+    # two disagreeing: measured on a shot, a sphere whose normals are smooth
+    # (98 vertices for 96 faces) arrived as 576 vertices for 192 triangles,
+    # which is a faceted ball.
+    pipelines = mlender_unreal.meshes.keep_source_normals([])
+    check("the import stack was copied so the normals can be kept",
+          len(pipelines) == 2, pipelines)
+    kept = None
+    for path in pipelines:
+        asset = unreal.load_asset(path)
+        if asset is None:
+            continue
+        try:
+            kept = asset.get_editor_property(
+                "common_meshes_properties").get_editor_property(
+                    "recompute_normals")
+        except Exception:
+            continue
+    check("and that copy stops Unreal recomputing them", kept is False, kept)
+
     # An object whose Maya name still holds an FBX escape. Unreal is handed
     # the decoded spelling, so a record indexed only under Maya's spelling
     # matches nothing -- and the object arrives with a placeholder material

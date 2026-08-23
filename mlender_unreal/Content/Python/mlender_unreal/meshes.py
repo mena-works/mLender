@@ -16,7 +16,13 @@ import os
 
 import unreal
 
-from .constants import GENERATED_TAG, HIDDEN_LAYER_NAME, MESH_CONTENT_PATH
+from .constants import (
+    GENERATED_TAG,
+    HIDDEN_LAYER_NAME,
+    MESH_CONTENT_PATH,
+    PIPELINE_CONTENT_PATH,
+    SCENE_IMPORT_PIPELINES,
+)
 from .utils import decoded_name, safe_asset_name
 
 
@@ -76,6 +82,64 @@ def send_content_path(package_name):
     return base
 
 
+def keep_source_normals(warnings):
+    """Copies of the scene import pipelines that keep the file's normals.
+
+    Interchange recomputes normals by default, from the file's edge smoothing
+    rather than from its normals. Maya writes both, and they disagree:
+    measured on a shot, a sphere's normals are smooth -- 98 vertices for 96
+    faces -- while every one of its 192 edges is marked hard. Recomputing
+    from the second delivered 576 vertices for 192 triangles, which is a
+    faceted ball.
+
+    The stack is copied whole rather than replaced by one pipeline of ours:
+    it holds two, and the second is what creates the actors. Overriding with
+    a single pipeline returns True and produces a level with nothing in it.
+
+    Returns the paths to pass as overrides, or an empty list, in which case
+    the import proceeds the way it always did.
+    """
+    copies = []
+    for source in SCENE_IMPORT_PIPELINES:
+        name = source.rsplit(".", 1)[-1]
+        target = "{0}/ML_{1}".format(PIPELINE_CONTENT_PATH, name)
+        try:
+            if not unreal.EditorAssetLibrary.does_asset_exist(target):
+                # Loaded first: duplicate_asset returns None for an engine
+                # asset that is not already in memory, and this one is not
+                # loadable through EditorAssetLibrary at all.
+                unreal.load_asset(source)
+                copy = unreal.EditorAssetLibrary.duplicate_asset(
+                    source, target)
+                if copy is None:
+                    warnings.append(
+                        "The import pipeline could not be copied from {0}, "
+                        "so Unreal recomputes the normals and smooth "
+                        "surfaces arrive faceted.".format(source)
+                    )
+                    return []
+                try:
+                    common = copy.get_editor_property(
+                        "common_meshes_properties")
+                except Exception:
+                    common = None
+                if common is not None:
+                    # Mutated in place: assigning the property back is
+                    # refused, and the refusal is silent enough to look like
+                    # it worked.
+                    common.set_editor_property("recompute_normals", False)
+                unreal.EditorAssetLibrary.save_asset(target)
+            copies.append("{0}.ML_{1}".format(target, name))
+        except Exception as exc:
+            warnings.append(
+                "The import pipeline could not be prepared ({0}), so Unreal "
+                "recomputes the normals and smooth surfaces arrive "
+                "faceted.".format(exc)
+            )
+            return []
+    return copies
+
+
 def import_fbx_scene(fbx_path, warnings, package_name=""):
     """Import the FBX into the open level, hierarchy and all.
 
@@ -89,6 +153,10 @@ def import_fbx_scene(fbx_path, warnings, package_name=""):
     source = manager.create_source_data(fbx_path)
     parameters = unreal.ImportAssetParameters()
     parameters.is_automated = True
+    overrides = keep_source_normals(warnings)
+    if overrides:
+        parameters.override_pipelines = [
+            unreal.SoftObjectPath(path) for path in overrides]
     if not manager.import_scene(
             send_content_path(package_name), source, parameters):
         raise RuntimeError(
