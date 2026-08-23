@@ -483,6 +483,29 @@ def main():
           abs(scaled[0] - 0.25) < 0.001 and abs(scaled[-1] - 0.75) < 0.001,
           (scaled[0], scaled[-1]))
 
+    # The sequence is named after the shot, not the package. Every export
+    # writes into a fresh folder and is therefore called mLender_01, so naming
+    # the sequence after the package gave two shots one asset: sending a second
+    # shot into a project overwrote the first shot's timeline and left its
+    # level bound to nothing. Measured on a real pair of sends.
+    label = receiver.utils.sequence_label
+    first = {"package_name": "mLender_01",
+             "maya_scene": "M:/shots/blocks_layout_v0101.ma"}
+    second = {"package_name": "mLender_01",
+              "maya_scene": "M:/shots/blocks_layout_v0107.ma"}
+    check("two shots under one package name get two sequence names",
+          label(first) != label(second), (label(first), label(second)))
+    check("and the same shot keeps one name",
+          label(first) == label(dict(first, package_folder="elsewhere")),
+          label(first))
+    check("the name is the scene file, not its folder",
+          label(first) == "blocks_layout_v0101", label(first))
+    check("a package with no scene still gets a name",
+          label({"package_name": "mLender_03"}) == "mLender_03",
+          label({"package_name": "mLender_03"}))
+    check("and one with neither does not go nameless",
+          bool(label({})), label({}))
+
     check(
         "every conditional channel really is in both tables",
         conditional <= wired

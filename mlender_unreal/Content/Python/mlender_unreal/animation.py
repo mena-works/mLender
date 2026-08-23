@@ -53,7 +53,7 @@ from .constants import (
 from .materials import channel_value
 from .meshes import mesh_component
 from .transforms import unreal_object_transform, unreal_transform
-from .utils import safe_asset_name, scalar
+from .utils import safe_asset_name, scalar, sequence_label
 
 
 def _linear():
@@ -98,9 +98,7 @@ def create_sequence(package_data, warnings):
     start = scalar(animation.get("start"), 1.0)
     end = scalar(animation.get("end"), start)
 
-    label = safe_asset_name(
-        (package_data or {}).get("package_name") or "Scene", "Scene"
-    )
+    label = sequence_label(package_data)
     asset_name = "{0}_{1}".format(ANIMATION_SEQUENCE_NAME, label)
     tools = unreal.AssetToolsHelpers.get_asset_tools()
     asset_path = "{0}/{1}".format(SEQUENCE_CONTENT_PATH, asset_name)
@@ -1267,7 +1265,8 @@ def animate_sampled_motion(sequence, motion, actors_by_path, unreal_scale,
 
 
 def import_animation(package_data, unreal_scale, metre_scale, power_scale,
-                     warnings, package_folder="", actors_by_path=None):
+                     warnings, package_folder="", actors_by_path=None,
+                     motion=None):
     """Build the Level Sequence and place an actor that plays it."""
     sequence, ticks_per_frame, first, last = create_sequence(
         package_data, warnings
@@ -1310,7 +1309,9 @@ def import_animation(package_data, unreal_scale, metre_scale, power_scale,
         lambda: animate_geometry_caches(
             sequence, ticks_per_frame, first, last, warnings),
         lambda: animate_sampled_motion(
-            sequence, read_motion(package_folder, package_data, warnings),
+            sequence,
+            motion if motion is not None
+            else read_motion(package_folder, package_data, warnings),
             actors_by_path or {}, unreal_scale, ticks_per_frame, first, last,
             warnings, sampled_labels),
     )
@@ -1355,9 +1356,13 @@ def import_animation(package_data, unreal_scale, metre_scale, power_scale,
             unreal.LevelSequenceActor, unreal.Vector(0.0, 0.0, 0.0)
         )
         player_actor.set_sequence(sequence)
-        player_actor.set_actor_label(
-            safe_asset_name(ANIMATION_SEQUENCE_NAME, "Sequence")
-        )
+        # Named after the shot as well, for the same reason the asset is: two
+        # shots in one project otherwise produce two actors called ML_Sequence
+        # and neither says which timeline it plays.
+        player_actor.set_actor_label("{0}_{1}".format(
+            safe_asset_name(ANIMATION_SEQUENCE_NAME, "Sequence"),
+            sequence_label(package_data),
+        ))
         player_actor.tags = [GENERATED_TAG]
     except Exception as exc:
         warnings.append(

@@ -371,7 +371,7 @@ def assign_materials(actor, record, material_cache, package_folder,
     return assigned
 
 
-def apply_visibility(actor, record):
+def apply_visibility(actor, record, blinks=False):
     """Hide an actor the Maya scene had hidden.
 
     The package has said so all along -- 4843 of the 7106 meshes in one shot
@@ -388,6 +388,15 @@ def apply_visibility(actor, record):
     """
     visibility = (record or {}).get("visibility") or {}
     if visibility.get("visible") is not False:
+        return False
+    if blinks:
+        # Its visibility is the sequence's to drive, so it is left alone. The
+        # layer below is an editor switch and a Sequencer visibility track
+        # cannot lift one: measured on a shot, 98 of 300 objects that blink on
+        # when they break were parked in it at the frame the package was
+        # anchored to, and never appeared again however far the ruler was
+        # dragged. What is left on screen is the blocks that have not broken,
+        # which is why the shot was reported as not moving at all.
         return False
     hidden = False
     try:

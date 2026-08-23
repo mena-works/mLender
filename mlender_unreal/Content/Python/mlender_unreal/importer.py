@@ -19,7 +19,7 @@ from .constants import (
 )
 from .alembic import import_alembic
 from .asrig import apply_as_rigs
-from .animation import import_animation
+from .animation import import_animation, read_motion
 from .aovs import build_render_config
 from .cameras import import_cameras
 from .curves import import_curves
@@ -140,6 +140,19 @@ def import_scene_package(
     )
 
     mesh_records = list(package_data.get("meshes") or [])
+    # Which objects have their visibility driven per frame. Read here rather
+    # than inside the animation pass because the mesh loop below has to know:
+    # an object the sequence will show later must not be parked in the hidden
+    # layer, which no track can lift.
+    motion = read_motion(package_folder, package_data, warnings)
+    blinking_paths = set()
+    for path, track in (motion.get("objects") or {}).items():
+        if track.get("visible"):
+            blinking_paths.add(path)
+    for record in mesh_records:
+        if record.get("visibility_samples"):
+            blinking_paths.add(record.get("mesh_path"))
+
     record_index = build_record_index(mesh_records)
     used = set()
     material_cache = {}
@@ -165,7 +178,8 @@ def import_scene_package(
         if record.get("mesh_path"):
             actors_by_path[record["mesh_path"]] = actor
         organise_actor(actor, record, ACTOR_FOLDER_ROOT)
-        if apply_visibility(actor, record):
+        if apply_visibility(actor, record,
+                            record.get("mesh_path") in blinking_paths):
             hidden_actors += 1
         names = assign_materials(
             actor, record, material_cache, package_folder,
@@ -257,6 +271,7 @@ def import_scene_package(
     animation_result = import_animation(
         package_data, unreal_scale, metre_scale, power_scale, warnings,
         package_folder=package_folder, actors_by_path=actors_by_path,
+        motion=motion,
     )
 
     # Render passes are Movie Render Queue configuration, not level contents,

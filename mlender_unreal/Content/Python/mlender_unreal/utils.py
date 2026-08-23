@@ -101,6 +101,29 @@ def safe_asset_name(name, fallback="Unnamed"):
     return text
 
 
+def sequence_label(package_data):
+    """What to name this package's Level Sequence after.
+
+    The Maya scene, not the package name. Every export writes into a fresh
+    folder and is therefore called ``mLender_01``, so naming the sequence after
+    the package gave two different shots one asset: sending a second shot into
+    the same project overwrote the first shot's sequence, and its level was
+    left with a timeline bound to nothing.
+
+    The Maya scene is what actually distinguishes them, and it is already in
+    the payload. Falls back to the package name, then to a constant, because a
+    sequence under an odd name beats no sequence at all.
+    """
+    data = package_data or {}
+    scene = str(data.get("maya_scene") or "").replace("\\", "/")
+    stem = os.path.splitext(os.path.basename(scene))[0]
+    for candidate in (stem, data.get("package_name"), "Scene"):
+        name = safe_asset_name(candidate or "", "")
+        if name:
+            return name
+    return "Scene"
+
+
 def package_relative_candidates(path, package_folder):
     """Where a recorded file might be if the package has moved.
 

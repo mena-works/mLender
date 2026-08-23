@@ -14,7 +14,11 @@ import zlib
 
 import unreal
 
-from .constants import ASSET_PREFIX, TEXTURE_CONTENT_PATH
+from .constants import (
+    ASSET_PREFIX,
+    SOURCE_STAMP_TAG,
+    TEXTURE_CONTENT_PATH,
+)
 from .utils import resolve_recorded_path, safe_asset_name
 
 
@@ -25,12 +29,66 @@ def reset_cache():
     _cache.clear()
 
 
+def _source_stamp(path):
+    """The file's size and modification time, as one short string.
+
+    Enough to notice a repaint without reading the file. A hash of the bytes
+    would be surer and would cost a full read of every texture on every send,
+    which is not a trade worth making for a map that is usually untouched.
+    """
+    try:
+        info = os.stat(path)
+    except OSError:
+        return ""
+    return "{0}:{1}".format(int(info.st_size), int(info.st_mtime))
+
+
+def _is_current(asset, path, stamp):
+    """Whether the standing asset was built from this file, as it is now.
+
+    Two ways it can be stale, and both were reachable before this existed:
+
+    - the file has been repainted. The asset is reused whenever one exists at
+      the destination path, so a lookdev artist's new map never arrived; the
+      old Texture2D was returned for the life of the project.
+    - the asset came from a *different* file that happens to share a basename.
+      The asset name is the file's stem, so two "colour.png" in two folders
+      resolve to one asset and the second silently wears the first.
+    """
+    try:
+        data = asset.get_editor_property("asset_import_data")
+        source = str(data.get_first_filename() or "")
+    except Exception:
+        source = ""
+    if source and os.path.normcase(os.path.normpath(source)) !=             os.path.normcase(os.path.normpath(path)):
+        return False
+    try:
+        recorded = unreal.EditorAssetLibrary.get_metadata_tag(
+            asset, SOURCE_STAMP_TAG)
+    except Exception:
+        recorded = ""
+    if not recorded:
+        # Imported by a build that did not stamp, so nothing can be said about
+        # it. Re-importing once is cheap and leaves it stamped.
+        return False
+    return str(recorded) == stamp
+
+
+def _stamp(asset, stamp):
+    try:
+        unreal.EditorAssetLibrary.set_metadata_tag(
+            asset, SOURCE_STAMP_TAG, stamp)
+    except Exception:
+        pass
+
+
 def _import_texture_asset(path, warnings):
     name = safe_asset_name(os.path.splitext(os.path.basename(path))[0], "Tex")
     destination = "{0}/{1}".format(TEXTURE_CONTENT_PATH, name)
+    stamp = _source_stamp(path)
     if unreal.EditorAssetLibrary.does_asset_exist(destination):
         existing = unreal.EditorAssetLibrary.load_asset(destination)
-        if existing is not None:
+        if existing is not None and _is_current(existing, path, stamp):
             return existing
 
     task = unreal.AssetImportTask()
@@ -45,6 +103,7 @@ def _import_texture_asset(path, warnings):
     for imported in task.imported_object_paths or []:
         asset = unreal.EditorAssetLibrary.load_asset(imported)
         if isinstance(asset, unreal.Texture):
+            _stamp(asset, stamp)
             return asset
     warnings.append('Texture "{0}" could not be imported.'.format(path))
     return None

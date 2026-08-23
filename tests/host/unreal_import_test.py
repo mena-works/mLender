@@ -1790,6 +1790,44 @@ def main():
     check("and every texture an instance assigns matches its sampler",
           not instance_mismatches, instance_mismatches[:4])
 
+    # A repainted map has to arrive. The receiver reuses whatever asset stands
+    # at the destination path, so before this was measured a texture imported
+    # once was the texture forever: the "just update the textures" loop did
+    # nothing at all. The file is touched here rather than repainted, because
+    # what the receiver compares is the file's size and modification time.
+    stamped = []
+    for path in (unreal.EditorAssetLibrary.list_assets(
+            "/Game/mLender/Textures", recursive=True) or []):
+        asset = unreal.EditorAssetLibrary.load_asset(path)
+        if isinstance(asset, unreal.Texture):
+            stamped.append(asset)
+    check("imported textures carry the stamp of the file they came from",
+          stamped and all(
+              unreal.EditorAssetLibrary.get_metadata_tag(
+                  asset, mlender_unreal.constants.SOURCE_STAMP_TAG)
+              for asset in stamped),
+          [asset.get_name() for asset in stamped[:3]])
+    if stamped:
+        subject = stamped[0]
+        source = subject.get_editor_property(
+            "asset_import_data").get_first_filename()
+        stamp = mlender_unreal.images._source_stamp(source)
+        check("and the stamp is the file's own size and time",
+              str(unreal.EditorAssetLibrary.get_metadata_tag(
+                  subject, mlender_unreal.constants.SOURCE_STAMP_TAG)) == stamp,
+              stamp)
+        check("so an untouched file is judged current",
+              mlender_unreal.images._is_current(subject, source, stamp) is True)
+        # Two ways it goes stale, and both were reachable before this existed.
+        check("a repainted file is not",
+              mlender_unreal.images._is_current(
+                  subject, source, stamp + "9") is False)
+        check("and neither is another file of the same name",
+              mlender_unreal.images._is_current(
+                  subject, os.path.join("elsewhere",
+                                        os.path.basename(source)),
+                  stamp) is False)
+
     # The FBX importer makes a Level Sequence of its own, beside the meshes,
     # holding the same keys at one tick per frame -- so it plays the whole
     # shot inside the first fiftieth of a frame. It is the easier of the two
@@ -2098,6 +2136,31 @@ def main():
                 labels.add(actor.get_actor_label())
             except Exception:
                 continue
+        # An object the sequence will show later must not be parked in the
+        # hidden layer. A Layer is an editor switch and no track can lift one:
+        # measured on a shot, 98 of 300 objects that blink on when they break
+        # sat in it and never appeared however far the ruler was dragged, so
+        # what was left on screen was the unbroken blocks -- reported, fairly,
+        # as "nothing moves".
+        blinkers = [record.get("mesh") for path, record in by_path.items()
+                    if (motion.get("objects") or {}).get(path, {}).get(
+                        "visible")]
+        parked = []
+        for actor in actors:
+            try:
+                label = actor.get_actor_label()
+            except Exception:
+                continue
+            if label not in blinkers:
+                continue
+            names = [str(n) for n in
+                     (actor.get_editor_property("layers") or [])]
+            if mlender_unreal.constants.HIDDEN_LAYER_NAME in names:
+                parked.append(label)
+        check("an object that blinks is not parked in the hidden layer",
+              not parked, parked[:4])
+        check("and there was one to check", bool(blinkers), blinkers[:3])
+
         check("a sampled mover arrives as a mesh actor, not a cache track",
               all(name in labels for name in movers_in_level),
               [name for name in movers_in_level if name not in labels])

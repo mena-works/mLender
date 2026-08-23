@@ -95,6 +95,12 @@ CACHE_RESIDENT_BUDGET_MB = 2048
 PURGE_ONE_BY_ONE_LIMIT = 250
 MATERIAL_CONTENT_PATH = CONTENT_ROOT + "/Materials"
 TEXTURE_CONTENT_PATH = CONTENT_ROOT + "/Textures"
+
+# Written on an imported texture so a later send can tell whether the file it
+# came from has changed. Without it the receiver reused whatever asset already
+# stood at the destination path, so a repainted map never arrived and two
+# different files sharing a basename silently became one texture.
+SOURCE_STAMP_TAG = "ml_source_stamp"
 SEQUENCE_CONTENT_PATH = CONTENT_ROOT + "/Sequences"
 AOV_CONTENT_PATH = CONTENT_ROOT + "/Render"
 IES_CONTENT_PATH = CONTENT_ROOT + "/IES"
