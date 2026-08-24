@@ -874,12 +874,22 @@ def _discard(sequences, warnings):
     sequences whose keys were taken are touched; one that gave up nothing may
     still hold something.
     """
+    # Through the compiled module when it is there: the sequence was made
+    # this session and never saved, and the editor's force delete of it
+    # trips an ensure -- "failed to unload all packages, likely corrupt" --
+    # measured on every import of a shot, and it is what sent the commandlet
+    # home with a non-zero exit while everything had in fact worked.
+    utility = getattr(unreal, "MLAssetUtility", None)
     for sequence in sequences:
         path = ""
         gone = False
         try:
             path = sequence.get_path_name().split(".")[0]
-            gone = bool(unreal.EditorAssetLibrary.delete_loaded_asset(sequence))
+            if utility is not None:
+                gone = utility.discard_unsaved_assets([sequence]) == 1
+            if not gone:
+                gone = bool(
+                    unreal.EditorAssetLibrary.delete_loaded_asset(sequence))
             if not gone:
                 gone = bool(unreal.EditorAssetLibrary.delete_asset(path))
         except Exception:
