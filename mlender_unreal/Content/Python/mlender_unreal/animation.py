@@ -818,6 +818,33 @@ def make_movable(actor):
         return False
 
 
+def mover_ancestors(motion):
+    """Leaf names of everything a player-driven mover hangs under.
+
+    A mover carries its own *world* transform, so whatever moves above it is
+    already inside that transform. Taking the FBX's track for the parent as
+    well leaves two writers on one object, and their order is fixed only while
+    the sequence is evaluated in one go.
+
+    Measured on a real shot: five cannonballs each hang under a KO_BULLET
+    transform that the FBX keyed, and the shot scrubbed cleanly, rendered
+    cleanly in the Movie Render Queue -- both evaluate a frame in lockstep --
+    and wobbled in the editor's real-time playback, where the player applies
+    from Tick and Sequencer writes the parent in its own pass. Turning off
+    motion blur and anti-aliasing changed nothing, which is what said the
+    artefact was not in the rendering.
+
+    Only ancestors are named, never the mover itself: the mover's own row is
+    already skipped by the label set the motion pass fills.
+    """
+    found = set()
+    for path in ((motion or {}).get("objects") or {}):
+        parts = [part for part in str(path).split("|") if part]
+        for name in parts[:-1]:
+            found.add(name)
+    return found
+
+
 def _varies(channels, tolerance=ADOPTED_MOTION_TOLERANCE):
     """Whether any channel actually changes across its keys.
 
@@ -844,7 +871,7 @@ def _varies(channels, tolerance=ADOPTED_MOTION_TOLERANCE):
 
 
 def adopt_object_animation(sequence, ticks_per_frame, first, last, warnings,
-                           skip_labels=None):
+                           skip_labels=None, parent_labels=None):
     """Object motion from the FBX, retimed into the sequence we built.
 
     Meshes carry their animation inside the FBX rather than in the package,
@@ -867,6 +894,7 @@ def adopt_object_animation(sequence, ticks_per_frame, first, last, warnings,
     adopted = 0
     keys_written = 0
     still = 0
+    over_movers = 0
     emptied = []
     for source in _interchange_sequences():
         # Sections read, whether or not they were worth a track. A source
@@ -884,6 +912,9 @@ def adopt_object_animation(sequence, ticks_per_frame, first, last, warnings,
             # tracks on one binding fight, and the sampled one is the one
             # that caught the solver.
             if label in (skip_labels or set()):
+                continue
+            if label in (parent_labels or set()):
+                over_movers += 1
                 continue
             for track in binding.get_tracks() or []:
                 if not isinstance(track, unreal.MovieScene3DTransformTrack):
@@ -922,6 +953,14 @@ def adopt_object_animation(sequence, ticks_per_frame, first, last, warnings,
         if taken:
             emptied.append(source)
     _discard(emptied, warnings)
+    if over_movers:
+        warnings.append(
+            "{0} object(s) the FBX keyed sit above objects the motion player "
+            "drives, whose transforms already carry that movement, so their "
+            "tracks were left off: two writers on one object agree while a "
+            "frame is evaluated in one go and disagree during real-time "
+            "playback.".format(over_movers)
+        )
     if still:
         # Said rather than left to be noticed: an outliner with fewer rows
         # than the level has objects is the sort of thing a person reads as
@@ -1836,7 +1875,10 @@ def import_animation(package_data, unreal_scale, metre_scale, power_scale,
     # else on one timeline.
     try:
         adopted, adopted_keys = adopt_object_animation(
-            sequence, ticks_per_frame, first, last, warnings, sampled_labels
+            sequence, ticks_per_frame, first, last, warnings, sampled_labels,
+            mover_ancestors(
+                motion if motion is not None
+                else read_motion(package_folder, package_data, warnings)),
         )
         tracks += adopted
         keys += adopted_keys

@@ -364,6 +364,32 @@ def main():
         ),
     )
 
+    # A mover carries its own world transform, so whatever moves above it is
+    # already inside that transform. Adopting the FBX's track for the parent
+    # too leaves two writers on one object, and their order holds only while a
+    # frame is evaluated in one go -- measured: clean scrubbing, clean in the
+    # Movie Render Queue, wobbling in real-time playback, and unchanged by
+    # turning off motion blur and anti-aliasing.
+    from mlender_unreal.animation import mover_ancestors
+
+    ancestors = mover_ancestors({"objects": {
+        "|KO_BULLET_1|Ball_MDL_1": {},
+        "|towers|KO_tower_13|block|shard": {},
+        "|lonely": {},
+    }})
+    check(
+        "the parent of a mover is named",
+        "KO_BULLET_1" in ancestors, sorted(ancestors),
+    )
+    check(
+        "every step of the chain is named, not only the first",
+        {"towers", "KO_tower_13", "block"} <= ancestors, sorted(ancestors),
+    )
+    check(
+        "the mover itself is not named, nor a mover with no parent",
+        not ({"Ball_MDL_1", "shard", "lonely"} & ancestors), sorted(ancestors),
+    )
+
     # An actor must find its own record, not one filed beside it. The index
     # holds every record under a sanitised alias as well as its real name, and
     # safe_asset_name collapses repeated underscores -- so "broken__shard" and

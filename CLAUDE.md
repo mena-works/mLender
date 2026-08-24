@@ -944,6 +944,15 @@ Kullanıcının elle doğrulaması gereken adımlar:
   çağırdı ve cetvel 519'a kadar gitti; ad kaldırılınca motor Frame'i doğrudan
   yazıyor, `Tick` uyguluyor ve ikisi de çalışıyor. PIE her iki durumda da
   çalıştığı için sorun uzun süre Sequencer'ın kendisinde sanıldı
+- ❌ Oynatıcıya bağlı bir mover'ın **üstündeki** objenin transform track'ini
+  FBX'ten devralma; mover kendi **dünya** transformunu taşıyor, yani parent'ın
+  hareketi zaten onun içinde. İkisini birden yazmak tek objeye iki yazıcı
+  demek ve sıraları yalnız kare tek seferde değerlendirilirken sabit. Ölçüldü:
+  beş gülle `KO_BULLET_n` altında, scrub temiz, **MRQ temiz** (ikisi de kilitli
+  adım), editörün gerçek zamanlı oynatmasında yalpalıyor; motion blur ve
+  anti-aliasing kapatmak hiçbir şeyi değiştirmedi — artefaktın render'da
+  olmadığını söyleyen ölçüm bu. Parent'ın track'ini atmadan önce altındaki
+  **mover olmayan** çocukları say; hepsi mover değilse atmak onları dondurur
 - ❌ FBX'ten geçmiş bir adı yalnız `safe_asset_name` ile aktöre bağlamaya
   çalışma; o ardışık alt çizgileri **teke indiriyor** ve kodu çözülmüş iki ad
   (`broken__polySurface123.007_u11` ile `broken_polySurface123.007_u11_r08`)
