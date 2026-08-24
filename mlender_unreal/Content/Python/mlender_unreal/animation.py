@@ -1503,7 +1503,7 @@ def animate_motion_player(sequence, motion, actors_by_path, unreal_scale,
         player.tags = [GENERATED_TAG]
         player.set_editor_property("motion", asset)
         bound = player.bind_actors(ids, actors)
-        player.set_frame(reference)
+        player.jump_to_frame(reference)
     except Exception as exc:
         warnings.append(
             "The motion player could not be placed ({0}), so the {1} "

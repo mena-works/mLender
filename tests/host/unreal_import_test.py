@@ -2258,18 +2258,18 @@ def main():
             # every mover by exactly that much. Scrubbing away and back must
             # return exactly here.
             placed = location(sim)
-            player.set_frame(float(frames[-1]))
+            player.jump_to_frame(float(frames[-1]))
             moved = location(sim)
             check("a mover that does not deform travels when the player scrubs",
                   distance(placed, moved) > 0.5, (placed, moved))
             visited = []
             for frame in frames[::max(1, len(frames) // 5)]:
-                player.set_frame(float(frame))
+                player.jump_to_frame(float(frame))
                 visited.append(location(sim))
             distinct = set(tuple(round(v, 2) for v in at) for at in visited)
             check("over the range rather than inside one frame",
                   len(distinct) >= 3, len(distinct))
-            player.set_frame(float(reference))
+            player.jump_to_frame(float(reference))
             back = location(sim)
             check("simCube sits where the FBX put it at the reference frame",
                   distance(placed, back) < 0.01, (placed, back))
@@ -2277,18 +2277,18 @@ def main():
             # sub-frame render needs for motion blur.
             if len(frames) > 2:
                 a, b = float(frames[0]), float(frames[1])
-                player.set_frame(a)
+                player.jump_to_frame(a)
                 at_a = location(sim)
-                player.set_frame(b)
+                player.jump_to_frame(b)
                 at_b = location(sim)
-                player.set_frame((a + b) / 2.0)
+                player.jump_to_frame((a + b) / 2.0)
                 mid = location(sim)
                 expected = tuple((x + y) / 2.0 for x, y in zip(at_a, at_b))
                 check("and interpolates between samples",
                       distance(mid, expected)
                       <= 0.05 * max(1.0, distance(at_a, at_b)),
                       (mid, expected))
-                player.set_frame(float(reference))
+                player.jump_to_frame(float(reference))
 
         # Where the player puts it, not only that it moves. The prop in the
         # moving group hangs under a static group thirty units up, and the
@@ -2299,9 +2299,9 @@ def main():
         rider_z = []
         if player is not None and rider is not None:
             for frame in frames:
-                player.set_frame(float(frame))
+                player.jump_to_frame(float(frame))
                 rider_z.append(location(rider)[2])
-            player.set_frame(float(reference))
+            player.jump_to_frame(float(reference))
         check("a sampled mover keeps the offset of its static parent",
               bool(rider_z) and max(rider_z) > 20.0 * unit,
               (max(rider_z or [0.0]), unit))
@@ -2321,11 +2321,11 @@ def main():
             for frame, visible in zip(frames, debris_visible):
                 if bool(visible) in states:
                     continue
-                player.set_frame(float(frame))
+                player.jump_to_frame(float(frame))
                 hidden = bool(debris.is_temporarily_hidden_in_editor()) or bool(
                     debris.get_editor_property("hidden"))
                 states[bool(visible)] = not hidden
-            player.set_frame(float(reference))
+            player.jump_to_frame(float(reference))
         check("and a mover that blinks carries its visibility",
               states == {True: True, False: False}, states)
 

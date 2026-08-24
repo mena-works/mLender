@@ -18,7 +18,7 @@ AMLMotionPlayer::AMLMotionPlayer()
 	RootComponent = Root;
 }
 
-void AMLMotionPlayer::SetFrame(float NewFrame)
+void AMLMotionPlayer::JumpToFrame(float NewFrame)
 {
 	Frame = NewFrame;
 	ApplyFrame(Frame);

@@ -2687,6 +2687,18 @@ receiver takes the movers out of the sequence entirely:
 - the Level Sequence keys **one float**, `Frame`, on that actor. Opening the
   shot costs one row, and scrubbing the ruler moves everything.
 
+The function that applies a frame is called `JumpToFrame`, and it is
+deliberately **not** called `SetFrame`. Sequencer chooses how to write a
+property by looking for a function named `Set` plus the property's name: when
+one exists it refuses the fast path and writes through a slower one that the
+editor does not run while a sequence is *playing*. Measured on a real shot —
+with `SetFrame` present, dragging the playhead applied every frame while
+pressing Play applied exactly one, the first, as the ruler ran to 519; with
+the name gone, `Frame` follows the ruler through both. It played in PIE either
+way, which is what made it look like a Sequencer problem rather than a naming
+one. If you add a property for Sequencer to key, do not give its class a
+`Set<Property>` function.
+
 The player is a C++ actor because that is what makes it update while you
 scrub in the editor, where a Blueprint does not tick; see
 [The compiled module](#the-compiled-module). Its visibility keys ride the

@@ -75,9 +75,23 @@ public:
 	UPROPERTY(VisibleAnywhere, Category = "mLender")
 	TArray<FMLMotionBinding> Bindings;
 
-	/** Sequencer finds this by name and calls it instead of writing the property. */
+	/**
+	 * Set Frame and place the movers for it. Python's entry point.
+	 *
+	 * NOT named SetFrame, and the name is the whole point. Sequencer resolves
+	 * a property to one of two paths, and FPropertyRegistry::ResolveFastProperty
+	 * refuses the fast one when the class has a function called
+	 * "Set" + PropertyName -- so a setter named SetFrame put Frame on the slow
+	 * FTrackInstancePropertyBindings path. Measured on a real shot: on that
+	 * path, dragging the playhead called the setter every time and playing
+	 * called it exactly once, at the first frame, while the ruler ran to 519.
+	 * The level played in PIE, where the actor ticks, and stood still in the
+	 * editor. With no such function the engine writes Frame directly and Tick
+	 * picks it up: measured again, Frame follows the ruler through playback
+	 * and dragging both.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "mLender")
-	void SetFrame(float NewFrame);
+	void JumpToFrame(float NewFrame);
 
 	/**
 	 * Pair each object id with its actor, in the order given, keeping only

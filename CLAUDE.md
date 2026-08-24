@@ -435,10 +435,10 @@ kendisi yazar, sequence yalnız `Frame` float'ını keyler.
 
 - Modül **yalnız** Python'un yapamadığını taşır: editörde scrub ederken
   güncellenen bir aktör (`ShouldTickIfViewportsOnly`, `PostEditChangeProperty`)
-  ve Sequencer'ın isimle çağırdığı `SetFrame`. Import mantığını, eksen
+  ve kareyi uygulayan `JumpToFrame`. Import mantığını, eksen
   dönüşümünü veya materyal işini C++'a taşıma.
 - Python ile C++ arasındaki isimler sözleşmedir ve tip denetimi yoktur:
-  `MOTION_FRAME_PROPERTY`, `SetFrame`, `BindActors`, `AddTrack`,
+  `MOTION_FRAME_PROPERTY`, `JumpToFrame`, `BindActors`, `AddTrack`,
   `CreateMotionAsset`, `DiscardUnsavedAssets`. `check_contracts.py` başlığı
   bu isimlere karşı okur; birini değiştirirken **ikisini birlikte** değiştir.
 - Kaydedilmemiş asset'i atmak için `EditorAssetLibrary.delete_*` kullanma:
@@ -934,6 +934,16 @@ Kullanıcının elle doğrulaması gereken adımlar:
   panel de 3968 üçgenlik küre de 256 okundu, yani sayı mesh'i değil
   bütçeyi anlatıyor. `get_num_nanite_triangles()` kaynağı verir.
   Nanite'ı bu araç açmıyor — motorun import varsayılanı
+- ❌ Frame'i uygulayan fonksiyona `SetFrame` adını verme — genel olarak,
+  Sequencer'ın keylediği bir property için `Set<PropertyName>` adında bir
+  fonksiyon **bulundurma**. `FPropertyRegistry::ResolveFastProperty` böyle bir
+  fonksiyon varken fast path'i reddediyor ve property yavaş
+  `FTrackInstancePropertyBindings` yoluna düşüyor; editör bir sekansı
+  **oynatırken** o yolu çalıştırmıyor. Ölçüldü: `SetFrame` varken sürükleme
+  her seferinde setter'ı çağırdı, Play ise **yalnız bir kez** (ilk karede)
+  çağırdı ve cetvel 519'a kadar gitti; ad kaldırılınca motor Frame'i doğrudan
+  yazıyor, `Tick` uyguluyor ve ikisi de çalışıyor. PIE her iki durumda da
+  çalıştığı için sorun uzun süre Sequencer'ın kendisinde sanıldı
 - ❌ Kaydedilmemiş bir level'a import edip sonra `save_map` ile ad verme;
   possessable binding, bind edildiği **dünyanın içindeki bir yol** olarak
   saklanıyor, dünya yeniden adlandırılınca hepsi bayatlıyor. Ölçüldü:

@@ -391,16 +391,25 @@ def main():
         bool(re.search(r"\bfloat\s+{0}\b".format(re.escape(frame)), header)),
         frame,
     )
-    # Sequencer calls Set<Property> by name when it exists; that is what
-    # makes a scrub apply on the spot rather than a tick later.
+    # And must NOT have a function called Set<Property>. Sequencer picks the
+    # property's evaluation path by that name: FPropertyRegistry refuses the
+    # fast path when it exists, and the slow path it falls back to is not run
+    # by the editor while a sequence plays. Measured on a real shot -- with a
+    # SetFrame present, dragging the playhead called it every time and playing
+    # called it once, at the first frame; without it, Frame follows the ruler
+    # through both. The level played in PIE either way, which is what made it
+    # look like a Sequencer problem rather than a naming one.
     check(
-        "and the player has the setter Sequencer looks for",
-        "void Set{0}(float".format(frame) in header,
+        "and no Set<Property> function, which would take the slow path",
+        "void Set{0}(float".format(frame) not in header,
         frame,
     )
     # Python spells a UFUNCTION in snake_case. A rename on either side is a
     # silent None at import time, so the two spellings are held together.
-    player_calls = ("BindActors", "SetFrame", "GetBoundCount")
+    # JumpToFrame, deliberately not SetFrame: a function named
+    # "Set" + PropertyName pushes Frame onto Sequencer's slow property
+    # path, which the editor does not run while playing.
+    player_calls = ("BindActors", "JumpToFrame", "GetBoundCount")
     check("the player exposes what the Python calls",
           all("{0}(".format(name) in header for name in player_calls),
           player_calls)
