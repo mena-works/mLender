@@ -57,6 +57,22 @@ def _unreal_editor():
 
 
 UNREAL = _unreal_editor()
+
+
+def _long_path(path):
+    """A Windows 8.3 path in its long spelling; any other path unchanged."""
+    if os.name != "nt":
+        return path
+    try:
+        import ctypes
+        buffer = ctypes.create_unicode_buffer(32768)
+        length = ctypes.windll.kernel32.GetLongPathNameW(
+            str(path), buffer, len(buffer))
+        if 0 < length < len(buffer):
+            return buffer.value
+    except Exception:
+        pass
+    return path
 # A project of our own, made here and thrown away. Installing into one of the
 # developer's projects would prove less and leave more behind.
 #
@@ -314,10 +330,17 @@ def verify_unreal(plugin_zip):
           any("/Content/Python/init_unreal.py" in name for name in names),
           [n for n in names if "init_unreal" in n])
 
-    project = tempfile.mkdtemp(prefix="mlender_ue_")
+    # The long spelling of the folder, because Unreal mounts the project's
+    # Content by the path it was given and the Content Browser finds it by
+    # the path Windows reports. Measured: a TEMP of C:\Users\ADMINI~1\... put
+    # the two out of step and the editor died on FilenameToLongPackageName
+    # before the probe ran, which read as a plugin that would not load.
+    project = _long_path(tempfile.mkdtemp(prefix="mlender_ue_"))
     try:
         plugins = os.path.join(project, "Plugins")
         os.makedirs(plugins)
+        # A project with no Content folder has no /Game mount to register.
+        os.makedirs(os.path.join(project, "Content"))
         zipfile.ZipFile(plugin_zip).extractall(plugins)
         uproject = os.path.join(project, "MLVerify.uproject")
         with open(uproject, "w", encoding="utf-8") as handle:
