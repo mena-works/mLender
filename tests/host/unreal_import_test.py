@@ -2151,6 +2151,36 @@ def main():
                   cache_import.get("motion_asset_path")),
               cache_import.get("motion_asset_path"))
 
+        # Movable, or the shot plays in the editor and stands still in PIE.
+        # Interchange brings every mesh in Static; the editor moves a Static
+        # component without a word, so scrubbing looked right on a real shot
+        # while pressing Play logged "Mobility of ... has to be 'Movable' if
+        # you'd like to move" once per shard and moved nothing. Every check in
+        # this suite runs in the editor world, which is exactly why none of
+        # them could see it -- so this one asks the property rather than the
+        # result.
+        # Its own map: the one built for the animation checks belongs to an
+        # earlier import in this run.
+        movers_by_label = {}
+        for actor in (unreal.get_editor_subsystem(
+                unreal.EditorActorSubsystem).get_all_level_actors() or []):
+            try:
+                movers_by_label.setdefault(str(actor.get_actor_label()), actor)
+            except Exception:
+                continue
+        static_movers = []
+        for path in (motion.get("objects") or {}):
+            record = by_path.get(path) or {}
+            actor = movers_by_label.get(record.get("mesh"))
+            if actor is None or actor.root_component is None:
+                continue
+            if actor.root_component.mobility != unreal.ComponentMobility.MOVABLE:
+                static_movers.append(str(actor.get_actor_label()))
+        check("every mover's component is Movable, so PIE can move it",
+              not static_movers,
+              "{0} static, first: {1}".format(
+                  len(static_movers), static_movers[:3]))
+
         mover_labels = set(
             record.get("mesh") for path, record in by_path.items()
             if path in (motion.get("objects") or {}))

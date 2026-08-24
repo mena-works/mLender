@@ -787,6 +787,37 @@ def _channel_keys(section):
     return read
 
 
+def make_movable(actor):
+    """Let the actor be moved at runtime, which Interchange does not.
+
+    Every mesh the FBX brings arrives Static, and the editor moves a Static
+    component without complaint -- which is why scrubbing a sequence shows the
+    whole shot playing. Press Play and the engine refuses: "Mobility of
+    ... StaticMeshComponent0 has to be 'Movable' if you'd like to move", once
+    per object per attempt, and the level stands still while the camera flies.
+    That difference between the editor and PIE is the whole bug, and it is
+    invisible to anything that measures in the editor world.
+
+    Only what is keyed or driven gets this: Static is worth keeping for the
+    thousands of objects that never move, since it is what lets them take
+    baked lighting.
+    """
+    try:
+        component = actor.root_component
+    except Exception:
+        return False
+    if component is None:
+        return False
+    try:
+        if component.mobility == unreal.ComponentMobility.MOVABLE:
+            return False
+        component.set_editor_property(
+            "mobility", unreal.ComponentMobility.MOVABLE)
+        return True
+    except Exception:
+        return False
+
+
 def _varies(channels, tolerance=ADOPTED_MOTION_TOLERANCE):
     """Whether any channel actually changes across its keys.
 
@@ -869,6 +900,7 @@ def adopt_object_animation(sequence, ticks_per_frame, first, last, warnings,
                         (pairs[-1][0] - pairs[0][0]) for _n, pairs in channels
                     )
                     scale = ticks_per_frame if span < ticks_per_frame else 1.0
+                    make_movable(actor)
                     target = sequence.add_possessable(actor)
                     _track, destination = _section(
                         target, unreal.MovieScene3DTransformTrack, first, last
@@ -1440,6 +1472,7 @@ def animate_motion_player(sequence, motion, actors_by_path, unreal_scale,
         if added < 0:
             missing += 1
             continue
+        make_movable(actor)
         ids.append(path)
         actors.append(actor)
         keys += len(kept)
@@ -1595,6 +1628,7 @@ def animate_sampled_motion(sequence, motion, actors_by_path, unreal_scale,
         if len(values) < len(frames) * 12:
             missing += 1
             continue
+        make_movable(actor)
         binding = target.add_possessable(actor)
         _track, section = _section(
             binding, unreal.MovieScene3DTransformTrack, first, last
