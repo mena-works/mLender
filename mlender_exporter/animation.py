@@ -107,7 +107,7 @@ def frame_list(settings):
     return [start + index * step for index in range(count)]
 
 
-def sample_records(settings, entries):
+def sample_records(settings, entries, visitors=()):
     """Attach a ``samples`` list to each record by stepping the timeline.
 
     ``entries`` is a sequence of ``(record, sampler)`` pairs, where sampler is
@@ -115,12 +115,19 @@ def sample_records(settings, entries):
     the samplers opaque is what lets this module stay independent of lights
     and cameras.
 
+    ``visitors`` are called once per frame after the samplers, with nothing,
+    and keep their own state: that is how the movers ride this walk instead
+    of making one of their own. Stepping the timeline is what an export of a
+    simulation pays for -- measured 0.4 s a frame on a shot of 12 028 meshes
+    and a Bullet solver, and the shot was walked twice, once for the lights
+    and once for the movers, at three and a half minutes a walk.
+
     The current frame is always restored, including when a sampler raises;
     leaving the user's scene parked on a different frame would be a visible
     side effect of exporting.
     """
     frames = frame_list(settings)
-    if not frames or not entries:
+    if not frames or (not entries and not visitors):
         return 0
 
     for record, _sampler in entries:
@@ -140,6 +147,11 @@ def sample_records(settings, entries):
                     continue
                 sample["frame"] = frame
                 record["samples"].append(sample)
+            for visitor in visitors:
+                try:
+                    visitor()
+                except Exception:
+                    continue
     finally:
         try:
             cmds.currentTime(original, edit=True)
@@ -246,11 +258,48 @@ def sample_motion(settings, entries, visible_at=None):
 
     World space, matching what the cache did, so a prop inside a moving group
     carries its journey without the group having to travel with it.
+
+    This walks the timeline itself. An export that also samples lights and
+    cameras hands motion_sampler's visitor to sample_records instead, so the
+    shot is walked once; the numbers are the same either way.
+    """
+    visit, finish = motion_sampler(settings, entries, visible_at)
+    frames = frame_list(settings)
+    if visit is None or not frames:
+        return {}
+    original = current_frame()
+    try:
+        for frame in frames:
+            try:
+                cmds.currentTime(frame, edit=True)
+            except Exception:
+                continue
+            visit()
+    finally:
+        try:
+            cmds.currentTime(original, edit=True)
+        except Exception:
+            pass
+    return finish()
+
+
+def motion_sampler(settings, entries, visible_at=None):
+    """The mover sampler as a per-frame visitor, for a shared timeline walk.
+
+    Returns ``(visit, finish)``: call ``visit()`` with the timeline parked on
+    each frame in turn, then ``finish()`` for what sample_motion returns.
+    ``(None, finish)`` when there is nothing to sample, and finish then
+    returns ``{}``.
+
+    Split from the walk so the movers can ride the same pass as the lights
+    and cameras. Measured on a shot of 12 028 meshes and a Bullet solver,
+    a frame step is 0.4 s whatever is read at it, and the shot was being
+    walked twice.
     """
     frames = frame_list(settings)
     pairs = [(key, path) for key, path in (entries or []) if key and path]
     if not frames or not pairs:
-        return {}
+        return None, (lambda: {})
 
     tracks = {}
     for key, _path in pairs:
@@ -261,55 +310,47 @@ def sample_motion(settings, entries, visible_at=None):
 
     readers = _api_readers(pairs, read_visibility=visible_at is not None)
 
-    original = current_frame()
-    try:
-        for frame in frames:
-            try:
-                cmds.currentTime(frame, edit=True)
-            except Exception:
+    def visit():
+        for key, path in pairs:
+            track = tracks[key]
+            reader = readers.get(key) if readers else None
+            if reader is not None:
+                _api_sample(reader, track)
                 continue
-            for key, path in pairs:
-                track = tracks[key]
-                reader = readers.get(key) if readers else None
-                if reader is not None:
-                    _api_sample(reader, track)
-                    continue
+            try:
+                matrix = cmds.xform(path, query=True, worldSpace=True,
+                                    matrix=True)
+            except Exception:
+                matrix = None
+            if not matrix or len(matrix) < 16:
+                continue
+            for index, value in enumerate(matrix):
+                if index % 4 != 3:
+                    track["matrix"].append(value)
+            visible = True
+            if visible_at is not None:
                 try:
-                    matrix = cmds.xform(path, query=True, worldSpace=True,
-                                        matrix=True)
+                    visible = bool(visible_at(path))
                 except Exception:
-                    matrix = None
-                if not matrix or len(matrix) < 16:
-                    continue
-                for index, value in enumerate(matrix):
-                    if index % 4 != 3:
-                        track["matrix"].append(value)
-                visible = True
-                if visible_at is not None:
-                    try:
-                        visible = bool(visible_at(path))
-                    except Exception:
-                        visible = True
-                track["visible"].append(1 if visible else 0)
-    finally:
-        try:
-            cmds.currentTime(original, edit=True)
-        except Exception:
-            pass
+                    visible = True
+            track["visible"].append(1 if visible else 0)
 
-    objects = {}
-    for key, track in tracks.items():
-        if len(track["matrix"]) < 24:
-            continue
-        written = {"matrix": track["matrix"]}
-        # A run that never changes is not animation, and a visibility channel
-        # of 520 identical ones is the common case.
-        if not _channel_constant(track["visible"], 1):
-            written["visible"] = track["visible"]
-        objects[key] = written
-    if not objects:
-        return {}
-    return {"frames": frames, "objects": objects}
+    def finish():
+        objects = {}
+        for key, track in tracks.items():
+            if len(track["matrix"]) < 24:
+                continue
+            written = {"matrix": track["matrix"]}
+            # A run that never changes is not animation, and a visibility
+            # channel of 520 identical ones is the common case.
+            if not _channel_constant(track["visible"], 1):
+                written["visible"] = track["visible"]
+            objects[key] = written
+        if not objects:
+            return {}
+        return {"frames": frames, "objects": objects}
+
+    return visit, finish
 
 
 def anchor_motion(motion, paths, warnings):

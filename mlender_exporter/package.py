@@ -31,7 +31,7 @@ from .animation import (
     frozen_animation_kinds,
     material_animation_entries,
     anchor_motion,
-    sample_motion,
+    motion_sampler,
     sample_records,
 )
 from .cameras import camera_record, camera_sample, scene_camera_shapes
@@ -365,55 +365,6 @@ def export_scene(
             )
             phases.done("who moves, who deforms")
 
-        # Sampling steps the timeline, so it runs after the static records are
-        # read and before the FBX, which bakes its own animation.
-        sample_records(
-            animation,
-            [
-                (record, _sampler(light_sample, shape))
-                for record, shape in zip(light_records, light_shapes)
-            ]
-            + [
-                (record, _sampler(camera_sample, shape))
-                for record, shape in zip(camera_records, camera_shapes)
-            ]
-            + [
-                (record, _sampler(particle_sample, shape))
-                for record, shape in zip(particle_list, particle_shapes)
-            ]
-            # Only the meshes that actually blink. Visibility is a getAttr per
-            # frame, cheap for a few objects and not for a whole scene over a
-            # long range, and almost nothing in a scene is keyed this way.
-            + [
-                (record, _sampler(visibility_sample, record["mesh_path"]))
-                for record in mesh_records
-                if visibility_animated(record.get("mesh_path"))
-            ]
-            # Root joints' evaluated worlds: the FBX bake cannot be trusted
-            # above the skeleton (an unexported group's connection-driven
-            # motion is folded at its static value), so the truth travels
-            # and the importer keys it onto the root bones directly.
-            # Keyed shader parameters. Without these a keyframed roughness
-            # or base colour froze at the export frame with nothing said.
-            + material_animation_entries(mesh_records)
-            + [
-                (record, _sampler(root_motion_sample, record))
-                for record in root_motion_list
-            ],
-        )
-        phases.done("light, camera, material sampling")
-        root_motion_list = [
-            record for record in root_motion_list
-            if len(record.get("samples") or []) >= 2
-        ]
-        # The importer's calibration anchor: at the frame the scene sat on
-        # during the FBX export, both fold failures are clean -- a static
-        # fold holds this very frame's value, and a curve fold's error
-        # lives on the armature object, which the anchor never touches.
-        for record in root_motion_list:
-            reference = root_motion_sample(record)
-            reference["frame"] = current_frame()
-            record["reference"] = reference
         # A rigid mover travels as a transform per frame rather than a mesh
         # per frame. Keyed by DAG path, which is what a receiver matches its
         # own records on; a name would have to be guessed at.
@@ -428,13 +379,67 @@ def export_scene(
             for record in mesh_records
             if record.get("mesh_path") in rigid_paths
         ]
-        motion = sample_motion(
+        visit_motion, finish_motion = motion_sampler(
             animation, motion_entries, visible_at=_visibility_reader(),
         )
-        if motion_entries:
-            phases.done("mover sampling ({0} x {1} frames)".format(
-                len(motion_entries), len(motion.get("frames") or [])))
 
+        # Sampling steps the timeline, so it runs after the static records are
+        # read and before the FBX, which bakes its own animation. One walk
+        # for everything: the movers ride it as a visitor, because a frame
+        # step costs the same whatever is read at it and a second walk over
+        # a Bullet shot was three and a half minutes of solving twice.
+        sample_records(
+            animation,
+            [
+                (record, _sampler(light_sample, shape))
+                for record, shape in zip(light_records, light_shapes)
+            ]
+            + [
+                (record, _sampler(camera_sample, shape))
+                for record, shape in zip(camera_records, camera_shapes)
+            ]
+            + [
+                (record, _sampler(particle_sample, shape))
+                for record, shape in zip(particle_list, particle_shapes)
+            ]
+            # Only the meshes that actually blink, and not the movers among
+            # them: a mover's visibility rides its motion, read there through
+            # the API, and reading it here as well was thousands of getAttr
+            # calls a frame on a shot where every breaking piece blinks.
+            + [
+                (record, _sampler(visibility_sample, record["mesh_path"]))
+                for record in mesh_records
+                if record.get("mesh_path") not in rigid_paths
+                and visibility_animated(record.get("mesh_path"))
+            ]
+            # Root joints' evaluated worlds: the FBX bake cannot be trusted
+            # above the skeleton (an unexported group's connection-driven
+            # motion is folded at its static value), so the truth travels
+            # and the importer keys it onto the root bones directly.
+            # Keyed shader parameters. Without these a keyframed roughness
+            # or base colour froze at the export frame with nothing said.
+            + material_animation_entries(mesh_records)
+            + [
+                (record, _sampler(root_motion_sample, record))
+                for record in root_motion_list
+            ],
+            visitors=(visit_motion,) if visit_motion is not None else (),
+        )
+        motion = finish_motion()
+        phases.done("timeline sampling ({0} movers x {1} frames)".format(
+            len(motion_entries), animation.get("frame_count") or 0))
+        root_motion_list = [
+            record for record in root_motion_list
+            if len(record.get("samples") or []) >= 2
+        ]
+        # The importer's calibration anchor: at the frame the scene sat on
+        # during the FBX export, both fold failures are clean -- a static
+        # fold holds this very frame's value, and a curve fold's error
+        # lives on the armature object, which the anchor never touches.
+        for record in root_motion_list:
+            reference = root_motion_sample(record)
+            reference["frame"] = current_frame()
+            record["reference"] = reference
         if rigid_paths:
             warnings.append(
                 "{0} moving object(s) do not deform, so they travel as their "
