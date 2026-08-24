@@ -78,6 +78,25 @@ def decoded_name(value):
     return "".join(out)
 
 
+def fbx_style_name(value):
+    """The spelling an actor arrives under, from the name Maya stored.
+
+    An FBX writes a character it dislikes as an escape, Maya keeps that as the
+    node name, and the importer turns it back into a plain separator. So a
+    Maya node called "polySurface123.007" is stored as
+    "polySurface123FBXASC046007" and arrives as "polySurface123_007".
+
+    Repeated underscores are **kept**, which is the whole point and the
+    difference from safe_asset_name. Measured on a real shot: the scene holds
+    both "broken__polySurface123.007_u11" and
+    "broken_polySurface123.007_u11_r08" -- two objects, two shapes -- and
+    collapsing the doubled underscore files them under one name, after which
+    one is drawn with the other's mesh forty centimetres away.
+    """
+    text = decoded_name(str(value or ""))
+    return re.sub(r"[^A-Za-z0-9_]", "_", text)
+
+
 def safe_asset_name(name, fallback="Unnamed"):
     """An Unreal object name from a Maya node name.
 

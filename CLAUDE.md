@@ -944,6 +944,15 @@ Kullanıcının elle doğrulaması gereken adımlar:
   çağırdı ve cetvel 519'a kadar gitti; ad kaldırılınca motor Frame'i doğrudan
   yazıyor, `Tick` uyguluyor ve ikisi de çalışıyor. PIE her iki durumda da
   çalıştığı için sorun uzun süre Sequencer'ın kendisinde sanıldı
+- ❌ FBX'ten geçmiş bir adı yalnız `safe_asset_name` ile aktöre bağlamaya
+  çalışma; o ardışık alt çizgileri **teke indiriyor** ve kodu çözülmüş iki ad
+  (`broken__polySurface123.007_u11` ile `broken_polySurface123.007_u11_r08`)
+  aynı isme düşüyor. Bu ailede **tam eşleşme hiç kurulamaz** — kayıt
+  `FBXASC046` taşır, aktör label'ı taşımaz — yani "tam eşleşme önce" katmanı
+  devreye girmez ve çarpışma normalize katmanında yeniden olur. Ölçüldü: ilk
+  düzeltmeden sonra bile **7 asset ikişer şekle** hizmet ediyordu.
+  `fbx_style_name` (kodu çöz, geçersiz karakteri `_` yap, ardışıkları
+  **koru**) aktörün geldiği yazımı üretir; indekse ve arama sırasına o girmeli
 - ❌ Aktörü mesh kaydına eşlerken normalize edilmiş adı tam adla eşdeğer
   sayma; `safe_asset_name` ardışık alt çizgileri **teke indiriyor**, yani
   `broken__shard` ile `broken_shard` — iki ayrı obje, iki ayrı şekil — aynı

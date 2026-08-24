@@ -409,6 +409,39 @@ def main():
         "and the other object still finds its own",
         other is double, (other or {}).get("mesh"),
     )
+    # The harder pair, and the one that survived the first fix: a name that
+    # travelled through an FBX never equals its actor's label, so no exact
+    # match exists for either side and both fall through to the sanitised
+    # tier -- where the doubled underscore is collapsed and they collide
+    # again. Measured on a real shot: 7 assets each serving two shapes, and
+    # the losers drawn 40 cm from where Maya puts them.
+    esc_double = {"mesh": "broken__polySurface123FBXASC046007_u11",
+                  "mesh_full_name": "broken__polySurface123FBXASC046007_u11",
+                  "geometry_key": "ccc"}
+    esc_single = {"mesh": "broken_polySurface123FBXASC046007_u11_r08",
+                  "mesh_full_name": "broken_polySurface123FBXASC046007_u11_r08",
+                  "geometry_key": "ddd"}
+    esc_index = receiver_meshes.build_record_index([esc_double, esc_single])
+    check(
+        "an escaped name is indexed under the spelling the actor arrives with",
+        esc_double in (esc_index.get("broken__polySurface123_007_u11") or []),
+        sorted(esc_index)[:3],
+    )
+    esc_used = set()
+    first = receiver_meshes.find_mesh_record(
+        _Actor("broken__polySurface123_007_u11"), esc_index, esc_used)
+    check(
+        "the doubled-underscore object finds its own escaped record",
+        first is esc_double, (first or {}).get("mesh"),
+    )
+    esc_used.add(id(first))
+    second = receiver_meshes.find_mesh_record(
+        _Actor("broken_polySurface123_007_u11_r08"), esc_index, esc_used)
+    check(
+        "and the single-underscore one finds its own",
+        second is esc_single, (second or {}).get("mesh"),
+    )
+
     # A name that only matches once sanitised is still matched, or a genuinely
     # renamed actor would find nothing at all.
     loose = receiver_meshes.build_record_index([double])

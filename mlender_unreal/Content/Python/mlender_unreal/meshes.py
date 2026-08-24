@@ -23,7 +23,7 @@ from .constants import (
     PIPELINE_CONTENT_PATH,
     SCENE_IMPORT_PIPELINES,
 )
-from .utils import decoded_name, safe_asset_name
+from .utils import decoded_name, fbx_style_name, safe_asset_name
 
 
 def resolve_fbx_path(package_folder, package_data):
@@ -325,6 +325,12 @@ def build_record_index(mesh_records):
             # arrives spelled the way the format spells it, not the way Maya
             # stored it.
             decoded_name(record.get("mesh") or ""),
+            # The spelling the actor actually arrives under: escapes decoded,
+            # punctuation replaced, doubled underscores kept. Without it the
+            # only bridge from an FBXASC name to its actor is the sanitised
+            # one, which collapses "__" and files two objects together.
+            fbx_style_name(record.get("mesh") or ""),
+            fbx_style_name(record.get("mesh_full_name") or ""),
             safe_asset_name(decoded_name(record.get("mesh") or "")),
             safe_asset_name(decoded_name(record.get("mesh_full_name") or "")),
         ):
@@ -364,6 +370,10 @@ def find_mesh_record(actor, record_index, used):
     for record in candidates:
         if label in (str(record.get("mesh") or ""),
                      str(record.get("mesh_full_name") or "")):
+            return record
+    for record in candidates:
+        if label in (fbx_style_name(record.get("mesh") or ""),
+                     fbx_style_name(record.get("mesh_full_name") or "")):
             return record
     for record in candidates:
         if label in (decoded_name(str(record.get("mesh") or "")),
