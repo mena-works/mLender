@@ -24,6 +24,9 @@ from .constants import (
     MAX_ANIMATION_FRAMES,
     TIME_UNIT_FPS,
     TRANSFORM_VISIBILITY_ATTRS,
+    UNSTABLE_REVERSAL_COS,
+    UNSTABLE_RUN,
+    UNSTABLE_STEP_METRES,
 )
 from .mayautils import (
     current_frame,
@@ -401,6 +404,94 @@ def anchor_motion(motion, paths, warnings):
         return {}
     motion["reference_frame"] = frames[0]
     return motion
+
+
+def report_unstable_motion(motion, warnings, metres_per_unit=0.01):
+    """Name objects whose samples reverse direction on consecutive frames.
+
+    A rigid body cannot turn round twice in two frames without being hit
+    twice, so a run of hard reversals is a solver that has stopped converging
+    rather than a piece of debris. It reaches the receivers as an object that
+    vibrates across the shot, and until now nothing said so on either side:
+    the transfer is faithful, the numbers match, and the result is wrong.
+
+    Measured on a real shot before this was written: 178 of 7468 movers
+    reversed every frame with an amplitude of about 1.1 metres, and every
+    piece under one tower carried the *same* per-frame delta to 0.0000 -- so
+    the instability was in a group transform, not in the pieces. That is why
+    the warning names the ancestor: it is the node somebody has to look at.
+
+    The floor is a real length rather than a factor of the object's own
+    motion, because an object that oscillates has no calm motion to compare
+    against -- its median step is the oscillation.
+    """
+    objects = (motion or {}).get("objects") or {}
+    frames = (motion or {}).get("frames") or []
+    count = len(frames)
+    if not objects or count < UNSTABLE_RUN + 2:
+        return 0
+    floor = UNSTABLE_STEP_METRES / max(float(metres_per_unit), 1e-9)
+    culprits = {}
+    total = 0
+    for path in objects:
+        matrix = (objects[path] or {}).get("matrix") or []
+        if len(matrix) < count * 12:
+            continue
+        onset = _reversal_onset(matrix, count, floor)
+        if onset is None:
+            continue
+        total += 1
+        parts = [part for part in str(path).split("|") if part]
+        group = parts[1] if len(parts) > 1 else (parts[0] if parts else path)
+        held = culprits.setdefault(group, [0, onset])
+        held[0] += 1
+        if frames[onset] < held[1]:
+            held[1] = frames[onset]
+    if not total:
+        return 0
+    named = sorted(culprits.items(), key=lambda item: -item[1][0])[:4]
+    warnings.append(
+        "{0} moving object(s) reverse direction on consecutive frames, which "
+        "is a simulation that stopped converging rather than motion: they "
+        "will vibrate wherever this package is opened. Worst: {1}. Re-solve "
+        "or re-cache those before sending.".format(
+            total,
+            ", ".join(
+                "{0} ({1} object(s), from frame {2:g})".format(
+                    name, held[0], held[1])
+                for name, held in named
+            ),
+        )
+    )
+    return total
+
+
+def _reversal_onset(matrix, count, floor):
+    """The first sample of a run of hard reversals, or None.
+
+    Positions are the fourth column of each twelve float row, which is where
+    sample_motion writes them.
+    """
+    run = 0
+    previous = None
+    for frame in range(1, count):
+        base = frame * 12 + 9
+        before = (frame - 1) * 12 + 9
+        step = [matrix[base + axis] - matrix[before + axis] for axis in range(3)]
+        length = math.sqrt(sum(value * value for value in step))
+        if previous is None or length < floor or previous[1] < floor:
+            run = 0
+            previous = (step, length)
+            continue
+        dot = sum(step[axis] * previous[0][axis] for axis in range(3))
+        if dot / (length * previous[1]) < UNSTABLE_REVERSAL_COS:
+            run += 1
+            if run >= UNSTABLE_RUN:
+                return max(frame - run, 0)
+        else:
+            run = 0
+        previous = (step, length)
+    return None
 
 
 def _channel_constant(values, width):

@@ -806,6 +806,58 @@ def main():
     check("frame list matches the count",
           exporter.animation.frame_list(stepped) == [1, 3, 5, 7, 9, 11],
           exporter.animation.frame_list(stepped))
+    # A mover that turns round every frame is a solver that stopped
+    # converging, and it reaches the receivers as an object that vibrates.
+    # Measured on a real shot before the check existed: 178 of 7468 movers
+    # did it, every piece under one tower with the same delta to 0.0000 --
+    # a group transform, which is why the warning names the ancestor.
+    def _track(steps):
+        """A twelve float row per frame, moving by each step in turn."""
+        matrix = []
+        here = 0.0
+        for step in [0.0] + list(steps):
+            here += step
+            matrix.extend([1, 0, 0, 0, 1, 0, 0, 0, 1, 0.0, 0.0, here])
+        return {"matrix": matrix}
+
+    frames = list(range(1, 12))
+    calm = [0.5] * (len(frames) - 1)
+    wobble = [4.0, -4.0] * ((len(frames) - 1) // 2 + 1)
+    motion = {
+        "frames": frames,
+        "objects": {
+            "|towers|KO_tower_13|piece_a": _track(wobble[:len(frames) - 1]),
+            "|towers|KO_tower_13|piece_b": _track(wobble[:len(frames) - 1]),
+            "|towers|quiet_GRP|piece_c": _track(calm),
+        },
+    }
+    said = []
+    unstable = exporter.animation.report_unstable_motion(motion, said, 0.01)
+    check("a mover that reverses every frame is reported",
+          unstable == 2, unstable)
+    check("and the steady one is not",
+          bool(said) and "quiet_GRP" not in said[0],
+          said[:1])
+    check("the warning names the group they share",
+          bool(said) and "KO_tower_13" in said[0], said[:1])
+    quiet = []
+    check("a scene with no wobble says nothing",
+          exporter.animation.report_unstable_motion(
+              {"frames": frames,
+               "objects": {"|towers|quiet_GRP|piece_c": _track(calm)}},
+              quiet, 0.01) == 0 and not quiet,
+          quiet)
+    # Below the floor it is noise on a settled piece, not a solver blowing up.
+    tiny = [0.001, -0.001] * ((len(frames) - 1) // 2 + 1)
+    small = []
+    check("a wobble smaller than the floor is left alone",
+          exporter.animation.report_unstable_motion(
+              {"frames": frames,
+               "objects": {"|towers|KO_tower_13|piece_d":
+                           _track(tiny[:len(frames) - 1])}},
+              small, 0.01) == 0,
+          small)
+
     reversed_range = info(True, 20, 5)
     check("a backwards range is put the right way round",
           (reversed_range["start"], reversed_range["end"]) == (5.0, 20.0),

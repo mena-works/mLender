@@ -2687,6 +2687,22 @@ receiver takes the movers out of the sequence entirely:
 - the Level Sequence keys **one float**, `Frame`, on that actor. Opening the
   shot costs one row, and scrubbing the ruler moves everything.
 
+**A simulation that stopped converging is reported at export.** A rigid body
+cannot turn round twice in two frames without being struck twice, so a run of
+hard reversals is a solver blowing up rather than debris — and it arrives as
+an object that vibrates across the shot, faithfully transferred and wrong.
+Measured on a real shot: 178 of 7468 movers reversed direction every frame at
+about 1.1 m of amplitude, and every piece under one tower carried the *same*
+per-frame delta to 0.0000, so the instability was in a group transform rather
+than in the pieces. The export warning therefore names the ancestor, with the
+frame it starts on, because that is the node somebody has to look at:
+
+```text
+178 moving object(s) reverse direction on consecutive frames ...
+Worst: KO_tower_13 (64 object(s), from frame 407), tower3 (50 object(s), from
+frame 92), KO_tower_11 (25 object(s), from frame 405) ...
+```
+
 The function that applies a frame is called `JumpToFrame`, and it is
 deliberately **not** called `SetFrame`. Sequencer chooses how to write a
 property by looking for a function named `Set` plus the property's name: when

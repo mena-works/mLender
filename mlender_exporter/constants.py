@@ -1058,3 +1058,13 @@ METERS_PER_LINEAR_UNIT = {
     "yd": 0.9144,
     "mi": 1609.344,
 }
+
+# A sampled mover that reverses direction on consecutive frames is a solver
+# that stopped converging, not debris. Measured on a real shot: 178 of 7468
+# movers reversed every frame at about 1.1 m of amplitude, and every piece
+# under one tower carried the same delta to 0.0000, so the instability was in
+# a group transform. The floor is a real length because an oscillating object
+# has no calm motion to compare against -- its median step *is* the wobble.
+UNSTABLE_STEP_METRES = 0.02
+UNSTABLE_RUN = 4
+UNSTABLE_REVERSAL_COS = -0.7

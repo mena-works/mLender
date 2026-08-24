@@ -32,6 +32,7 @@ from .animation import (
     frozen_animation_kinds,
     material_animation_entries,
     anchor_motion,
+    report_unstable_motion,
     motion_sampler,
     sample_records,
 )
@@ -531,6 +532,10 @@ def export_scene(
         motion = anchor_motion(
             motion, dict((path, path) for path, _p in motion_entries), warnings
         )
+        # Said here, where the person who can re-solve it is sitting. The
+        # receivers carry export warnings now, so it reaches the other end
+        # too, but this one is only actionable in Maya.
+        report_unstable_motion(motion, warnings, meters_per_maya_unit())
         export_fbx(
             [
                 transform
