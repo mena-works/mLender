@@ -1861,6 +1861,23 @@ def import_animation(package_data, unreal_scale, metre_scale, power_scale,
             unreal.LevelSequenceActor, unreal.Vector(0.0, 0.0, 0.0)
         )
         player_actor.set_sequence(sequence)
+        # And it plays. The actor is placed so that the level plays the shot
+        # rather than holding an asset nobody opens, and Unreal's default
+        # leaves auto play off, so pressing Play in the viewport advanced
+        # nothing: the shot sat on its first frame, where the intact blocks
+        # are shown and every shard is correctly hidden. Reported as "only
+        # the intact ones are visible", which is a timeline that never
+        # started rather than a visibility that never arrived.
+        try:
+            settings = player_actor.get_editor_property("playback_settings")
+            settings.set_editor_property("auto_play", True)
+            player_actor.set_editor_property("playback_settings", settings)
+        except Exception as exc:
+            warnings.append(
+                "The sequence actor is placed but could not be set to play on "
+                "its own ({0}); press Play in the Sequencer, or tick Auto "
+                "Play on \"{1}\".".format(exc, ANIMATION_SEQUENCE_NAME)
+            )
         # Named after the shot as well, for the same reason the asset is: two
         # shots in one project otherwise produce two actors called ML_Sequence
         # and neither says which timeline it plays.

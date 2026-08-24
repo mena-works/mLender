@@ -2181,6 +2181,24 @@ def main():
               "{0} static, first: {1}".format(
                   len(static_movers), static_movers[:3]))
 
+        # And the level plays it. Unreal leaves auto play off, so a shot whose
+        # actor is placed but not set to play sits on its first frame when
+        # Play is pressed -- which on this package is intact blocks shown and
+        # every shard correctly hidden, and reads as the shards never
+        # arriving.
+        auto = None
+        for actor in (unreal.get_editor_subsystem(
+                unreal.EditorActorSubsystem).get_all_level_actors() or []):
+            if actor.get_class().get_name() != "LevelSequenceActor":
+                continue
+            try:
+                auto = actor.get_editor_property(
+                    "playback_settings").get_editor_property("auto_play")
+            except Exception as exc:
+                auto = "unreadable: {0}".format(exc)
+            break
+        check("the sequence actor plays on its own", auto is True, auto)
+
         mover_labels = set(
             record.get("mesh") for path, record in by_path.items()
             if path in (motion.get("objects") or {}))
