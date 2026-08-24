@@ -136,6 +136,16 @@ MOTION_FRAME_PROPERTY = "Frame"
 # before it reaches the asset; the player interpolates across the gap. Shared
 # by centimetres and unit quaternion components, which is fine at this size.
 MOTION_KEY_TOLERANCE = 1.0e-4
+# A transform section adopted from the FBX whose channels all change by less
+# than this over the whole shot is not motion, and no track is built for it.
+# Measured on a real shot rather than picked: the 65 sections Interchange keyed
+# for objects that never move varied by at most 4.554e-05 -- float noise from
+# the bake, not zero, which is why a 1e-6 guard let every one of them through
+# -- while the smallest genuinely moving section varied by 4.312e+02. Seven
+# orders of magnitude apart, so this sits twenty times above the noise and
+# five orders below the motion. Centimetres and degrees share it; at this size
+# that costs nothing.
+ADOPTED_MOTION_TOLERANCE = 1.0e-3
 
 # The Movie Render Queue config that carries the scene AOVs.
 RENDER_CONFIG_NAME = "ML_RenderConfig"

@@ -1033,7 +1033,11 @@ def main():
             # of two identical keys on the sequence, and since the movers ride
             # one actor on purpose those were the *only* object rows in the
             # outliner. Scrolling mesh names whose tracks do nothing reads as
-            # a shot that did not arrive, which is how it was reported.
+            # a shot that did not arrive, which is how it was reported. The
+            # threshold comes from the package rather than a literal here:
+            # the first attempt used 1e-6 and caught none of them, because
+            # the bake leaves noise at 4.554e-05 and "flat" is not zero.
+            from mlender_unreal.constants import ADOPTED_MOTION_TOLERANCE
             flat = []
             for binding in sequence.get_bindings() or []:
                 for track in binding.get_tracks() or []:
@@ -1045,7 +1049,8 @@ def main():
                         for channel in section.get_all_channels() or []:
                             values = [k.get_value()
                                       for k in (channel.get_keys() or [])]
-                            if values and max(values) - min(values) > 1e-6:
+                            if values and (max(values) - min(values)
+                                           > ADOPTED_MOTION_TOLERANCE):
                                 varies = True
                                 break
                         if not varies:

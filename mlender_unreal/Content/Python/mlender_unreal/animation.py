@@ -36,6 +36,7 @@ import os
 import unreal
 
 from .constants import (
+    ADOPTED_MOTION_TOLERANCE,
     ANIMATION_SEQUENCE_NAME,
     MESH_CONTENT_PATH,
     MOTION_ASSET_NAME,
@@ -786,17 +787,23 @@ def _channel_keys(section):
     return read
 
 
-def _varies(channels, tolerance=1.0e-6):
+def _varies(channels, tolerance=ADOPTED_MOTION_TOLERANCE):
     """Whether any channel actually changes across its keys.
 
     Interchange keys every object it imported, moving or not. Measured on a
-    real shot: 71 of the adopted sections were two keys of 0.0 on all six
-    channels. They cost nothing to evaluate -- a transform track is relative,
-    so they write the identity an unparented actor already has -- but they are
-    *rows*, and they were the only object rows in the outliner, the movers
-    having been taken off the sequence on purpose. Somebody opening that
-    sequence scrolls a list of mesh names whose transform tracks do nothing
-    and reads it as a shot that did not arrive. That is how it was reported.
+    real shot: 65 of the adopted sections were two keys reading 0.0 to three
+    places on all six channels. They cost nothing to evaluate -- a transform
+    track is relative, so they write the identity an unparented actor already
+    has -- but they are *rows*, and they were the only object rows in the
+    outliner, the movers having been taken off the sequence on purpose.
+    Somebody opening that sequence scrolls a list of mesh names whose
+    transform tracks do nothing and reads it as a shot that did not arrive.
+    That is how it was reported.
+
+    "Reading 0.0" is not zero, and the first guard here was 1e-6 and caught
+    none of them: the bake leaves noise at 4.554e-05. The tolerance is where
+    it is because the two populations were measured, not rounded -- see
+    ADOPTED_MOTION_TOLERANCE.
     """
     for _name, pairs in channels:
         values = [value for _tick, value in pairs]
