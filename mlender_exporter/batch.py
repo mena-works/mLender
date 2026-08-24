@@ -154,6 +154,12 @@ def main(argv=None):
         result.get("mesh_count"), result.get("light_count"),
         result.get("camera_count"), len(result.get("warnings") or []),
     ))
+    # The phases too: a farm log that says half an hour says nothing, one
+    # that says which half hour says what to fix.
+    for label, seconds in result.get("timings") or []:
+        print("time:     {0:40s} {1:8.1f} s".format(label, seconds))
+    print("time:     {0:40s} {1:8.1f} s".format(
+        "total", float(result.get("total_seconds") or 0.0)))
     # The warnings go to stdout as well as into the report: a farm log is
     # often the only thing anybody reads afterwards.
     for warning in result.get("warnings") or []:

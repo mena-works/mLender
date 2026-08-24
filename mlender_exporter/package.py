@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import time
 import zipfile
 
 import maya.cmds as cmds
@@ -130,6 +131,31 @@ def renderer_name():
         return ""
 
 
+class _Phases(object):
+    """Where an export's time goes, phase by phase, for the report.
+
+    A shot of a few thousand movers over a few hundred frames is half an
+    hour, and "the export is slow" names nothing: the timeline stepping, the
+    matrix reads, the FBX writer and the JSON each have a different remedy.
+    Measured on one such shot the guess was the reads and the truth was Maya
+    evaluating a Bullet solver at every frame, which is only visible when the
+    report says so.
+    """
+
+    def __init__(self):
+        self.started = time.time()
+        self.last = self.started
+        self.marks = []
+
+    def done(self, label):
+        now = time.time()
+        self.marks.append((label, now - self.last))
+        self.last = now
+
+    def total(self):
+        return time.time() - self.started
+
+
 def export_scene(
     output_folder,
     selected_only=False,
@@ -169,6 +195,7 @@ def export_scene(
     archive_path = ""
 
     warnings = []
+    phases = _Phases()
     bake_context = BakeContext(
         os.path.join(package_folder, BAKE_FOLDER_NAME),
         resolution=bake_resolution,
@@ -289,6 +316,7 @@ def export_scene(
         ))
 
         _apply_light_linking(light_records, light_shapes, mesh_records)
+        phases.done("scene discovery")
 
         animation = animation_info(
             export_animation, frame_start, frame_end, frame_step
@@ -335,6 +363,7 @@ def export_scene(
             deforming_movers, rigid_movers = motion_split(
                 mesh_shapes, animation
             )
+            phases.done("who moves, who deforms")
 
         # Sampling steps the timeline, so it runs after the static records are
         # read and before the FBX, which bakes its own animation.
@@ -372,6 +401,7 @@ def export_scene(
                 for record in root_motion_list
             ],
         )
+        phases.done("light, camera, material sampling")
         root_motion_list = [
             record for record in root_motion_list
             if len(record.get("samples") or []) >= 2
@@ -401,6 +431,9 @@ def export_scene(
         motion = sample_motion(
             animation, motion_entries, visible_at=_visibility_reader(),
         )
+        if motion_entries:
+            phases.done("mover sampling ({0} x {1} frames)".format(
+                len(motion_entries), len(motion.get("frames") or [])))
 
         if rigid_paths:
             warnings.append(
@@ -459,6 +492,8 @@ def export_scene(
             animated_roots=deforming_movers,
         )
         cached = list(alembic.get("roots") or [])
+        if cached:
+            phases.done("alembic cache")
         # The flag is what stops the importer building a second, frozen copy
         # of an object the cache already carries. Membership, not equality: a
         # root carries its whole subtree, so a still prop inside a moving
@@ -499,6 +534,7 @@ def export_scene(
             cmds.currentTime(anchor_frame, edit=True)
         except Exception:
             pass
+        phases.done("fbx")
 
         payload = {
             "schema_version": EXPORT_SCHEMA_VERSION,
@@ -574,6 +610,7 @@ def export_scene(
             )
             payload["collected_textures"] = collected
         write_json(json_path, payload)
+        phases.done("json")
         if archive_package:
             # One file to hand over. Written beside the folder rather than
             # instead of it: LiveLink and the importer both read the folder,
@@ -617,6 +654,8 @@ def export_scene(
         "archive_path": archive_path,
         "animated": animation["enabled"],
         "warnings": warnings,
+        "timings": list(phases.marks),
+        "total_seconds": phases.total(),
     }
     result["report_path"] = write_report(
         result, BUILD_VERSION, maya_version(), renderer_name()

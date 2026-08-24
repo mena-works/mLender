@@ -3330,6 +3330,13 @@ counts what travelled, then lists **every** warning. The test fixture produces
 sixty-seven of them in Unreal, which is exactly why a scrolling console was not
 good enough.
 
+The Maya report also says **where the time went**, phase by phase — scene
+discovery, the motion probes, the sampling, the FBX, the JSON — because a
+half-hour export names nothing on its own. On the shot this was added for,
+the guess was the per-object reads and the truth was Maya evaluating a Bullet
+solver at every frame; only the phases could tell the two apart. The batch
+exporter prints the same lines to its log.
+
 In Blender the same warnings are also in the sidebar, under
 **mLender Import > Last Import Warnings**, with a button that opens the report.
 The panel shows the first twenty-five — a panel with hundreds of rows stops the

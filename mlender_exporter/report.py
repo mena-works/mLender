@@ -89,6 +89,17 @@ def build_report(result, build_version, maya_version="", renderer=""):
             "animation", result.get("frame_count")))
     lines.append("")
 
+    timings = list(result.get("timings") or [])
+    total = float(result.get("total_seconds") or 0.0)
+    if timings and total > 0.0:
+        # Where the time went. A long export names nothing; a phase does.
+        lines.append("time ({0})".format(_duration(total)))
+        lines.append("-" * 60)
+        for label, seconds in timings:
+            lines.append("  {0:40s} {1:>10s}".format(
+                str(label)[:40], _duration(seconds)))
+        lines.append("")
+
     lines.append("warnings ({0})".format(len(warnings)))
     lines.append("-" * 60)
     if not warnings:
@@ -109,6 +120,21 @@ def build_report(result, build_version, maya_version="", renderer=""):
         "assume."
     )
     return lines
+
+
+def _duration(seconds):
+    """Seconds as a person reads them: 4.2 s, 3 min 12 s, 1 h 05 min."""
+    try:
+        seconds = float(seconds)
+    except (TypeError, ValueError):
+        return "?"
+    if seconds < 60.0:
+        return "{0:.1f} s".format(seconds)
+    minutes, rest = divmod(int(round(seconds)), 60)
+    if minutes < 60:
+        return "{0} min {1:02d} s".format(minutes, rest)
+    hours, minutes = divmod(minutes, 60)
+    return "{0} h {1:02d} min".format(hours, minutes)
 
 
 def write_report(result, build_version, maya_version="", renderer=""):

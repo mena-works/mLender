@@ -1953,6 +1953,18 @@ def main():
         check("the report is inside the package folder",
               os.path.dirname(report_path) == result.get("package_folder"),
               os.path.dirname(report_path))
+        # Where the time went, phase by phase. A half hour export names
+        # nothing on its own; on a real shot the guess was the reads and
+        # the truth was the solver, which only the phases could show.
+        check("the report says where the time went",
+              "time (" in report_text and "fbx" in report_text
+              and "scene discovery" in report_text,
+              [l for l in report_text.splitlines() if "time (" in l][:1])
+        check("and the phases add up to the total",
+              result.get("timings") and result.get("total_seconds", 0) > 0
+              and abs(sum(s for _l, s in result["timings"])
+                      - result["total_seconds"]) < 5.0,
+              (result.get("timings"), result.get("total_seconds")))
 
     check("a NURBS surface arrived as a mesh", "nurbsBall" in by_mesh,
           sorted(k for k in by_mesh if "nurbs" in str(k).lower()))
