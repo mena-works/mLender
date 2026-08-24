@@ -1,7 +1,7 @@
 {
 	"FileVersion": 3,
 	"Version": 1,
-	"VersionName": "2.71.0",
+	"VersionName": "2.72.0",
 	"FriendlyName": "mLender",
 	"Description": "Receives a Maya scene package over LiveLink and rebuilds it in Unreal: meshes with their hierarchy, materials as Material Instances, lights, cine cameras, and a simulation's rigid movers on a single motion player actor.",
 	"Category": "Importers",

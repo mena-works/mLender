@@ -43,6 +43,8 @@ def build_report(result, engine_version=""):
     lines.append("-" * 60)
     for label, key in (
         ("static meshes", "mesh_count"),
+        ("  distinct assets", "mesh_asset_count"),
+        ("  sharing one", "mesh_shared_count"),
         ("skeletal meshes", "skeletal_count"),
         ("materials", "material_count"),
         ("lights", "light_count"),

@@ -2,10 +2,15 @@
 """Scene mesh discovery and per-mesh material records."""
 from __future__ import absolute_import
 
+import array
+import hashlib
+import json
+
 import maya.cmds as cmds
 
 from .constants import (
     BAKE_SEMANTIC,
+    GEOMETRY_KEY_QUANTUM,
     DISPLACEMENT_ENGINE_PLUG,
     DISPLACEMENT_MESH_ATTRS,
     DISPLACEMENT_MODES,
@@ -192,6 +197,7 @@ def mesh_records(mesh_shape, bake_context=None, cache=None):
     subdivision = subdivision_info(mesh_shape)
     sets = color_sets(mesh_shape)
     shape_label = node_label(mesh_shape)
+    key = geometry_key(mesh_shape, materials, subdivision)
     records = []
     for transform in transforms:
         full_name = node_label(transform or mesh_shape)
@@ -201,6 +207,7 @@ def mesh_records(mesh_shape, bake_context=None, cache=None):
             "mesh_path": transform,
             "shape": shape_label,
             "shape_path": mesh_shape,
+            "geometry_key": key,
             "groups": group_path(transform),
             "visibility": visibility_info(mesh_shape, transform),
             "subdivision": subdivision,
@@ -211,6 +218,84 @@ def mesh_records(mesh_shape, bake_context=None, cache=None):
             "custom_attributes": _merged_attributes(mesh_shape, transform),
         })
     return records
+
+
+def geometry_key(mesh_shape, materials=None, subdivision=None):
+    """A digest of what makes a mesh render as itself, or "" if unreadable.
+
+    Two shapes with the same key look the same from any angle, so a receiver
+    can hand every actor carrying that key one mesh asset instead of one
+    each. Measured on the shot this was written for: 12028 meshes, 4068
+    distinct keys, because a layout is mostly copies of a few blocks.
+
+    What goes in is everything the asset would carry and the actor would
+    not: the points in object space, the topology, the normals (a hard and
+    a soft edge share points and render differently), every UV set, the
+    material *slot structure* -- how many shading groups and which faces
+    each holds -- and the subdivision settings. What stays out is what the
+    receiver puts on the actor anyway: the transform, the material a slot is
+    given, the name.
+
+    Object space on purpose: a frozen duplicate has its points at world
+    positions under an identity transform, and reads as a different shape.
+    That is right -- sharing an asset between the two would need a pivot
+    the receiver does not have -- and it is where the measured ceiling of
+    3296 keys instead of 4068 went.
+
+    Quantised, so a point that differs in the last float digit still counts
+    as the same point; the quantum is far below anything that renders.
+    """
+    try:
+        from maya.api import OpenMaya
+    except Exception:
+        return ""
+    try:
+        selection = OpenMaya.MSelectionList()
+        selection.add(mesh_shape)
+        mesh = OpenMaya.MFnMesh(selection.getDagPath(0))
+        points = mesh.getPoints(OpenMaya.MSpace.kObject)
+        counts, connects = mesh.getVertices()
+        normals = mesh.getNormals(OpenMaya.MSpace.kObject)
+        uv_sets = list(mesh.getUVSetNames() or [])
+    except Exception:
+        return ""
+
+    def quantised(values):
+        return array.array("i", [
+            int(round(value / GEOMETRY_KEY_QUANTUM)) for value in values
+        ]).tobytes()
+
+    digest = hashlib.md5()
+    digest.update(array.array("i", [len(points), len(counts)]).tobytes())
+    digest.update(array.array("i", list(counts)).tobytes())
+    digest.update(array.array("i", list(connects)).tobytes())
+    digest.update(quantised(
+        component for point in points for component in (point.x, point.y, point.z)
+    ))
+    digest.update(quantised(
+        component for normal in normals
+        for component in (normal.x, normal.y, normal.z)
+    ))
+    for name in uv_sets:
+        try:
+            us, vs = mesh.getUVs(name)
+        except Exception:
+            continue
+        digest.update(str(name).encode("utf-8"))
+        digest.update(quantised(us))
+        digest.update(quantised(vs))
+    # The slot structure, not the shaders: which faces each shading group
+    # holds decides how many slots the asset has and what each covers. Two
+    # copies of a block wearing different shaders share the key, and the
+    # receiver puts the shader on the actor.
+    structure = [
+        item.get("face_assignment") for item in (materials or [])
+    ]
+    digest.update(json.dumps(
+        {"slots": structure, "subdivision": subdivision or {}},
+        sort_keys=True, default=str,
+    ).encode("utf-8"))
+    return digest.hexdigest()
 
 
 def _merged_attributes(shape, transform):

@@ -188,6 +188,70 @@ def mesh_component(actor):
     return None
 
 
+def share_static_mesh(actor, key, canonical_by_key, duplicates):
+    """Point an actor at the asset an identical mesh already brought.
+
+    The first actor to arrive with a key keeps its own asset and becomes the
+    one the rest point at; every later one hands its asset to ``duplicates``
+    and takes the shared one. True when this actor now shares.
+
+    Materials are untouched here on purpose: they go on the component, not
+    the asset, so a red block and a blue block share the mesh and keep their
+    colours. The slot *structure* is part of the key, so the shared asset
+    has the slots every actor pointing at it expects.
+    """
+    if not key:
+        return False
+    component = mesh_component(actor)
+    mesh = getattr(component, "static_mesh", None) if component else None
+    if mesh is None:
+        return False
+    canonical = canonical_by_key.get(key)
+    if canonical is None:
+        canonical_by_key[key] = mesh
+        return False
+    try:
+        if canonical.get_path_name() == mesh.get_path_name():
+            return False
+        if not component.set_static_mesh(canonical):
+            return False
+    except Exception:
+        return False
+    duplicates.append(mesh)
+    return True
+
+
+def discard_duplicate_meshes(duplicates, warnings):
+    """Delete the assets nothing points at any more. Returns how many went.
+
+    They are unsaved at this point -- the FBX import creates them in memory
+    and nothing has written them -- so a delete that is refused costs
+    nothing but the memory until the editor closes. It is still said, so an
+    unsaved-assets prompt on exit has an explanation.
+    """
+    unique = {}
+    for mesh in duplicates:
+        try:
+            unique[mesh.get_path_name()] = mesh
+        except Exception:
+            continue
+    if not unique:
+        return 0
+    try:
+        gone = bool(unreal.EditorAssetLibrary.delete_loaded_assets(
+            list(unique.values())))
+    except Exception:
+        gone = False
+    if not gone:
+        warnings.append(
+            "{0} duplicate mesh asset(s) were replaced by a shared one but "
+            "could not be deleted; they are unsaved and harmless, and go when "
+            "the editor closes.".format(len(unique))
+        )
+        return 0
+    return len(unique)
+
+
 def is_mesh_actor(actor):
     static = getattr(unreal, "StaticMeshActor", None)
     skeletal = getattr(unreal, "SkeletalMeshActor", None)
@@ -344,6 +408,12 @@ def assign_materials(actor, record, material_cache, package_folder,
             # material for uniqueness.
             if len(records) == 1 and max(count, 1) == 1:
                 item = records[0]
+            elif len(records) == max(count, 1):
+                # A shared asset carries the slot names of the mesh that
+                # brought it. This actor has the same slot structure -- that
+                # is what sharing was keyed on -- and its Maya materials come
+                # in slot order, so the index is the match.
+                item = records[index]
             else:
                 warnings.append(
                     'Mesh "{0}" slot {1} ("{2}") matched no Maya material; '

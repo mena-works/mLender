@@ -347,7 +347,22 @@ particle system              -> anchor, and the points its instancers scatter on
 selection set, display layer -> Unreal Layer
 package Alembic cache        -> Geometry Cache on a GeometryCacheActor
 sampled motion (rigid sim)   -> one ML_MotionPlayer actor, keyed by a single float on the sequence
+copies of one shape          -> one StaticMesh asset, shared by every actor that is that shape
 ```
+
+**One asset per shape.** The FBX brings a mesh asset per object, and a layout
+is mostly copies of a few blocks: measured on a shot, 12028 meshes over 4068
+distinct shapes, and every one of the 7960 copies was an asset for Unreal to
+build, save and load — the save alone took twenty minutes. So the exporter
+writes each mesh a `geometry_key`, a digest of what it looks like (points in
+object space, topology, normals, every UV set, the material slot structure and
+the subdivision settings — not its transform, its name or which shader a slot
+wears), and the receiver hands every actor with the same key the first asset
+that arrived and drops the rest before anything saves them. A red block and a
+blue block share the mesh and keep their colours, because materials go on the
+component. A frozen duplicate, whose points sit at world positions under an
+identity transform, is a different shape by this rule and keeps its own asset;
+sharing it would need a pivot the receiver does not have.
 
 The **Alembic cache is not an optional extra**. When the export caches, the
 deforming meshes and emitting particles are written into the `.abc` *instead of*

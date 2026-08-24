@@ -199,6 +199,65 @@ def main():
             labels.add(actor.get_actor_label())
         except Exception:
             pass
+    # One asset per distinct geometry. Measured on a layout: 12028 meshes
+    # over 4068 shapes, and every copy was an asset to build, save and load.
+    # Actors whose records share a geometry key must share a StaticMesh, and
+    # the copies' own assets must be gone before anything saves them.
+    print("\nshared meshes")
+    key_of = {}
+    for record in package_data.get("meshes") or []:
+        if record.get("mesh") and record.get("geometry_key"):
+            key_of[record["mesh"]] = record["geometry_key"]
+    asset_of = {}
+    for actor in actors:
+        if not isinstance(actor, unreal.StaticMeshActor):
+            continue
+        try:
+            mesh = actor.static_mesh_component.static_mesh
+            asset_of[actor.get_actor_label()] = (
+                mesh.get_path_name() if mesh else None)
+        except Exception:
+            continue
+    cubes = [n for n in ("dropCube", "simCube", "debrisChunk")
+             if n in asset_of and n in key_of]
+    check("the fixture holds identical cubes to share",
+          len(cubes) >= 2 and len(set(key_of[n] for n in cubes)) == 1,
+          {n: key_of.get(n) for n in cubes})
+    check("actors of one geometry share one static mesh asset",
+          len(cubes) >= 2 and len(set(asset_of[n] for n in cubes)) == 1
+          and all(asset_of[n] for n in cubes),
+          {n: asset_of.get(n) for n in cubes})
+    check("actors of different geometry do not",
+          asset_of.get("nurbsBall") and cubes
+          and asset_of["nurbsBall"] != asset_of[cubes[0]],
+          (asset_of.get("nurbsBall"), asset_of.get(cubes[0]) if cubes else 0))
+    check("the import counted the sharing",
+          result.get("mesh_shared_count", 0) >= 1
+          and 0 < result.get("mesh_asset_count", 0) < result["mesh_count"],
+          (result.get("mesh_shared_count"), result.get("mesh_asset_count"),
+           result["mesh_count"]))
+    # The copies' assets: replaced, then deleted, so they never reach disk.
+    # A shared block with two colours keeps both: materials live on the
+    # component, and the slot structure is part of the key.
+    check("and dropped the copies' assets",
+          result.get("mesh_discarded_count", 0)
+          == result.get("mesh_shared_count", 0),
+          (result.get("mesh_discarded_count"), result.get("mesh_shared_count")))
+    remaining = [
+        path for path in (unreal.EditorAssetLibrary.list_assets(
+            mlender_unreal.constants.MESH_CONTENT_PATH, recursive=True) or [])
+        if unreal.EditorAssetLibrary.find_asset_data(path).asset_class_path
+        .asset_name == "StaticMesh"
+    ]
+    # Not exactly one per shape: the folder also holds meshes no mesh actor
+    # owns -- an instancer's source, a stand-in -- so the claim is that the
+    # copies are gone, not that nothing else is there.
+    check("so the mesh folder holds fewer assets than mesh actors",
+          result.get("mesh_asset_count", 0) <= len(remaining)
+          < result["mesh_count"],
+          (len(remaining), result.get("mesh_asset_count"),
+           result["mesh_count"]))
+
     for label in ("nurbsBall", "trimmedPanel", "subdivBall"):
         check("a tessellated Maya surface is in the level: " + label,
               any(name == label or name.startswith(label + "_")

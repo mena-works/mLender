@@ -1633,6 +1633,27 @@ def main():
     check("the instances share one shape",
           shapes["instSource"] and shapes["instSource"] == shapes["instA"]
           == shapes["instB"], shapes)
+
+    print("\ngeometry keys")
+    # What a mesh looks like, as a digest, so a receiver can give copies one
+    # asset. Measured on a layout: 12028 meshes, 4068 distinct keys.
+    keys = {name: (record or {}).get("geometry_key")
+            for name, record in by_mesh.items()}
+    check("every mesh carries a geometry key",
+          all(isinstance(k, str) and len(k) == 32 for k in keys.values()),
+          [n for n, k in keys.items() if not k][:4])
+    # Two default cubes are the same shape wherever they stand and whatever
+    # they wear; the key says so.
+    cubes = [n for n in ("dropCube", "simCube", "debrisChunk") if n in keys]
+    check("identical cubes share a key",
+          len(cubes) >= 2 and len(set(keys[n] for n in cubes)) == 1,
+          {n: keys[n] for n in cubes})
+    check("and a different shape does not",
+          keys.get("nurbsBall") and keys.get("nurbsBall") != keys.get(cubes[0]),
+          (keys.get("nurbsBall"), keys.get(cubes[0]) if cubes else None))
+    check("an instanced shape keys the same on every instance",
+          keys.get("instSource") and keys["instSource"] == keys.get("instA")
+          == keys.get("instB"), (keys.get("instSource"), keys.get("instA")))
     # The duplicate is the control. Without it a test would pass on code that
     # merged anything whose geometry happened to match.
     check("and a real duplicate does not",

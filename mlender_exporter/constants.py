@@ -13,7 +13,7 @@ from __future__ import absolute_import
 # here rather than in __init__ so package.py can reach it without
 # importing the package root, which would be circular. The importer keeps
 # its own in constants.py for the same reason.
-BUILD_VERSION = "2.71.0"
+BUILD_VERSION = "2.72.0"
 
 TOOL_NAME = "mLender"
 WINDOW_NAME = "mLenderWindow"
@@ -940,6 +940,12 @@ BAKE_FILE_FORMAT = "png"
 BAKE_BACKGROUND_MODE = "shader"
 BAKE_SEMANTIC = "baked_procedural"
 DEFAULT_BAKE_RESOLUTION = 1024
+
+# Points, normals and UVs are rounded to this before they go into a mesh's
+# geometry key, so two copies of a block whose last float digit disagrees
+# still share one asset. A ten-thousandth of a scene unit is far below
+# anything that renders.
+GEOMETRY_KEY_QUANTUM = 1.0e-4
 MAX_BAKE_RESOLUTION = 8192
 BAKE_FOLDER_NAME = "textures"
 

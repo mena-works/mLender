@@ -37,9 +37,11 @@ from .meshes import (
     apply_visibility,
     assign_materials,
     build_record_index,
+    discard_duplicate_meshes,
     find_mesh_record,
     import_fbx_scene,
     imported_mesh_actors,
+    share_static_mesh,
     skeletal_actors,
     organise_actor,
     resolve_fbx_path,
@@ -163,6 +165,15 @@ def import_scene_package(
     actors_by_path = {}
     hidden_actors = 0
     matched = 0
+    # One asset per distinct geometry. The FBX brings a mesh asset per
+    # object and a layout is mostly copies of a few blocks: measured, 12028
+    # meshes over 4068 shapes, and every one of the 7960 copies was an asset
+    # to build, save and load. The exporter keys each mesh on what it looks
+    # like; actors with the same key point at the first asset that arrived
+    # and the rest are dropped before anything saves them.
+    canonical_meshes = {}
+    duplicate_meshes = []
+    shared = 0
 
     for actor in actors:
         record = find_mesh_record(actor, record_index, used)
@@ -177,6 +188,11 @@ def import_scene_package(
         matched += 1
         if record.get("mesh_path"):
             actors_by_path[record["mesh_path"]] = actor
+        # Before the materials: they go on the component, and the slot names
+        # they are matched by come from whichever asset the component holds.
+        if share_static_mesh(actor, record.get("geometry_key"),
+                             canonical_meshes, duplicate_meshes):
+            shared += 1
         organise_actor(actor, record, ACTOR_FOLDER_ROOT)
         if apply_visibility(actor, record,
                             record.get("mesh_path") in blinking_paths):
@@ -190,6 +206,7 @@ def import_scene_package(
             "maya_mesh": record.get("mesh_full_name") or record.get("mesh"),
             "materials": names,
         })
+    discarded = discard_duplicate_meshes(duplicate_meshes, warnings)
 
     if import_lights:
         light_result = build_lights(
@@ -291,6 +308,9 @@ def import_scene_package(
         "fbx_path": fbx_path,
         "actor_count": len(actors),
         "mesh_count": matched,
+        "mesh_asset_count": len(canonical_meshes),
+        "mesh_shared_count": shared,
+        "mesh_discarded_count": discarded,
         "hidden_count": hidden_actors,
         "material_count": len(material_cache),
         "light_count": light_result["light_count"],

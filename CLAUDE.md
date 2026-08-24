@@ -398,6 +398,22 @@ Mesh transform'ları **Interchange** taşıyor ve doğru taşıyor — `meshes.p
 içinde bilinçli olarak hiç transform matematiği yok. Doğru olanın üstüne bir
 kez daha uygulamak, ışık enerjisinde bir kez yapılmış hatanın aynısıdır.
 
+### Aynı şekle tek StaticMesh
+
+Exporter her mesh'e `geometry_key` yazar (object-space noktalar, topoloji,
+normaller, UV setleri, materyal **slot yapısı**, subdivision); alıcı aynı
+anahtarlı aktörlere ilk gelen asset'i verip kopyaları kaydedilmeden siler
+(`share_static_mesh`, `discard_duplicate_meshes`). Ölçüldü: 12 028 mesh →
+4 068 asset.
+
+- Anahtara transform, isim veya shader **koyma**; materyal component'te,
+  paylaşım onu bozmaz. Slot yapısı ise anahtarda **kalmalı**, yoksa iki
+  slotlu bir kopya tek slotlu asset'e düşer.
+- Paylaşımı `assign_materials`'tan **önce** yap: slot adları component'in
+  tuttuğu asset'ten okunur.
+- Donmuş (frozen) kopyalar bilerek ayrı kalır; pivot telafisi eklemeden
+  onları da paylaştırmaya kalkma.
+
 ### Rigid mover'lar Sequencer satırı DEĞİL
 
 Sequencer'da hareket eden her aktör bir satırdır ve 7 562 satırlık sequence
