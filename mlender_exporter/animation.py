@@ -24,6 +24,7 @@ from .constants import (
     MAX_ANIMATION_FRAMES,
     TIME_UNIT_FPS,
     TRANSFORM_VISIBILITY_ATTRS,
+    SOLVER_REPLAY_TOLERANCE,
     UNSTABLE_REVERSAL_COS,
     UNSTABLE_RUN,
     UNSTABLE_STEP_METRES,
@@ -380,6 +381,8 @@ def anchor_motion(motion, paths, warnings):
             "motion may start from the wrong pose.".format(frames[0])
         )
     lost = 0
+    drifted = 0
+    worst = 0.0
     for key in list(objects):
         path = paths.get(key) if hasattr(paths, "get") else key
         try:
@@ -395,6 +398,29 @@ def anchor_motion(motion, paths, warnings):
             if index % 4 != 3:
                 reference.append(value)
         objects[key]["reference"] = reference
+        # The walk sampled this same frame on its way past. If the solver
+        # replays the shot the same way, arriving here again lands on the
+        # same pose; if it does not, the anchor and the first sample
+        # disagree and every receiver is anchored to something the motion
+        # never passes through.
+        sample = (objects[key] or {}).get("matrix") or []
+        if len(sample) >= 12:
+            gap = 0.0
+            for index in (9, 10, 11):
+                gap = max(gap, abs(reference[index] - sample[index]))
+            if gap > SOLVER_REPLAY_TOLERANCE:
+                drifted += 1
+                if gap > worst:
+                    worst = gap
+    if drifted:
+        warnings.append(
+            "{0} moving object(s) are in a different place when the timeline "
+            "returns to frame {1:g} than when it passed through, by up to "
+            "{2:.3g} unit(s): the simulation does not replay the same way "
+            "twice, so this export is not repeatable and the anchor does not "
+            "match the motion. Bake or cache it.".format(
+                drifted, frames[0], worst)
+        )
     if lost:
         warnings.append(
             "{0} moving object(s) could not be read at the reference frame, "

@@ -474,13 +474,18 @@ def export_scene(
             )
             solvers = _live_solvers()
             if solvers:
+                # Named, not judged. Whether this particular solver replays
+                # the same way is measured in anchor_motion by comparing the
+                # anchor against the sample the walk took at the same frame,
+                # and only says so when they disagree. The sentence that used
+                # to stand here quoted "2044 of 12028 objects by up to 108
+                # units" on every export, which was a measurement of some
+                # other run: on this shot the true figure is 0 of 7468.
                 warnings.append(
-                    "The motion was sampled from a live simulation ({0}), "
-                    "which replays differently between a freshly opened "
-                    "scene and one that has already played the shot -- "
-                    "measured, 2044 of 12028 objects by up to 108 units. "
-                    "Bake or cache the simulation for an export that comes "
-                    "out the same twice.".format(", ".join(solvers[:3]))
+                    "The motion was sampled from a live simulation ({0}) "
+                    "rather than from curves or a cache, so it is only as "
+                    "repeatable as the solver is.".format(
+                        ", ".join(solvers[:3]))
                 )
 
         # Renamed off the shared key: for a light this is a lighting sample

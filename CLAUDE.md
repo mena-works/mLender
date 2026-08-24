@@ -944,6 +944,18 @@ Kullanıcının elle doğrulaması gereken adımlar:
   çağırdı ve cetvel 519'a kadar gitti; ad kaldırılınca motor Frame'i doğrudan
   yazıyor, `Tick` uyguluyor ve ikisi de çalışıyor. PIE her iki durumda da
   çalıştığı için sorun uzun süre Sequencer'ın kendisinde sanıldı
+- ❌ Ölçülmemiş bir sayıyı uyarı metnine gömüp o export'un ölçümü gibi
+  sunma. `"measured, 2044 of 12028 objects by up to 108 units"` cümlesi
+  sabit metindi ve canlı solver olan **her** export'ta yazılıyordu; okuyan
+  (ben dahil) onu o koşunun ölçümü sandı ve kullanıcıya öyle aktardı. Aynı
+  sahneden üç export alındı, hareket verisi **bit bit aynı** çıktı (fark 0
+  obje, 0.00 birim) ve çapa ile ilk kare örneği **0/7468** objede ayrıştı —
+  yani iddia bu şot için yanlıştı. Bir sayı yazacaksan o koşuda ölç;
+  ölçemiyorsan sayı verme
+- ❌ Simülasyonu bake ederek titremenin düzeleceğini varsayma; bake solverin
+  ürettiğini dondurur. Ölçüldü: bake öncesi ve sonrası **aynı 178 parça**,
+  aynı gruplar, aynı kareler. Bedeli ise gerçek — her objeye animCurve
+  binince FBX 171 MB'tan **345 MB**'a, FBX aşaması 12 dk'dan **25 dk**'ya çıktı
 - ❌ Kaydedilmemiş bir level'a import edip sonra `save_map` ile ad verme;
   possessable binding, bind edildiği **dünyanın içindeki bir yol** olarak
   saklanıyor, dünya yeniden adlandırılınca hepsi bayatlıyor. Ölçüldü:
