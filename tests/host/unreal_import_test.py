@@ -1028,6 +1028,31 @@ def main():
                   "{0} unresolved, first: {1}".format(
                       len(unresolved), unresolved[:3]))
 
+            # And no row that carries nothing. Interchange keys every object
+            # it imported, moving or not; on a real shot that put 71 sections
+            # of two identical keys on the sequence, and since the movers ride
+            # one actor on purpose those were the *only* object rows in the
+            # outliner. Scrolling mesh names whose tracks do nothing reads as
+            # a shot that did not arrive, which is how it was reported.
+            flat = []
+            for binding in sequence.get_bindings() or []:
+                for track in binding.get_tracks() or []:
+                    if not isinstance(
+                            track, unreal.MovieScene3DTransformTrack):
+                        continue
+                    for section in track.get_sections() or []:
+                        varies = False
+                        for channel in section.get_all_channels() or []:
+                            values = [k.get_value()
+                                      for k in (channel.get_keys() or [])]
+                            if values and max(values) - min(values) > 1e-6:
+                                varies = True
+                                break
+                        if not varies:
+                            flat.append(str(binding.get_display_name()))
+            check("no transform row keys the same value twice", not flat,
+                  "{0} flat, first: {1}".format(len(flat), flat[:3]))
+
             fps = float(animation.get("fps") or 24.0)
             per_frame = sequence.get_tick_resolution().numerator / fps
             player_actor = unreal.EditorLevelLibrary.spawn_actor_from_class(

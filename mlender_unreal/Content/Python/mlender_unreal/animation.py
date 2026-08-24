@@ -786,6 +786,25 @@ def _channel_keys(section):
     return read
 
 
+def _varies(channels, tolerance=1.0e-6):
+    """Whether any channel actually changes across its keys.
+
+    Interchange keys every object it imported, moving or not. Measured on a
+    real shot: 71 of the adopted sections were two keys of 0.0 on all six
+    channels. They cost nothing to evaluate -- a transform track is relative,
+    so they write the identity an unparented actor already has -- but they are
+    *rows*, and they were the only object rows in the outliner, the movers
+    having been taken off the sequence on purpose. Somebody opening that
+    sequence scrolls a list of mesh names whose transform tracks do nothing
+    and reads it as a shot that did not arrive. That is how it was reported.
+    """
+    for _name, pairs in channels:
+        values = [value for _tick, value in pairs]
+        if values and (max(values) - min(values)) > tolerance:
+            return True
+    return False
+
+
 def adopt_object_animation(sequence, ticks_per_frame, first, last, warnings,
                            skip_labels=None):
     """Object motion from the FBX, retimed into the sequence we built.
@@ -809,8 +828,13 @@ def adopt_object_animation(sequence, ticks_per_frame, first, last, warnings,
     actors = actors_by_label()
     adopted = 0
     keys_written = 0
+    still = 0
     emptied = []
     for source in _interchange_sequences():
+        # Sections read, whether or not they were worth a track. A source
+        # whose every object is static gives up nothing, and counting only
+        # what was written would leave it behind for the user to open by
+        # mistake -- which is the failure it was measured causing before.
         taken = 0
         for binding in source.get_bindings() or []:
             label = str(binding.get_display_name() or "")
@@ -829,6 +853,10 @@ def adopt_object_animation(sequence, ticks_per_frame, first, last, warnings,
                 for section in track.get_sections() or []:
                     channels = _channel_keys(section)
                     if not channels:
+                        continue
+                    if not _varies(channels):
+                        still += 1
+                        taken += 1
                         continue
                     span = max(
                         (pairs[-1][0] - pairs[0][0]) for _n, pairs in channels
@@ -855,6 +883,15 @@ def adopt_object_animation(sequence, ticks_per_frame, first, last, warnings,
         if taken:
             emptied.append(source)
     _discard(emptied, warnings)
+    if still:
+        # Said rather than left to be noticed: an outliner with fewer rows
+        # than the level has objects is the sort of thing a person reads as
+        # loss, and this is the opposite of loss.
+        warnings.append(
+            "{0} object(s) the FBX keyed do not move -- every key is the same "
+            "value -- so no track was built for them. What does move is on "
+            "the sequence.".format(still)
+        )
     return adopted, keys_written
 
 
