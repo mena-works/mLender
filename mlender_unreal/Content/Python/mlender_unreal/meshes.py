@@ -340,14 +340,36 @@ def find_mesh_record(actor, record_index, used):
     Unreal strips the namespace colon from an actor label, so the sanitised
     forms are in the index as well. A record is only used once, which is what
     keeps two meshes of the same short name in different groups apart.
+
+    An exact name wins over a sanitised one, and that is not a nicety.
+    safe_asset_name collapses repeated underscores, so "broken__shard" and
+    "broken_shard" -- two different objects with two different shapes -- are
+    filed under one key, and a bucket reached by an exact label can hold the
+    other object's record. Measured on a real shot: 169 such collisions over
+    324 meshes, every one of them between genuinely different geometry, and
+    the object that lost the race was drawn with the winner's mesh 93 cm from
+    where Maya put it. It read as a shard floating in mid air.
     """
-    label = actor.get_actor_label()
+    label = str(actor.get_actor_label())
+    candidates = []
+    seen = set()
     for key in (label, safe_asset_name(label)):
         for record in record_index.get(str(key), []):
-            if id(record) in used:
+            if id(record) in used or id(record) in seen:
                 continue
+            seen.add(id(record))
+            candidates.append(record)
+    if not candidates:
+        return None
+    for record in candidates:
+        if label in (str(record.get("mesh") or ""),
+                     str(record.get("mesh_full_name") or "")):
             return record
-    return None
+    for record in candidates:
+        if label in (decoded_name(str(record.get("mesh") or "")),
+                     decoded_name(str(record.get("mesh_full_name") or ""))):
+            return record
+    return candidates[0]
 
 
 def assign_materials(actor, record, material_cache, package_folder,

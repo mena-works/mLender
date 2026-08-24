@@ -944,6 +944,14 @@ Kullanıcının elle doğrulaması gereken adımlar:
   çağırdı ve cetvel 519'a kadar gitti; ad kaldırılınca motor Frame'i doğrudan
   yazıyor, `Tick` uyguluyor ve ikisi de çalışıyor. PIE her iki durumda da
   çalıştığı için sorun uzun süre Sequencer'ın kendisinde sanıldı
+- ❌ Aktörü mesh kaydına eşlerken normalize edilmiş adı tam adla eşdeğer
+  sayma; `safe_asset_name` ardışık alt çizgileri **teke indiriyor**, yani
+  `broken__shard` ile `broken_shard` — iki ayrı obje, iki ayrı şekil — aynı
+  kovaya düşüyor ve tam isimle sorgulayan aktör bile yanlış kaydı alabiliyor.
+  Ölçüldü: bir şotta **169 çarpışma, 324 mesh**, hepsi gerçekten farklı
+  geometri; kaybeden obje kazananın mesh'iyle çizilip Maya'daki yerinden
+  **93 cm** ötede durdu ve "havada asılı parça" diye bildirildi. Tam eşleşme
+  önce denenmeli, normalize edilmiş ad yalnız hiçbir tam eşleşme yokken
 - ❌ Ölçülmemiş bir sayıyı uyarı metnine gömüp o export'un ölçümü gibi
   sunma. `"measured, 2044 of 12028 objects by up to 108 units"` cümlesi
   sabit metindi ve canlı solver olan **her** export'ta yazılıyordu; okuyan

@@ -364,6 +364,61 @@ def main():
         ),
     )
 
+    # An actor must find its own record, not one filed beside it. The index
+    # holds every record under a sanitised alias as well as its real name, and
+    # safe_asset_name collapses repeated underscores -- so "broken__shard" and
+    # "broken_shard", two different objects with two different shapes, share a
+    # key. Measured on a real shot: 169 such collisions over 324 meshes, all
+    # between genuinely different geometry, and the loser was drawn with the
+    # winner's mesh 93 cm from where Maya put it.
+    print(chr(10) + "unreal mesh record matching")
+    from mlender_unreal import meshes as receiver_meshes
+
+    class _Actor(object):
+        def __init__(self, label):
+            self._label = label
+
+        def get_actor_label(self):
+            return self._label
+
+    double = {"mesh": "broken__shard", "mesh_full_name": "broken__shard",
+              "geometry_key": "aaa"}
+    single = {"mesh": "broken_shard", "mesh_full_name": "broken_shard",
+              "geometry_key": "bbb"}
+    # The colliding record first, which is the order that produced the bug.
+    index = receiver_meshes.build_record_index([double, single])
+    # Both records reach that bucket, which is the collision itself. The
+    # bucket holds a record once per alias, so distinct records is the count
+    # that means anything.
+    bucket = index.get("broken_shard") or []
+    check(
+        "both objects land in one sanitised bucket",
+        len({id(item) for item in bucket}) == 2,
+        len({id(item) for item in bucket}),
+    )
+    used = set()
+    got = receiver_meshes.find_mesh_record(_Actor("broken_shard"), index, used)
+    check(
+        "an exact name beats a record that only matched once sanitised",
+        got is single, (got or {}).get("mesh"),
+    )
+    used.add(id(got))
+    other = receiver_meshes.find_mesh_record(
+        _Actor("broken__shard"), index, used)
+    check(
+        "and the other object still finds its own",
+        other is double, (other or {}).get("mesh"),
+    )
+    # A name that only matches once sanitised is still matched, or a genuinely
+    # renamed actor would find nothing at all.
+    loose = receiver_meshes.build_record_index([double])
+    check(
+        "a sanitised match still works when nothing exact exists",
+        receiver_meshes.find_mesh_record(
+            _Actor("broken_shard"), loose, set()) is double,
+        "",
+    )
+
     print("\nunreal compiled module")
     # The movers play from a C++ actor, and the Python addresses it by class
     # and property name across a reflection boundary nothing type-checks.
