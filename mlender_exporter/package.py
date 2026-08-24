@@ -366,6 +366,29 @@ def export_scene(
                 mesh_shapes, animation
             )
             phases.done("who moves, who deforms")
+        elif animation.get("enabled"):
+            # Nothing measures a mover unless the line above runs, and a
+            # simulated object has no animCurve to give it away, so with this
+            # off a solved shot exports as one still pose and says nothing.
+            # Measured: the same scene exported with the box unticked found 0
+            # movers where it had found 7468, wrote no motion sidecar, and
+            # spent 46 minutes in an FBX bake it did not need. The warning is
+            # conditional on a solver actually being in the scene, so a
+            # hand-keyed export does not get told off for nothing.
+            solvers = []
+            for kind in LIVE_SOLVER_NODE_TYPES:
+                try:
+                    solvers.extend(cmds.ls(type=kind) or [])
+                except Exception:
+                    continue
+            if solvers:
+                warnings.append(
+                    "The scene has {0} solver(s) ({1}) and Cache Animated "
+                    "Meshes is off, so nothing measured which objects move: "
+                    "a simulation travels as one still pose. Tick it to carry "
+                    "the motion.".format(
+                        len(solvers), ", ".join(sorted(solvers)[:3]))
+                )
 
         # A rigid mover travels as a transform per frame rather than a mesh
         # per frame. Keyed by DAG path, which is what a receiver matches its
