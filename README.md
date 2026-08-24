@@ -2687,6 +2687,17 @@ With the split above, most shots have nothing in the cache to lose it for.
 Sampled motion carries **visibility** too, keyed per frame, because a piece
 that is on screen before it breaks reads as a piece that never moved.
 
+The sampling reads each mover through the OpenMaya API rather than a `cmds`
+call per object per frame — a shot of 7468 movers over 520 frames is 3.9
+million reads, and a command round trip for each was a third of the export.
+Measured on that shot: 32 minutes through `cmds`, 24 through the API, with
+the motion file byte for byte identical. The rest of the time is Maya
+evaluating the scene at every frame — a Bullet solver has to be stepped
+from the first frame, and there is no shortcut through a simulation — so
+an export of a long simulation is still a coffee, not a click. Visibility
+plugs are read every frame only where something drives them; a static plug
+is read once.
+
 It is applied **on top of where the receiver put the object**, not instead of
 it. Measured: Unreal's FBX import places every actor with a 90 degree roll —
 that is where the format's up-axis conversion ends up, with the mesh left in

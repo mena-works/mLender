@@ -19,7 +19,12 @@ import math
 import maya.cmds as cmds
 import maya.mel as mel
 
-from .constants import DEFAULT_FPS, MAX_ANIMATION_FRAMES, TIME_UNIT_FPS
+from .constants import (
+    DEFAULT_FPS,
+    MAX_ANIMATION_FRAMES,
+    TIME_UNIT_FPS,
+    TRANSFORM_VISIBILITY_ATTRS,
+)
 from .mayautils import (
     current_frame,
     node_label,
@@ -143,6 +148,84 @@ def sample_records(settings, entries):
     return len(frames)
 
 
+def _api_readers(pairs, read_visibility=True):
+    """Per mover, what the API needs to read it each frame, or None.
+
+    A ``cmds`` call is a command round trip -- parse, resolve the name,
+    evaluate, marshal a list back -- and the sampler makes one per mover per
+    frame: 3.9 million of them on a shot of 7500 movers over 520 frames,
+    which was most of a sixteen minute export. The API resolves the node
+    once and reads the same plugs directly after that.
+
+    Visibility is read the same way, and only where it can change: a plug
+    with an incoming connection (an animation curve, an expression, a
+    driver) is read every frame, while one that nothing drives is read once.
+    A hidden object whose plug is static is hidden on every frame, which is
+    what reading it 520 times would have said.
+
+    None when any mover cannot be resolved, so the sampler runs one code
+    path or the other for the whole shot rather than a mixture nothing has
+    measured. Both paths produce the same numbers: measured on the fixture,
+    every matrix identical and every visibility channel identical.
+    """
+    try:
+        from maya.api import OpenMaya
+    except Exception:
+        return None
+    attrs = []
+    for candidates in TRANSFORM_VISIBILITY_ATTRS.values():
+        attrs.extend(candidates)
+    readers = {}
+    for key, path in pairs:
+        try:
+            selection = OpenMaya.MSelectionList()
+            selection.add(path)
+            dag = selection.getDagPath(0)
+            node = OpenMaya.MFnDependencyNode(dag.node())
+            dynamic = []
+            hidden = False
+            # No reader given means the caller wants every frame visible,
+            # which is what the command path answers without one.
+            for attr in (attrs if read_visibility else ()):
+                if not node.hasAttribute(attr):
+                    continue
+                plug = node.findPlug(attr, False)
+                if plug.isDestination:
+                    dynamic.append(plug)
+                elif not plug.asBool():
+                    hidden = True
+        except Exception:
+            return None
+        readers[key] = (dag, tuple(dynamic), hidden)
+    return readers
+
+
+def _api_sample(reader, track):
+    """One frame of one mover through the API. False when it could not be read."""
+    dag, dynamic, hidden = reader
+    try:
+        matrix = dag.inclusiveMatrix()
+    except Exception:
+        return False
+    values = track["matrix"]
+    # Row major with the translation in the last row, which is the order
+    # cmds.xform -matrix hands back; the constant fourth column is dropped.
+    for row in range(4):
+        for column in range(3):
+            values.append(matrix.getElement(row, column))
+    visible = not hidden
+    if visible:
+        for plug in dynamic:
+            try:
+                if not plug.asBool():
+                    visible = False
+                    break
+            except Exception:
+                continue
+    track["visible"].append(1 if visible else 0)
+    return True
+
+
 def sample_motion(settings, entries, visible_at=None):
     """World matrices and visibility per frame, for movers that only move.
 
@@ -176,6 +259,8 @@ def sample_motion(settings, entries, visible_at=None):
             "visible": array.array("b"),
         }
 
+    readers = _api_readers(pairs, read_visibility=visible_at is not None)
+
     original = current_frame()
     try:
         for frame in frames:
@@ -185,6 +270,10 @@ def sample_motion(settings, entries, visible_at=None):
                 continue
             for key, path in pairs:
                 track = tracks[key]
+                reader = readers.get(key) if readers else None
+                if reader is not None:
+                    _api_sample(reader, track)
+                    continue
                 try:
                     matrix = cmds.xform(path, query=True, worldSpace=True,
                                         matrix=True)

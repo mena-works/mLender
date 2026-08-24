@@ -189,6 +189,45 @@ def _walk(frames, visit):
             pass
 
 
+def _api_matrix_readers(transforms):
+    """A resolved DAG path per transform, or None to read through cmds.
+
+    The probe asks every transform in the scene for its world matrix at
+    twelve frames -- 164 000 cmds.xform round trips on a layout of 13 634
+    transforms -- and the API answers the same question from a path resolved
+    once. All or nothing, as in animation._api_readers: one code path for the
+    whole pass rather than a mixture.
+    """
+    try:
+        from maya.api import OpenMaya
+    except Exception:
+        return None
+    readers = {}
+    for transform in transforms:
+        try:
+            selection = OpenMaya.MSelectionList()
+            selection.add(transform)
+            readers[transform] = selection.getDagPath(0)
+        except Exception:
+            return None
+    return readers
+
+
+def _read_world_matrix(readers, transform):
+    """Sixteen floats, row major, from the API when it resolved the node."""
+    dag = readers.get(transform) if readers else None
+    if dag is None:
+        return world_matrix(transform)
+    try:
+        matrix = dag.inclusiveMatrix()
+        return [
+            matrix.getElement(row, column)
+            for row in range(4) for column in range(4)
+        ]
+    except Exception:
+        return world_matrix(transform)
+
+
 def _moving(transforms, frames):
     """Which of these transforms change their world matrix over the probes.
 
@@ -206,12 +245,13 @@ def _moving(transforms, frames):
     """
     first = {}
     moving = set()
+    readers = _api_matrix_readers(transforms)
 
     def visit():
         for transform in transforms:
             if transform in moving:
                 continue
-            matrix = world_matrix(transform)
+            matrix = _read_world_matrix(readers, transform)
             if not matrix:
                 continue
             reference = first.get(transform)
