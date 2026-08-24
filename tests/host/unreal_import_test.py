@@ -1002,6 +1002,32 @@ def main():
                 result["sequence_path"].split(".")[0]
             )
         if sequence is not None:
+            # Every row has to find its object. A binding is stored as a path
+            # inside the world it was made in, so a send into an unsaved level
+            # that is named afterwards leaves the tracks intact and their
+            # objects missing -- measured on a real shot: 73 of 73 bindings
+            # resolved to nothing while all their actors were in the level
+            # under the right labels, and Sequencer drew every row red. The
+            # suite counted tracks and keys and had nothing to say about it.
+            world = unreal.get_editor_subsystem(
+                unreal.UnrealEditorSubsystem).get_editor_world()
+            unresolved = []
+            for binding in sequence.get_bindings() or []:
+                try:
+                    bound = list(
+                        unreal.MovieSceneSequenceExtensions
+                        .locate_bound_objects(sequence, binding, world) or [])
+                except Exception as exc:
+                    bound = []
+                    unresolved.append("{0} ({1})".format(
+                        binding.get_display_name(), exc))
+                    continue
+                if not bound:
+                    unresolved.append(str(binding.get_display_name()))
+            check("every Sequencer binding finds its object", not unresolved,
+                  "{0} unresolved, first: {1}".format(
+                      len(unresolved), unresolved[:3]))
+
             fps = float(animation.get("fps") or 24.0)
             per_frame = sequence.get_tick_resolution().numerator / fps
             player_actor = unreal.EditorLevelLibrary.spawn_actor_from_class(

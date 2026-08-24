@@ -803,6 +803,20 @@ accepts a wrong value without complaining:
   pre-animated values, so a check that reads there sees the actor's spawn state
   and concludes nothing was keyed.
 
+**Save the level before you send.** A Sequencer binding is stored as a path
+inside the world it was made in, so a send into an unsaved level that is given
+a name afterwards leaves the tracks intact and every one of their objects
+missing — Sequencer draws each row red, "the object bound to this track is
+missing", and the timeline plays nothing. Measured on a headless send that
+imported into `/Temp/Untitled_0` and saved the level afterwards: 73 of 73
+bindings resolved to nothing while all of their actors were still in the level
+under the right labels, and a binding made in the saved world resolved on the
+same asset in the same session. The import now says so in its warnings rather
+than leaving it to be found in the Sequencer; the meshes, materials and lights
+are unaffected, so the fix is to save the level and send again. A script that
+drives the import headlessly has to `load_map` the destination **first** and
+save in place, never `save_map` to a new path afterwards.
+
 A fifth thing was measured after the first four, while adding keyed material
 parameters: **the material parameter API does not use the same time unit**. On
 one sequence, a transform channel handed 1000 stores 1000 and

@@ -1638,6 +1638,53 @@ def animate_sampled_motion(sequence, motion, actors_by_path, unreal_scale,
     return tracks, keys
 
 
+def _editor_world():
+    """The world being edited, through whichever accessor this build has."""
+    try:
+        return unreal.get_editor_subsystem(
+            unreal.UnrealEditorSubsystem).get_editor_world()
+    except Exception:
+        pass
+    try:
+        return unreal.EditorLevelLibrary.get_editor_world()
+    except Exception:
+        return None
+
+
+def warn_unsaved_world(warnings):
+    """Say so when the level has no name yet, because every binding will stale.
+
+    A possessable is stored as a path inside the world it was bound in, so
+    saving that world under a new name leaves every binding pointing at a
+    world that no longer exists. Measured on a headless send: the import ran
+    in ``/Temp/Untitled_0`` and the driver saved the level afterwards as
+    ``/Game/Shot_v108_player``. All 73 bindings then resolved to nothing while
+    all of their actors were still in the level under the right labels, and
+    Sequencer drew every row red -- "the object bound to this track is
+    missing". A binding made in the saved world resolved on the same asset in
+    the same session, which is what ruled the API out and the rename in.
+
+    A warning rather than a refusal: the meshes, materials and lights are all
+    still worth having, and it is only the timeline that is lost.
+    """
+    world = _editor_world()
+    path = ""
+    try:
+        path = str(world.get_path_name()) if world is not None else ""
+    except Exception:
+        path = ""
+    if not path.startswith("/Temp/") and not path.startswith("/Engine/"):
+        return False
+    warnings.append(
+        'The level has not been saved yet ("{0}"), so every Sequencer '
+        "binding this import writes is stored against a world that stops "
+        "existing the moment the level is saved under a name: the tracks "
+        "survive, their objects read as missing, and the timeline plays "
+        "nothing. Save the level first, then send again.".format(path)
+    )
+    return True
+
+
 def import_animation(package_data, unreal_scale, metre_scale, power_scale,
                      warnings, package_folder="", actors_by_path=None,
                      motion=None):
@@ -1645,6 +1692,9 @@ def import_animation(package_data, unreal_scale, metre_scale, power_scale,
     sequence, ticks_per_frame, first, last = create_sequence(
         package_data, warnings
     )
+    # Before a single binding is written, and whether or not there is a
+    # sequence: an unnamed world costs the FBX's own object animation too.
+    warn_unsaved_world(warnings)
     if sequence is None:
         # No package animation still leaves the FBX's own take to hand out.
         skeletal = 0

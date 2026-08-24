@@ -934,6 +934,18 @@ Kullanıcının elle doğrulaması gereken adımlar:
   panel de 3968 üçgenlik küre de 256 okundu, yani sayı mesh'i değil
   bütçeyi anlatıyor. `get_num_nanite_triangles()` kaynağı verir.
   Nanite'ı bu araç açmıyor — motorun import varsayılanı
+- ❌ Kaydedilmemiş bir level'a import edip sonra `save_map` ile ad verme;
+  possessable binding, bind edildiği **dünyanın içindeki bir yol** olarak
+  saklanıyor, dünya yeniden adlandırılınca hepsi bayatlıyor. Ölçüldü:
+  `/Temp/Untitled_0`'da import edilip sonra `/Game/Shot_v108_player` diye
+  kaydedilen çekimde **73 binding'in 73'ü** hiçbir şeye çözülmedi, oysa
+  aktörlerin 72'si doğru label ile level'daydı; Sequencer her satırı kırmızı
+  çizdi ("the object bound to this track is missing"). Aynı oturumda aynı
+  asset üzerinde **o an** kurulan bir binding çözüldü — API'yi eleyen, adlandırmayı
+  suçlu bulan ölçüm bu. Headless sürücü önce `load_map` yapıp yerinde kaydetmeli
+- ❌ Sequencer testini track ve key sayarak yazma; ikisi de bu hatada
+  **doğruydu** (73 track, 1.5 M anahtar) ve hiçbiri objesini bulamıyordu.
+  `locate_bound_objects` ile her binding'in objesini bulduğunu assert et
 - ❌ Sekansı motorun varsayılan tick çözünürlüğüyle bırakma; 24000'e karşı 24
   fps'te motorun iki yarısı **birbiriyle çelişiyor**: değerlendirme section
   aralığını tick okuyor, editörün cetveli ve `get_end_frame_seconds` aynı
