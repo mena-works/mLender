@@ -11,3 +11,8 @@ build/
 # textures, and this repository is public. They are what the tool is aimed
 # at, so they live here -- but they are not the tool.
 assets/
+
+# The Unreal plugin builds into its own folder; the compiled module is a
+# release artefact, not a source.
+mlender_unreal/Binaries/
+mlender_unreal/Intermediate/

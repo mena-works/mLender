@@ -2008,119 +2008,163 @@ def main():
                 actors_by_path_test[path] = found
         sequence = unreal.EditorAssetLibrary.load_asset(
             cache_import.get("sequence_path") or "")
-        keyed = {}
+
+        # The movers are not rows. A binding is a row in the Sequencer
+        # outliner, and a shot of 7562 of them made a 349 MB sequence the
+        # editor would not open; cut into parts, the rows were still there to
+        # be opened by mistake. So the movers ride one actor, and the sequence
+        # keys a single float on it.
+        check("the compiled module is loaded, so the player class exists",
+              hasattr(unreal, "MLMotionPlayer"),
+              "MLMotionPlayer" in dir(unreal))
+        players = [
+            actor for actor in unreal.get_editor_subsystem(
+                unreal.EditorActorSubsystem).get_all_level_actors() or []
+            if actor.get_class().get_name() == "MLMotionPlayer"
+        ]
+        check("the movers are played by one motion player actor",
+              len(players) == 1, len(players))
+        player = players[0] if players else None
+        bound = player.get_bound_count() if player is not None else 0
+        check("and it bound the movers", bound >= 5, bound)
+        check("the import reported them",
+              cache_import.get("motion_object_count") == bound,
+              (cache_import.get("motion_object_count"), bound))
+        check("and their asset",
+              bool(cache_import.get("motion_asset_path"))
+              and unreal.EditorAssetLibrary.does_asset_exist(
+                  cache_import.get("motion_asset_path")),
+              cache_import.get("motion_asset_path"))
+
+        mover_labels = set(
+            record.get("mesh") for path, record in by_path.items()
+            if path in (motion.get("objects") or {}))
+        rows = {}
         for binding in (sequence.get_bindings() if sequence else []):
             label = str(binding.get_display_name() or "")
+            rows[label] = [track.get_class().get_name()
+                           for track in (binding.get_tracks() or [])]
+        check("no mover has a row of its own on the sequence",
+              not (mover_labels & set(rows)),
+              sorted(mover_labels & set(rows))[:4])
+        player_label = player.get_actor_label() if player is not None else ""
+        check("the player has one, with a float track",
+              "MovieSceneFloatTrack" in (rows.get(player_label) or []),
+              (player_label, rows.get(player_label)))
+        frame_property = None
+        for binding in (sequence.get_bindings() if sequence else []):
+            if str(binding.get_display_name() or "") != player_label:
+                continue
             for track in binding.get_tracks() or []:
-                name = track.get_class().get_name()
-                if name not in ("MovieScene3DTransformTrack",
-                                "MovieSceneVisibilityTrack"):
+                if track.get_class().get_name() != "MovieSceneFloatTrack":
                     continue
-                for section in track.get_sections() or []:
-                    channels = mlender_unreal.animation._channel_keys(section)
-                    if channels:
-                        keyed.setdefault(label, {})[name] = channels
+                try:
+                    frame_property = str(track.get_property_name())
+                except Exception as exc:
+                    frame_property = "unreadable: {0}".format(exc)
+        check("and that track keys the frame the C++ declares",
+              frame_property == mlender_unreal.constants.MOTION_FRAME_PROPERTY,
+              frame_property)
 
-        def sampled(mesh_name):
-            """The keyed channels of a sampled mover, by Maya mesh name."""
+        def mover(mesh_name):
             for path, record in by_path.items():
-                if record.get("mesh") != mesh_name:
-                    continue
-                if path in (motion.get("objects") or {}):
-                    return keyed.get(mesh_name) or {}
-            return {}
+                if record.get("mesh") == mesh_name:
+                    return actors_by_path_test.get(path)
+            return None
 
-        sim = sampled("simCube").get("MovieScene3DTransformTrack") or []
-        check("a mover that does not deform is keyed on the sequence",
-              len(sim) >= 3, len(sim))
-        # By name, not by position: the read only returns channels that hold
-        # keys, so an object falling in Z alone comes back as a single
-        # channel and a positional read would write it into X.
-        spans = {}
-        for name, pairs in sim:
-            values = [value for _tick, value in pairs]
-            spans[str(name)] = max(values) - min(values) if values else 0.0
-        check("and it travels rather than sitting at one value",
-              max(spans.values() or [0.0]) > 0.5, spans)
-        # The frames the keys land on, which is the half a value check
-        # cannot see: a key run compressed into the first tick reads as an
-        # object already at its end position before frame one.
-        ticks = sorted(set(
-            tick for _name, pairs in sim for tick, _value in pairs))
-        check("over the range rather than inside one frame",
-              len(ticks) > 2 and (ticks[-1] - ticks[0]) >= 10,
-              (ticks[:3], ticks[-3:] if len(ticks) > 3 else None))
-        # The blink travels as a visibility track, because a piece that is on
-        # screen before it breaks reads as a piece that never moved.
-        blink = sampled("debrisChunk").get("MovieSceneVisibilityTrack") or []
-        states = set()
-        for _name, pairs in blink:
-            for _tick, value in pairs:
-                states.add(bool(value))
-        check("and a mover that blinks carries its visibility",
-              states == set([True, False]), states)
-        # At the frame the FBX holds, the keys must put the object exactly
-        # where Interchange put it. Measured, and the reason the samples are
-        # deltas at all: Interchange places every FBX actor with a 90 degree
-        # roll, and a world transform of our own written over that turned
-        # every moving object by exactly that much.
-        reference = (cache_data.get("motion") or {}).get("reference_frame")
+        def location(actor):
+            at = actor.get_actor_location()
+            return (float(at.x), float(at.y), float(at.z))
+
+        def distance(a, b):
+            return sum((x - y) ** 2 for x, y in zip(a, b)) ** 0.5
+
         frames = motion.get("frames") or []
-        if reference in frames:
-            tick = int(round(float(reference)))
-            for name in ("simCube", "dropCube"):
-                channels = sampled(name).get("MovieScene3DTransformTrack") or []
-                actor = None
-                for path, record in by_path.items():
-                    if record.get("mesh") == name:
-                        actor = actors_by_path_test.get(path)
-                if actor is None or not channels:
-                    continue
-                placed = actor.get_actor_transform()
-                wanted = {
-                    "Location.X": placed.translation.x,
-                    "Location.Y": placed.translation.y,
-                    "Location.Z": placed.translation.z,
-                    "Rotation.X": placed.rotation.rotator().roll,
-                    "Rotation.Y": placed.rotation.rotator().pitch,
-                    "Rotation.Z": placed.rotation.rotator().yaw,
-                }
-                off = []
-                for channel, pairs in channels:
-                    expected = wanted.get(str(channel).rsplit("_", 1)[0])
-                    if expected is None:
-                        continue
-                    at = [value for time, value in pairs if time == tick]
-                    if at and abs(at[0] - expected) > 0.01:
-                        off.append((str(channel), at[0], expected))
-                check("{0} sits where the FBX put it at the reference "
-                      "frame".format(name), not off, off)
+        reference = (cache_data.get("motion") or {}).get("reference_frame")
+        if reference is None and frames:
+            reference = frames[0]
+        unit = float(cache_data.get("meters_per_maya_unit") or 0.01) * 100.0
 
-        # Where the keys put it, not only that they move. The prop in the
+        sim = mover("simCube")
+        if player is not None and sim is not None and frames:
+            # The import leaves the player on the reference frame, which is
+            # the pose the FBX carries -- so where the actor stands now is
+            # where Interchange put it. Measured, and the reason the samples
+            # are anchored: Interchange places every FBX actor with a 90
+            # degree roll, and a world transform written over that turned
+            # every mover by exactly that much. Scrubbing away and back must
+            # return exactly here.
+            placed = location(sim)
+            player.set_frame(float(frames[-1]))
+            moved = location(sim)
+            check("a mover that does not deform travels when the player scrubs",
+                  distance(placed, moved) > 0.5, (placed, moved))
+            visited = []
+            for frame in frames[::max(1, len(frames) // 5)]:
+                player.set_frame(float(frame))
+                visited.append(location(sim))
+            distinct = set(tuple(round(v, 2) for v in at) for at in visited)
+            check("over the range rather than inside one frame",
+                  len(distinct) >= 3, len(distinct))
+            player.set_frame(float(reference))
+            back = location(sim)
+            check("simCube sits where the FBX put it at the reference frame",
+                  distance(placed, back) < 0.01, (placed, back))
+            # Between two samples the player interpolates, which is what a
+            # sub-frame render needs for motion blur.
+            if len(frames) > 2:
+                a, b = float(frames[0]), float(frames[1])
+                player.set_frame(a)
+                at_a = location(sim)
+                player.set_frame(b)
+                at_b = location(sim)
+                player.set_frame((a + b) / 2.0)
+                mid = location(sim)
+                expected = tuple((x + y) / 2.0 for x, y in zip(at_a, at_b))
+                check("and interpolates between samples",
+                      distance(mid, expected)
+                      <= 0.05 * max(1.0, distance(at_a, at_b)),
+                      (mid, expected))
+                player.set_frame(float(reference))
+
+        # Where the player puts it, not only that it moves. The prop in the
         # moving group hangs under a static group thirty units up, and the
         # samples are world space -- so the prop carries that offset itself.
         # A local sample would leave it near the floor and still look like a
         # working transfer.
-        rider = sampled("simRider").get("MovieScene3DTransformTrack") or []
-        rider_z = [
-            value for name, pairs in rider if str(name).startswith("Location.Z")
-            for _tick, value in pairs
-        ]
-        # A Sequencer transform track keys an actor's *relative* transform,
-        # so whatever the FBX attached it to counts towards the height.
-        rider_actor = None
-        for path, record in by_path.items():
-            if record.get("mesh") == "simRider":
-                rider_actor = actors_by_path_test.get(path)
-        parent_z = 0.0
-        if rider_actor is not None:
-            parent = rider_actor.get_attach_parent_actor()
-            if parent is not None:
-                parent_z = parent.get_actor_location().z
-        unit = float(cache_data.get("meters_per_maya_unit") or 0.01) * 100.0
+        rider = mover("simRider")
+        rider_z = []
+        if player is not None and rider is not None:
+            for frame in frames:
+                player.set_frame(float(frame))
+                rider_z.append(location(rider)[2])
+            player.set_frame(float(reference))
         check("a sampled mover keeps the offset of its static parent",
-              rider_z and (max(rider_z) + parent_z) > 20.0 * unit,
-              (max(rider_z or [0.0]), parent_z, unit))
+              bool(rider_z) and max(rider_z) > 20.0 * unit,
+              (max(rider_z or [0.0]), unit))
+
+        # The blink, on the player rather than as a visibility track: a piece
+        # that is on screen before it breaks reads as a piece that never
+        # moved. Both editor and game flags are read, because which one the
+        # player writes depends on the world it finds itself in.
+        debris = mover("debrisChunk")
+        debris_visible = []
+        for path, record in by_path.items():
+            if record.get("mesh") == "debrisChunk":
+                debris_visible = (motion.get("objects") or {}).get(
+                    path, {}).get("visible") or []
+        states = {}
+        if player is not None and debris is not None and debris_visible:
+            for frame, visible in zip(frames, debris_visible):
+                if bool(visible) in states:
+                    continue
+                player.set_frame(float(frame))
+                hidden = bool(debris.is_temporarily_hidden_in_editor()) or bool(
+                    debris.get_editor_property("hidden"))
+                states[bool(visible)] = not hidden
+            player.set_frame(float(reference))
+        check("and a mover that blinks carries its visibility",
+              states == {True: True, False: False}, states)
 
         # The mover arrives as an ordinary mesh actor, which is the whole
         # point: a static mesh is instanced and ray traced, and a cache track

@@ -27,8 +27,36 @@ import zipfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DIST = os.path.join(ROOT, "dist")
 MAYAPY = r"C:\Program Files\Autodesk\Maya2023\bin\mayapy.exe"
-UNREAL = (r"C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64"
-          r"\UnrealEditor-Cmd.exe")
+
+
+def _unreal_editor():
+    """The 5.8 editor, wherever the launcher put it.
+
+    The launcher records every install in LauncherInstalled.dat, and an
+    engine on another drive is ordinary -- the machine this was extended on
+    keeps it on D:. The Program Files path stays as the fallback for a
+    machine without the launcher's record.
+    """
+    tail = os.path.join("Engine", "Binaries", "Win64", "UnrealEditor-Cmd.exe")
+    record = os.path.join(
+        os.environ.get("ProgramData", r"C:\ProgramData"),
+        "Epic", "UnrealEngineLauncher", "LauncherInstalled.dat")
+    try:
+        import json
+        with open(record, encoding="utf-8") as handle:
+            installs = json.load(handle).get("InstallationList") or []
+        for install in installs:
+            if str(install.get("AppName")) == "UE_5.8":
+                candidate = os.path.join(
+                    str(install.get("InstallLocation")), tail)
+                if os.path.isfile(candidate):
+                    return candidate
+    except Exception:
+        pass
+    return os.path.join(r"C:\Program Files\Epic Games\UE_5.8", tail)
+
+
+UNREAL = _unreal_editor()
 # A project of our own, made here and thrown away. Installing into one of the
 # developer's projects would prove less and leave more behind.
 #
@@ -125,6 +153,10 @@ def say(key, value):
 # tell the two apart.
 say("PRELOADED", "mlender_unreal" in sys.modules)
 say("DEPENDENCIES", hasattr(unreal, "InterchangeManager"))
+# The compiled module: the archive carries it prebuilt, and a plugin whose
+# Binaries did not travel still imports its Python and only falls back later,
+# in front of a user, with a warning. So the class is asked for by name here.
+say("MODULE", hasattr(unreal, "MLMotionPlayer"))
 # INSTALL.md tells the user to look for Tools > mLender, and that cannot be
 # checked here: a commandlet has no editor UI to hang a menu on, which the
 # plugin's own startup script says out loud rather than failing. What is
@@ -328,6 +360,11 @@ def verify_unreal(plugin_zip):
         check("its declared dependencies came with it",
               unreal_field(output, "DEPENDENCIES") == "True",
               unreal_field(output, "DEPENDENCIES"))
+        # The archive is only a release if the module it was built with
+        # loads from the unpacked folder on an engine that never compiled it.
+        check("and its compiled module loaded from the archive",
+              unreal_field(output, "MODULE") == "True",
+              unreal_field(output, "MODULE"))
         # False here is the right answer, not a failure: there is no editor
         # UI in a commandlet. What matters is that it answered at all.
         check("its menu registration ran and said which it got",

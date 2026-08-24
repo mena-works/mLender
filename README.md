@@ -269,6 +269,31 @@ on, and restart once more. The plugin needs Unreal's **Python Editor Script
 Plugin** and **Interchange Editor**; the `.uplugin` asks for both, so enabling
 mLender enables them.
 
+#### The compiled module
+
+The plugin is Python with one small C++ module, `Source/mLender`, holding the
+actor that plays a simulation's movers (see [Carry everything that
+moves](#carry-everything-that-moves)). The release archive ships it compiled
+for Unreal 5.8.1 on Windows in `Binaries/Win64`, so a user needs no compiler.
+
+A development link to the repository has no `Binaries` folder until you build
+one. Build it against any project that has the plugin enabled — a throwaway
+Blueprint project is enough — with the engine's own tool:
+
+```bat
+"<Engine>\Engine\Build\BatchFiles\Build.bat" UnrealEditor Win64 Development ^
+    -Project="<YourProject>\<YourProject>.uproject" -WaitMutex
+```
+
+That needs Visual Studio 2022 17.14+ or 2026 with the **Desktop development
+with C++** workload; the output lands in the plugin's `Binaries/` and
+`Intermediate/`, both ignored by git. Opening the editor on a plugin with
+`Source` and no `Binaries` gets the same offer to rebuild from Unreal itself.
+
+Without the module the plugin still loads and everything else works; the
+movers fall back to one Sequencer row each, which is the layout the module
+exists to replace.
+
 > The plugin folder in this repository is `mlender_unreal/` and the built one is
 > `mLender/`, because Unreal names a plugin after its `.uplugin` file. The
 > Python package inside is at `Content/Python/`, which is the only place Unreal
@@ -321,6 +346,7 @@ particle instancer           -> one StaticMeshActor per point, sharing the mesh
 particle system              -> anchor, and the points its instancers scatter on
 selection set, display layer -> Unreal Layer
 package Alembic cache        -> Geometry Cache on a GeometryCacheActor
+sampled motion (rigid sim)   -> one ML_MotionPlayer actor, keyed by a single float on the sequence
 ```
 
 The **Alembic cache is not an optional extra**. When the export caches, the
@@ -2615,6 +2641,29 @@ moving objects deformed**: every one of them was a rigid body, and all of them
 were paying for a container that cannot be instanced, cannot be ray traced,
 and has to stream 452 MB off disk to play back. As sampled transforms the same
 motion is a few megabytes of matrices on ordinary static meshes.
+
+**In Unreal the sampled movers do not become Sequencer rows.** A binding is a
+row in the Sequencer outliner, and measured on the same shot grown to 7562
+movers, one row each made a 349 MB Level Sequence the editor would not open
+at all; cutting it into 400-row sub-sequences let the master open, but every
+part was still a sequence a person could open by mistake and hang on. So the
+receiver takes the movers out of the sequence entirely:
+
+- their transforms go into one **`ML_Motion` data asset** under
+  `Content/mLender/Motion`, thinned to the samples that are not already on
+  the line between their neighbours;
+- one **`ML_MotionPlayer` actor** holds a binding per mover and writes every
+  world transform itself, interpolating between samples so a sub-frame render
+  gets motion blur;
+- the Level Sequence keys **one float**, `Frame`, on that actor. Opening the
+  shot costs one row, and scrubbing the ruler moves everything.
+
+The player is a C++ actor because that is what makes it update while you
+scrub in the editor, where a Blueprint does not tick; see
+[The compiled module](#the-compiled-module). Its visibility keys ride the
+same asset, so a piece that appears when it breaks still does. The old
+per-row layout remains as the fallback for a plugin loaded without its
+module, and the import says so in its warnings when that happens.
 
 There is a measurement behind "cannot be ray traced". A geometry cache's ray
 tracing geometry is sized from the frame it first saw, and a track whose

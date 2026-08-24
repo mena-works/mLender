@@ -38,7 +38,12 @@ import unreal
 from .constants import (
     ANIMATION_SEQUENCE_NAME,
     MESH_CONTENT_PATH,
+    MOTION_ASSET_NAME,
     MOTION_BINDINGS_PER_SEQUENCE,
+    MOTION_CONTENT_PATH,
+    MOTION_FRAME_PROPERTY,
+    MOTION_KEY_TOLERANCE,
+    MOTION_PLAYER_NAME,
     GENERATED_TAG,
     SEQUENCE_CONTENT_PATH,
 )
@@ -1197,10 +1202,302 @@ def _motion_parts(master, label, count, first, last, warnings):
     return parts
 
 
+def motion_player_available():
+    """Whether the plugin's compiled module is loaded.
+
+    The player and its asset are C++ classes. A plugin installed without its
+    Binaries folder, or on an engine it was not built for, has the Python and
+    not the module -- and then the movers fall back to one row each on the
+    sequence, which plays but is what the editor could not open above a few
+    hundred objects.
+    """
+    return (getattr(unreal, "MLMotionPlayer", None) is not None
+            and getattr(unreal, "MLMotionData", None) is not None)
+
+
+def _sparse(samples, tolerance=MOTION_KEY_TOLERANCE):
+    """The indices worth keeping, given that the player interpolates.
+
+    The rule of _keyable applied to a whole sample rather than one lane: a
+    sample within tolerance of both neighbours on every component already
+    lies on the line between them. Run ends are kept, so a piece that settles
+    and later moves again starts moving on the right frame.
+    """
+    keep = []
+    count = len(samples)
+    for index in range(count):
+        if index == 0 or index == count - 1:
+            keep.append(index)
+            continue
+        before = samples[index - 1]
+        after = samples[index + 1]
+        value = samples[index]
+        if all(abs(v - b) <= tolerance and abs(a - v) <= tolerance
+               for v, b, a in zip(value, before, after)):
+            continue
+        keep.append(index)
+    return keep
+
+
+def _visibility_switches(frame_numbers, visible):
+    """The frames at which visibility changes, with the value from then on."""
+    switch_frames = []
+    switch_values = []
+    previous = None
+    for frame, state in zip(frame_numbers, visible):
+        state = bool(state)
+        if previous is None or state != previous:
+            switch_frames.append(int(frame))
+            switch_values.append(state)
+            previous = state
+    return switch_frames, switch_values
+
+
+def _world_samples(track, frames, anchor, unreal_scale):
+    """Ten floats per frame: the world transform the player should write.
+
+    The same composition the sequence keys used -- each sample onto the
+    anchor that divides out the reference pose -- without the parent inverse,
+    because the player sets world transforms and Sequencer keys relative ones.
+    """
+    values = track.get("matrix") or []
+    samples = []
+    for index in range(len(frames)):
+        row = values[index * 12:(index + 1) * 12]
+        matrix = [
+            row[0], row[1], row[2], 0.0,
+            row[3], row[4], row[5], 0.0,
+            row[6], row[7], row[8], 0.0,
+            row[9], row[10], row[11], 1.0,
+        ]
+        location, rotation, scale = unreal_object_transform(
+            {"world_matrix": matrix}, unreal_scale
+        )
+        world = unreal.MathLibrary.compose_transforms(
+            anchor, unreal.Transform(location, rotation, scale)
+        )
+        translation = world.translation
+        quaternion = world.rotation
+        scale3d = world.scale3d
+        samples.append((
+            float(translation.x), float(translation.y), float(translation.z),
+            float(quaternion.x), float(quaternion.y), float(quaternion.z),
+            float(quaternion.w),
+            float(scale3d.x), float(scale3d.y), float(scale3d.z),
+        ))
+    return samples
+
+
+def _motion_asset(label, warnings):
+    """A fresh motion asset for this shot, or None with the reason said."""
+    name = safe_asset_name(
+        "{0}_{1}".format(MOTION_ASSET_NAME, label), "Motion")
+    path = "{0}/{1}".format(MOTION_CONTENT_PATH, name)
+    try:
+        if unreal.EditorAssetLibrary.does_asset_exist(path):
+            unreal.EditorAssetLibrary.delete_asset(path)
+    except Exception:
+        pass
+    try:
+        asset = unreal.MLMotionData.create_motion_asset(
+            MOTION_CONTENT_PATH, name)
+    except Exception as exc:
+        warnings.append(
+            "The motion asset could not be created ({0}), so the movers "
+            "arrive still.".format(exc)
+        )
+        return None
+    if asset is None:
+        warnings.append(
+            'Unreal returned no motion asset for "{0}", so the movers arrive '
+            "still.".format(path)
+        )
+    return asset
+
+
+def animate_motion_player(sequence, motion, actors_by_path, unreal_scale,
+                          ticks_per_frame, first, last, warnings,
+                          keyed_labels=None, package_label="Scene",
+                          result=None):
+    """Every rigid mover on one actor, and one float track on the sequence.
+
+    A binding is a row in the Sequencer outliner, and a shot of 7562 movers
+    as rows made a 349 MB asset the editor would not open. Cutting it into
+    parts kept the rows, in sub-sequences a person could still open by
+    mistake. So the movers leave the sequence: their transforms go into one
+    data asset, one player actor applies them, and the sequence keys a single
+    float -- the frame -- on that actor. Opening the shot costs one row.
+
+    The samples are the same world transforms the rows carried, anchored to
+    where Interchange placed each actor for the same measured reason (see
+    animate_sampled_motion), thinned to the samples that are not already on
+    the line between their neighbours. The player interpolates between them,
+    which is also what a sub-frame render needs for motion blur.
+    """
+    frames = list((motion or {}).get("frames") or [])
+    objects = (motion or {}).get("objects") or {}
+    if keyed_labels is None:
+        keyed_labels = set()
+    if result is None:
+        result = {}
+    if not frames or not objects:
+        return 0, 0
+
+    asset = _motion_asset(package_label, warnings)
+    if asset is None:
+        return 0, 0
+
+    frame_numbers = [int(round(float(frame))) for frame in frames]
+    ids = []
+    actors = []
+    missing = 0
+    keys = 0
+    for path, track in objects.items():
+        actor = actors_by_path.get(path)
+        if actor is None:
+            missing += 1
+            continue
+        values = track.get("matrix") or []
+        if len(values) < len(frames) * 12:
+            missing += 1
+            continue
+        # Where Interchange put it, read before anything of ours touches the
+        # actor, with the reference pose divided out so a sample composes
+        # straight onto it.
+        anchor = _anchor_transform(
+            actor.get_actor_transform(), track.get("reference"), unreal_scale)
+        if anchor is None:
+            missing += 1
+            continue
+        samples = _world_samples(track, frames, anchor, unreal_scale)
+        kept = _sparse(samples)
+        flat = []
+        for index in kept:
+            flat.extend(samples[index])
+        visible = track.get("visible") or []
+        if len(visible) >= len(frames):
+            switch_frames, switch_values = _visibility_switches(
+                frame_numbers, visible)
+        else:
+            switch_frames, switch_values = [], []
+        added = asset.add_track(
+            path, [frame_numbers[index] for index in kept], flat,
+            switch_frames, switch_values)
+        if added < 0:
+            missing += 1
+            continue
+        ids.append(path)
+        actors.append(actor)
+        keys += len(kept)
+
+    if missing:
+        warnings.append(
+            "{0} object(s) carry sampled motion but no actor in the level "
+            "matched them, so they arrive still.".format(missing)
+        )
+    if not ids:
+        return 0, 0
+
+    # The FBX pose is the reference frame's, so that is where the player
+    # rests: closing the sequence restores the property, and the actors
+    # return to exactly where Interchange put them.
+    reference = (motion or {}).get("reference_frame")
+    try:
+        reference = float(reference)
+    except (TypeError, ValueError):
+        reference = float(frames[0])
+
+    try:
+        player = unreal.EditorLevelLibrary.spawn_actor_from_class(
+            unreal.MLMotionPlayer, unreal.Vector(0.0, 0.0, 0.0))
+        player.set_actor_label(safe_asset_name(
+            "{0}_{1}".format(MOTION_PLAYER_NAME, package_label),
+            "MotionPlayer"))
+        player.tags = [GENERATED_TAG]
+        player.set_editor_property("motion", asset)
+        bound = player.bind_actors(ids, actors)
+        player.set_frame(reference)
+    except Exception as exc:
+        warnings.append(
+            "The motion player could not be placed ({0}), so the {1} "
+            "mover(s) arrive still.".format(exc, len(ids))
+        )
+        return 0, 0
+    try:
+        unreal.EditorAssetLibrary.save_loaded_asset(asset)
+    except Exception:
+        pass
+
+    # One binding, one track, two keys: the frame number itself, linear
+    # from the first tick to the last, so scrubbing the ruler reads the
+    # frame straight off it.
+    counted = 0
+    try:
+        binding = sequence.add_possessable(player)
+        track = binding.add_track(unreal.MovieSceneFloatTrack)
+        track.set_property_name_and_path(
+            MOTION_FRAME_PROPERTY, MOTION_FRAME_PROPERTY)
+        section = track.add_section()
+        section.set_range(first, last)
+        channels = section.get_all_channels()
+        if channels:
+            per_frame = float(ticks_per_frame) or 1.0
+            if _add_key(channels[0], first, float(first) / per_frame):
+                counted += 1
+            if _add_key(channels[0], last, float(last) / per_frame):
+                counted += 1
+    except Exception as exc:
+        warnings.append(
+            "The motion player is placed but the sequence could not key it "
+            "({0}); scrub it from the actor's Frame instead.".format(exc)
+        )
+
+    for actor in actors:
+        try:
+            keyed_labels.add(str(actor.get_actor_label()))
+        except Exception:
+            pass
+    result["motion_objects"] = bound
+    result["motion_keys"] = keys
+    try:
+        result["motion_player"] = str(player.get_actor_label())
+        result["motion_asset"] = str(asset.get_path_name())
+    except Exception:
+        pass
+    return (1 if counted else 0), counted + keys
+
+
+def animate_motion(sequence, motion, actors_by_path, unreal_scale,
+                   ticks_per_frame, first, last, warnings,
+                   keyed_labels=None, package_label="Scene", result=None):
+    """The movers, on the player when the module is there and as rows if not."""
+    if motion_player_available():
+        return animate_motion_player(
+            sequence, motion, actors_by_path, unreal_scale, ticks_per_frame,
+            first, last, warnings, keyed_labels, package_label, result)
+    count = len((motion or {}).get("objects") or {})
+    if count:
+        warnings.append(
+            "The plugin's compiled module is not loaded, so its {0} mover(s) "
+            "were keyed one row each on the sequence{1}. Install a build "
+            "with its Binaries folder, or build Source/mLender, to play them "
+            "from one actor instead.".format(
+                count,
+                ", split into parts" if count > MOTION_BINDINGS_PER_SEQUENCE
+                else "")
+        )
+    return animate_sampled_motion(
+        sequence, motion, actors_by_path, unreal_scale, ticks_per_frame,
+        first, last, warnings, keyed_labels, package_label)
+
+
 def animate_sampled_motion(sequence, motion, actors_by_path, unreal_scale,
                            ticks_per_frame, first, last, warnings,
                            keyed_labels=None, package_label="Scene"):
     """Transform and visibility keys for the movers that only move.
+
+    The fallback for a plugin whose compiled module is not loaded; see
+    animate_motion_player for the path a full install takes.
 
     This is the half of a simulation that does not belong in a geometry
     cache. It arrives as one transform per frame per object, which is what a
@@ -1353,6 +1650,8 @@ def import_animation(package_data, unreal_scale, metre_scale, power_scale,
     keys = 0
     # Filled by the sampled motion pass and read by the adopt pass below.
     sampled_labels = set()
+    # What the motion pass built, for the report: the player and its asset.
+    motion_result = {}
     try:
         skeletal = assign_skeletal_animation(warnings)
     except Exception as exc:
@@ -1375,12 +1674,13 @@ def import_animation(package_data, unreal_scale, metre_scale, power_scale,
             warnings),
         lambda: animate_geometry_caches(
             sequence, ticks_per_frame, first, last, warnings),
-        lambda: animate_sampled_motion(
+        lambda: animate_motion(
             sequence,
             motion if motion is not None
             else read_motion(package_folder, package_data, warnings),
             actors_by_path or {}, unreal_scale, ticks_per_frame, first, last,
-            warnings, sampled_labels, sequence_label(package_data)),
+            warnings, sampled_labels, sequence_label(package_data),
+            motion_result),
     )
     for builder in builders:
         try:
@@ -1443,4 +1743,8 @@ def import_animation(package_data, unreal_scale, metre_scale, power_scale,
         "track_count": tracks,
         "key_count": keys,
         "skeletal_animated": skeletal,
+        "motion_objects": motion_result.get("motion_objects", 0),
+        "motion_keys": motion_result.get("motion_keys", 0),
+        "motion_player": motion_result.get("motion_player", ""),
+        "motion_asset": motion_result.get("motion_asset", ""),
     }

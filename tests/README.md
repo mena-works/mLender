@@ -81,6 +81,20 @@ Birden fazla Blender sürümünde çalıştırmak sürüm uyum kodunu sınar; bu
 Bir `.uproject` gerekir; `PythonScriptPlugin` etkin minimal bir tanesi yeter.
 Test package'ı depodan import eder, kurulum gerektirmez.
 
+**Derlenmiş modül şart.** Test, mover'ların `ML_MotionPlayer` aktöründe
+olduğunu doğrular ve o sınıf `mlender_unreal/Source/mLender`'dan gelir.
+Projenin `Plugins/mLender`'ı depoya junction ise ve `Binaries/` yoksa önce
+derle (README, Unreal > Installing > The compiled module):
+
+```bash
+"D:\UE_5.8\Engine\Build\BatchFiles\Build.bat" UnrealEditor Win64 Development ^
+    -Project="<proje>.uproject" -WaitMutex
+```
+
+Modülsüz koşan test "the compiled module is loaded" satırında düşer; bu
+bilerek böyle, çünkü modülsüz plugin satır yoluna düşer ve o yol bu testin
+ölçtüğü şey değildir.
+
 **Çıktı stdout'ta değil** `<proje>/Saved/Logs/<proje>.log` içindedir; sonucu
 `MLPASS` / `MLFAIL` ile ara. Headless Unreal'da bu ayrıntı ilk saati yer.
 

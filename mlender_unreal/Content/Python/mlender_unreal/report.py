@@ -58,6 +58,8 @@ def build_report(result, engine_version=""):
         ("instancers", "instancer_count"),
         ("  instances", "instance_count"),
         ("alembic caches", "alembic_count"),
+        ("movers on the player", "motion_object_count"),
+        ("  samples kept", "motion_key_count"),
         ("layers", "layer_count"),
         ("sets", "set_count"),
         ("AS rigs", "as_rig_count"),

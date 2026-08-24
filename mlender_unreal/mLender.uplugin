@@ -1,9 +1,9 @@
 {
 	"FileVersion": 3,
 	"Version": 1,
-	"VersionName": "2.68.0",
+	"VersionName": "2.69.0",
 	"FriendlyName": "mLender",
-	"Description": "Receives a Maya scene package over LiveLink and rebuilds it in Unreal: meshes with their hierarchy, materials as Material Instances, lights and cine cameras.",
+	"Description": "Receives a Maya scene package over LiveLink and rebuilds it in Unreal: meshes with their hierarchy, materials as Material Instances, lights, cine cameras, and a simulation's rigid movers on a single motion player actor.",
 	"Category": "Importers",
 	"CreatedBy": "mena-works",
 	"CreatedByURL": "https://github.com/mena-works/mLender",
@@ -12,7 +12,13 @@
 	"CanContainContent": true,
 	"IsBetaVersion": false,
 	"Installed": false,
-	"Modules": [],
+	"Modules": [
+		{
+			"Name": "mLender",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	],
 	"Plugins": [
 		{
 			"Name": "PythonScriptPlugin",

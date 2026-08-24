@@ -10,7 +10,7 @@ Everything under "measured" was read off a live Unreal 5.8.1 session or solved
 from a probe, never guessed. tests/docs/unreal_calibration.md records how.
 """
 
-BUILD_VERSION = "2.68.0"
+BUILD_VERSION = "2.69.0"
 
 TOOL_NAME = "mLender"
 
@@ -121,6 +121,21 @@ ANIMATION_SEQUENCE_NAME = "ML_Sequence"
 # while the same data cut to 400 bindings and 21 MB opened at once. The
 # master then holds one row per part instead of one per object.
 MOTION_BINDINGS_PER_SEQUENCE = 400
+
+# Where the movers go when the plugin's compiled module is loaded: one data
+# asset holding every track and one player actor applying them, so the
+# sequence keys a single float rather than a row per object. The split above
+# is the fallback for a plugin installed without its Binaries folder.
+MOTION_CONTENT_PATH = CONTENT_ROOT + "/Motion"
+MOTION_ASSET_NAME = ASSET_PREFIX + "Motion"
+MOTION_PLAYER_NAME = ASSET_PREFIX + "MotionPlayer"
+# The player's property the sequence keys, spelled as the C++ declares it.
+# check_contracts.py holds the header to this name.
+MOTION_FRAME_PROPERTY = "Frame"
+# A sample within this of both its neighbours on every component is dropped
+# before it reaches the asset; the player interpolates across the gap. Shared
+# by centimetres and unit quaternion components, which is fine at this size.
+MOTION_KEY_TOLERANCE = 1.0e-4
 
 # The Movie Render Queue config that carries the scene AOVs.
 RENDER_CONFIG_NAME = "ML_RenderConfig"

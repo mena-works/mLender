@@ -364,6 +364,67 @@ def main():
         ),
     )
 
+    print("\nunreal compiled module")
+    # The movers play from a C++ actor, and the Python addresses it by class
+    # and property name across a reflection boundary nothing type-checks.
+    # Three files have to agree: the .uplugin that declares the module, the
+    # Build.cs that names it, and the header that spells the property the
+    # sequence keys.
+    modules = uplugin.get("Modules") or []
+    check(
+        "uplugin declares the mLender runtime module",
+        any(module.get("Name") == "mLender" and module.get("Type") == "Runtime"
+            for module in modules),
+        modules,
+    )
+    source = os.path.join(TOOL_ROOT, "mlender_unreal", "Source", "mLender")
+    check("the module has its Build.cs",
+          os.path.isfile(os.path.join(source, "mLender.Build.cs")), source)
+    header_path = os.path.join(source, "Public", "MLMotionPlayer.h")
+    header = ""
+    if os.path.isfile(header_path):
+        with open(header_path, encoding="utf-8") as handle:
+            header = handle.read()
+    frame = receiver.constants.MOTION_FRAME_PROPERTY
+    check(
+        "the sequence keys the property the player declares",
+        bool(re.search(r"\bfloat\s+{0}\b".format(re.escape(frame)), header)),
+        frame,
+    )
+    # Sequencer calls Set<Property> by name when it exists; that is what
+    # makes a scrub apply on the spot rather than a tick later.
+    check(
+        "and the player has the setter Sequencer looks for",
+        "void Set{0}(float".format(frame) in header,
+        frame,
+    )
+    # Python spells a UFUNCTION in snake_case. A rename on either side is a
+    # silent None at import time, so the two spellings are held together.
+    player_calls = ("BindActors", "SetFrame", "GetBoundCount")
+    check("the player exposes what the Python calls",
+          all("{0}(".format(name) in header for name in player_calls),
+          player_calls)
+    data_header = ""
+    data_path = os.path.join(source, "Public", "MLMotionData.h")
+    if os.path.isfile(data_path):
+        with open(data_path, encoding="utf-8") as handle:
+            data_header = handle.read()
+    check("and so does the motion asset",
+          all("{0}(".format(name) in data_header
+              for name in ("AddTrack", "CreateMotionAsset")),
+          data_path)
+    check("the receiver falls back when the module is absent",
+          callable(getattr(receiver.animation, "animate_sampled_motion", None))
+          and callable(getattr(receiver.animation,
+                               "motion_player_available", None)),
+          dir(receiver.animation))
+    with open(os.path.join(TOOL_ROOT, ".gitignore"), encoding="utf-8") as handle:
+        ignored = handle.read()
+    check("the build output is not committed",
+          "mlender_unreal/Binaries/" in ignored
+          and "mlender_unreal/Intermediate/" in ignored,
+          ignored.splitlines()[-4:])
+
     print("\nunreal measured conversions")
     # The Y/Z swap is the receiver's foundation and it is NOT the Blender rule.
     # Both directions are asserted, because a swap that also flipped a sign

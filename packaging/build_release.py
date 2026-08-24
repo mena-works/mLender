@@ -43,8 +43,14 @@ MODULE_NAME = "mLender"
 # Unreal keys the plugin on the .uplugin's basename, and a folder that
 # disagrees with it works but reads as a mistake in the plugin browser.
 UNREAL_PLUGIN_NAME = "mLender"
-# Everything Python leaves behind that must not travel to a user.
-IGNORED = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", ".DS_Store")
+# Everything Python and the C++ build leave behind that must not travel to a
+# user. The Binaries folder does travel: it is the compiled module, and a
+# plugin without it makes Unreal ask to rebuild on a machine that may have no
+# compiler. Intermediate and the .pdb are the build's scratch, not the build.
+IGNORED = shutil.ignore_patterns(
+    "__pycache__", "*.pyc", "*.pyo", ".DS_Store", "Intermediate", "*.pdb")
+# What the archive must carry for the module to load without a compiler.
+UNREAL_BINARY = os.path.join("Binaries", "Win64", "UnrealEditor-mLender.dll")
 
 
 def read_versions():
@@ -195,6 +201,12 @@ The plugin needs Unreal's **Python Editor Script Plugin** and
 **Interchange Editor**, both shipped with the engine; the .uplugin asks for
 them, so enabling mLender enables them too.
 
+The archive carries a compiled module (`Binaries/Win64`) built for Unreal
+5.8.1 on Windows. On another engine version Unreal offers to rebuild it,
+which needs Visual Studio with the C++ workload; without a rebuild the plugin
+still loads its Python, and a simulation's movers are keyed one row each on
+the sequence rather than played from one actor.
+
 Unreal import replaces the level's actors and this build does not save first.
 Save your level before sending.
 
@@ -243,6 +255,13 @@ def build_unreal_plugin(version):
     staging = os.path.join(DIST, "mLender-{0}-unreal".format(version))
     if os.path.isdir(staging):
         shutil.rmtree(staging)
+    binary = os.path.join(ROOT, UNREAL, UNREAL_BINARY)
+    if not os.path.isfile(binary):
+        raise SystemExit(
+            "The Unreal plugin has no compiled module at {0}. Build it first "
+            "(README, Unreal > Installing) so the archive loads on a machine "
+            "without Visual Studio.".format(binary)
+        )
     shutil.copytree(
         os.path.join(ROOT, UNREAL),
         os.path.join(staging, UNREAL_PLUGIN_NAME),

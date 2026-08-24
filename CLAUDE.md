@@ -2,8 +2,9 @@
 
 > Bu dosya bu repo için geçerlidir ve üst klasördeki (`Downloads/CLAUDE.md`)
 > Unreal Engine kurallarının **yerine geçer**. Bu repoda Unreal **alıcı bir
-> hedef**tir (`mlender_unreal`, editör Python'u); Blueprint, C++ modülü veya
-> it-is-unreal MCP ile ilgili hiçbir şey yoktur.
+> hedef**tir (`mlender_unreal`, editör Python'u + tek bir küçük C++ modülü);
+> Blueprint veya it-is-unreal MCP ile ilgili hiçbir şey yoktur. C++ modülünün
+> kuralları bölüm 6c'de.
 
 ---
 
@@ -200,6 +201,8 @@ ve birinden eksik bir modül testten geçer.
 - Klasör adı plugin adı **değildir**: Unreal plugin'i `.uplugin` dosyasının
   adından tanır. Depoda klasör `mlender_unreal`, dağıtımda `mLender`.
 - `unreal` modülü thread-safe **değildir** (bkz. bölüm 6).
+- Plugin bir C++ modülü taşır (`Source/mLender`); kuralları bölüm 6c'de.
+  Host testi derlenmiş modül ister: `Binaries/` yoksa önce derle.
 
 ### Importer (`mlender_importer/`)
 
@@ -394,6 +397,48 @@ benzetmeye çalışma.
 Mesh transform'ları **Interchange** taşıyor ve doğru taşıyor — `meshes.py`
 içinde bilinçli olarak hiç transform matematiği yok. Doğru olanın üstüne bir
 kez daha uygulamak, ışık enerjisinde bir kez yapılmış hatanın aynısıdır.
+
+### Rigid mover'lar Sequencer satırı DEĞİL
+
+Sequencer'da hareket eden her aktör bir satırdır ve 7 562 satırlık sequence
+editörde hiç açılmadı (ölçüldü, 349 MB). Bu yüzden örneklenen hareket
+`animation.py` içinde `animate_motion_player` ile **tek aktöre** gider:
+transformlar `ML_Motion` data asset'inde, `ML_MotionPlayer` aktörü onları
+kendisi yazar, sequence yalnız `Frame` float'ını keyler.
+
+- Mover'lara yeniden satır açma; `animate_sampled_motion` yalnız derlenmiş
+  modül yokken çalışan **fallback**'tir ve uyarı yazar.
+- Python'un C++'a verdiği değerler **dünya** transformlarıdır, parent inverse
+  yok; Sequencer'ın relative key'lediği eski yolla karıştırma.
+- Çapa (anchor) aynı: Interchange'in koyduğu poz üzerinden referans poz
+  bölünür. Bunu C++'a taşıma, tek otorite Python'daki `_anchor_transform`.
+
+---
+
+## 6c. C++ Modülü (`mlender_unreal/Source/mLender`)
+
+- Modül **yalnız** Python'un yapamadığını taşır: editörde scrub ederken
+  güncellenen bir aktör (`ShouldTickIfViewportsOnly`, `PostEditChangeProperty`)
+  ve Sequencer'ın isimle çağırdığı `SetFrame`. Import mantığını, eksen
+  dönüşümünü veya materyal işini C++'a taşıma.
+- Python ile C++ arasındaki isimler sözleşmedir ve tip denetimi yoktur:
+  `MOTION_FRAME_PROPERTY`, `SetFrame`, `BindActors`, `AddTrack`,
+  `CreateMotionAsset`. `check_contracts.py` başlığı bu isimlere karşı okur;
+  birini değiştirirken **ikisini birlikte** değiştir.
+- Python tarafı sınıfları `getattr(unreal, "MLMotionPlayer", None)` ile
+  yoklar ve yoksa satır yoluna düşer. Yeni bir C++ sınıfı eklerken aynı
+  korumayı koy; modülsüz kurulum (Binaries yok) geçerli bir kurulumdur.
+- Derleme: `Build.bat UnrealEditor Win64 Development -Project=<herhangi
+  bir .uproject>`; çıktı plugin'in `Binaries/` ve `Intermediate/`
+  klasörlerine düşer, ikisi de `.gitignore`'da. `build_release.py` `.dll`
+  yoksa **durur**; dağıtım derlenmiş modülü taşır.
+- Kurulu motor **Rocket** build'dir: `PCHUsage = UseExplicitOrSharedPCHs`
+  zorunlu, özel PCH reddedilir.
+- Modül `Runtime` tipindedir çünkü aktör PIE ve Movie Render Queue'da da
+  yaşar; editör-only kısımlar `#if WITH_EDITOR` altında.
+- Asset üretimi (`CreateMotionAsset`) `CreatePackage` + `NewObject` +
+  `AssetCreated` üçlüsüdür; Python'dan `DataAssetFactory` ile yapmaya
+  çalışma, sınıf parametresi Python'a açık değil.
 
 ### Işık/kamera ile obje dönüşümü AYRI
 
