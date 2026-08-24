@@ -8,6 +8,7 @@ nothing, and this receiver is as destructive as the Blender one.
 
 import json
 import os
+import time
 
 import unreal
 
@@ -93,6 +94,28 @@ def validate_schema_version(package_data):
     return version
 
 
+class _Phases(object):
+    """Where an import's time goes, phase by phase, for the report.
+
+    The Maya report has the same. A fourteen minute import names nothing;
+    measured on a shot, the guess was the FBX and the truth was deleting the
+    duplicate mesh assets, which only the phases could show.
+    """
+
+    def __init__(self):
+        self.started = time.time()
+        self.last = self.started
+        self.marks = []
+
+    def done(self, label):
+        now = time.time()
+        self.marks.append((label, now - self.last))
+        self.last = now
+
+    def total(self):
+        return time.time() - self.started
+
+
 def import_scene_package(
     package_folder,
     package_data=None,
@@ -109,6 +132,7 @@ def import_scene_package(
     fbx_path = resolve_fbx_path(package_folder, package_data)
 
     warnings = []
+    phases = _Phases()
     reset_material_cache()
     reset_texture_cache()
 
@@ -118,12 +142,14 @@ def import_scene_package(
     # something to add on top of it.
     clear_level(warnings, keep_lighting=keep_existing_lights)
     purge_generated_content(warnings)
+    phases.done("clearing the level and the previous send")
 
     before = {id(actor) for actor in level_actors()}
     import_fbx_scene(
         fbx_path, warnings, package_data.get("package_name") or "")
 
     actors = imported_mesh_actors(before)
+    phases.done("fbx import ({0} mesh actors)".format(len(actors)))
     if not actors:
         raise RuntimeError(
             "The FBX import produced no static mesh actors. Assets from a "
@@ -206,7 +232,10 @@ def import_scene_package(
             "maya_mesh": record.get("mesh_full_name") or record.get("mesh"),
             "materials": names,
         })
+    phases.done("records, sharing and materials ({0} meshes)".format(matched))
     discarded = discard_duplicate_meshes(duplicate_meshes, warnings)
+    phases.done("discarding {0} duplicate mesh assets".format(
+        len(duplicate_meshes)))
 
     if import_lights:
         light_result = build_lights(
@@ -224,6 +253,7 @@ def import_scene_package(
             )
         light_result = {"light_count": 0, "object_count": 0, "dome_count": 0}
     camera_result = import_cameras(package_data, unreal_scale, warnings)
+    phases.done("lights and cameras")
 
     # Everything the JSON rebuilds rather than the FBX. Order is dependency
     # order: locators first, because other kinds may hang under them, and the
@@ -282,6 +312,7 @@ def import_scene_package(
 
     # Sets name actors, so this runs after everything that creates them.
     set_result = import_sets(package_data, warnings)
+    phases.done("caches, locators, curves, volumes, particles, sets")
 
     # Last, and it has to be: every track binds an actor by its label, so
     # nothing that spawns one may run after this.
@@ -290,12 +321,15 @@ def import_scene_package(
         package_folder=package_folder, actors_by_path=actors_by_path,
         motion=motion,
     )
+    phases.done("animation ({0} movers on the player)".format(
+        animation_result.get("motion_objects", 0)))
 
     # Render passes are Movie Render Queue configuration, not level contents,
     # so this produces the config the user renders with rather than an actor.
     aov_result = build_render_config(
         package_data, animation_result.get("sequence_path"), warnings
     )
+    phases.done("render config")
 
     # Maya's own warnings first: they describe what never left the scene,
     # which is a different thing from what this build could not rebuild.
@@ -348,6 +382,8 @@ def import_scene_package(
         "layer_count": set_result["layer_count"],
         "assignments": assignments,
         "warnings": warnings,
+        "timings": list(phases.marks),
+        "total_seconds": phases.total(),
     }
     # Last: one file to hand over instead of scrolling the Output Log.
     try:

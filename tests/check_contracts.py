@@ -413,6 +413,13 @@ def main():
           all("{0}(".format(name) in data_header
               for name in ("AddTrack", "CreateMotionAsset")),
           data_path)
+    utility_path = os.path.join(source, "Public", "MLAssetUtility.h")
+    utility_header = ""
+    if os.path.isfile(utility_path):
+        with open(utility_path, encoding="utf-8") as handle:
+            utility_header = handle.read()
+    check("and the asset utility the discard calls",
+          "DiscardUnsavedAssets(" in utility_header, utility_path)
     check("the receiver falls back when the module is absent",
           callable(getattr(receiver.animation, "animate_sampled_motion", None))
           and callable(getattr(receiver.animation,

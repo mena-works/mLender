@@ -237,6 +237,22 @@ def discard_duplicate_meshes(duplicates, warnings):
             continue
     if not unique:
         return 0
+    # Through the compiled module when it is there. The editor's delete walks
+    # every object in memory looking for referencers, per asset -- measured,
+    # 7960 of them cost nine minutes of a fourteen minute import -- and the
+    # answer is known: nothing points at them, the components that did were
+    # just pointed elsewhere. The module moves them out of their packages,
+    # off the asset registry and onto the garbage list, measured instant.
+    utility = getattr(unreal, "MLAssetUtility", None)
+    if utility is not None:
+        try:
+            parked = int(utility.discard_unsaved_assets(list(unique.values())))
+        except Exception:
+            parked = 0
+        if parked == len(unique):
+            return parked
+    # Without the module, the editor's own delete, batched: measured 30 ms an
+    # asset against 190 ms one at a time.
     try:
         gone = bool(unreal.EditorAssetLibrary.delete_loaded_assets(
             list(unique.values())))
@@ -245,7 +261,7 @@ def discard_duplicate_meshes(duplicates, warnings):
     if not gone:
         warnings.append(
             "{0} duplicate mesh asset(s) were replaced by a shared one but "
-            "could not be deleted; they are unsaved and harmless, and go when "
+            "could not be removed; they are unsaved and harmless, and go when "
             "the editor closes.".format(len(unique))
         )
         return 0

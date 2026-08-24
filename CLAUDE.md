@@ -439,8 +439,14 @@ kendisi yazar, sequence yalnız `Frame` float'ını keyler.
   dönüşümünü veya materyal işini C++'a taşıma.
 - Python ile C++ arasındaki isimler sözleşmedir ve tip denetimi yoktur:
   `MOTION_FRAME_PROPERTY`, `SetFrame`, `BindActors`, `AddTrack`,
-  `CreateMotionAsset`. `check_contracts.py` başlığı bu isimlere karşı okur;
-  birini değiştirirken **ikisini birlikte** değiştir.
+  `CreateMotionAsset`, `DiscardUnsavedAssets`. `check_contracts.py` başlığı
+  bu isimlere karşı okur; birini değiştirirken **ikisini birlikte** değiştir.
+- Kaydedilmemiş asset'i atmak için `EditorAssetLibrary.delete_*` kullanma:
+  asset başına referans taraması yapar, 7 960 kopya **9,5 dk** sürdü.
+  `MLAssetUtility.DiscardUnsavedAssets` (rename → transient + registry'den
+  düşürme + garbage) ölçüldü anlık. Python'dan `rename` tek başına yetmez,
+  registry'de hayalet kayıt bırakır; `unreal.get_transient_package` diye
+  bir fonksiyon da yok (`find_object(None, "/Engine/Transient")` var).
 - Python tarafı sınıfları `getattr(unreal, "MLMotionPlayer", None)` ile
   yoklar ve yoksa satır yoluna düşer. Yeni bir C++ sınıfı eklerken aynı
   korumayı koy; modülsüz kurulum (Binaries yok) geçerli bir kurulumdur.

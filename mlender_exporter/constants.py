@@ -13,7 +13,7 @@ from __future__ import absolute_import
 # here rather than in __init__ so package.py can reach it without
 # importing the package root, which would be circular. The importer keeps
 # its own in constants.py for the same reason.
-BUILD_VERSION = "2.73.0"
+BUILD_VERSION = "2.74.0"
 
 TOOL_NAME = "mLender"
 WINDOW_NAME = "mLenderWindow"
@@ -940,6 +940,14 @@ BAKE_FILE_FORMAT = "png"
 BAKE_BACKGROUND_MODE = "shader"
 BAKE_SEMANTIC = "baked_procedural"
 DEFAULT_BAKE_RESOLUTION = 1024
+
+# Solvers that compute the shot as the timeline plays rather than reading it
+# back from a cache. Sampling one is sampling a replay, and a replay is not
+# reproducible: measured on a Bullet shot of 12 028 meshes, the first walk
+# after opening the scene differed from the second on 2044 objects by up to
+# 108 units, and the second and third agreed exactly. The export says so
+# when it finds one, because nothing else will.
+LIVE_SOLVER_NODE_TYPES = ("bulletSolverShape",)
 
 # Points, normals and UVs are rounded to this before they go into a mesh's
 # geometry key, so two copies of a block whose last float digit disagrees

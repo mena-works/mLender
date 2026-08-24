@@ -2702,6 +2702,16 @@ With the split above, most shots have nothing in the cache to lose it for.
 Sampled motion carries **visibility** too, keyed per frame, because a piece
 that is on screen before it breaks reads as a piece that never moved.
 
+**A live simulation is sampled as a replay, and a replay is not
+reproducible.** Measured on a Bullet shot of 12 028 meshes: the first walk
+through the timeline after opening the scene differed from the second on
+2044 objects, by up to 108 units, and the second and third walks agreed
+exactly. Maya itself behaves this way — the artist who has scrubbed the shot
+sees one result and a fresh batch session sees another — so the exporter
+cannot promise the same package twice from a live solver. It says so in the
+report when it finds one. Bake the simulation to keys, or cache it, for an
+export that comes out the same every time.
+
 The sampling reads each mover through the OpenMaya API rather than a `cmds`
 call per object per frame — a shot of 7468 movers over 520 frames is 3.9
 million reads, and a command round trip for each was a third of the export.
