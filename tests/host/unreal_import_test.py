@@ -2423,6 +2423,31 @@ def main():
     pipelines = mlender_unreal.meshes.keep_source_normals([])
     check("the import stack was copied so the normals can be kept",
           len(pipelines) == 2, pipelines)
+
+    # The import scale has to reach these copies. Everything else in the
+    # package is placed from the JSON and multiplied by position_scale, but
+    # the meshes come through Interchange, so a scale that stopped here would
+    # move the motion and the cameras while the geometry stayed its file size.
+    # Asked for twice on purpose: the copy outlives a send, so a scale written
+    # only when it is created would be the previous send's scale.
+    scales = []
+    for wanted in (10.0, 1.0):
+        mlender_unreal.meshes.keep_source_normals([], wanted)
+        seen = None
+        for path in pipelines:
+            asset = unreal.load_asset(path)
+            if asset is None:
+                continue
+            try:
+                seen = asset.get_editor_property(
+                    "import_offset_uniform_scale")
+            except Exception:
+                continue
+        scales.append((wanted, seen))
+    check("the import scale reaches the pipeline copies",
+          scales[0][1] == 10.0, scales)
+    check("and a later send overwrites it rather than keeping the old one",
+          scales[1][1] == 1.0, scales)
     kept = None
     for path in pipelines:
         asset = unreal.load_asset(path)

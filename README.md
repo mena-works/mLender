@@ -405,7 +405,28 @@ produced:
 | `(0, 40, 0)` | `(0, 0, 40)` |
 | `(0, 0, 50)` | `(0, 50, 0)` |
 
-One Maya centimetre is one Unreal unit. Lights and cameras ride the JSON rather
+One Maya centimetre is one Unreal unit.
+
+**Import Scale** multiplies that. It reaches both halves of a send, which is
+the only way it can be right: everything placed from the JSON — object motion,
+cameras, locators, curves, sets — is multiplied by it directly, while the
+meshes come through Interchange and are scaled by handing the same number to
+that importer as its global offset. A scale that reached only one half would
+tear a scene in two, geometry at its file size and everything else moved.
+
+Measured on a shot of 11,008 meshes at `Import Scale = 10`: a ground plane of
+2000 × 2000 × 4 units at `(0, 0, -2)` arrived as 20000 × 20000 × 40 at
+`(0, 0, -20)` — a ratio of exactly 10 on all three axes, so the offset is
+applied once rather than to the geometry and the actor both. All 7,467 moving
+objects started the shot on the spot the FBX placed them, which is what says
+the two halves agree.
+
+Scaling a shot **in the level** is not an alternative for anything that moves:
+the motion player writes the world transform of every mover on every frame, so
+an actor scaled by hand is put back on the next one. The scale has to come from
+the import.
+
+Lights and cameras ride the JSON rather
 than the FBX, so their conversion is this tool's own; a Maya light aims down
 local −Z and an Unreal light down local +X, and the resulting basis was checked
 against the engine to **1e-8** on all three axes.
