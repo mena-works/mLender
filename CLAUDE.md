@@ -830,6 +830,18 @@ Kullanıcının elle doğrulaması gereken adımlar:
 - ❌ Mesh'i olmayan bir mesh actor'ünde materyal atamasını sessizce atlama;
   daha önce gönderi barındıran content root'a yeniden import bunu üretiyor ve
   "2 mesh, 0 materyal, 0 uyarı" diye görünüyordu
+- ❌ Unattended bir commandlet'te Python'dan yazılan transform'un paketi
+  **dirty** işaretlediğini sanma; işaretlemiyor, ve dirty'ye bağlı her kaydetme
+  sessizce hiçbir şey yapmıyor. Ölçüldü: on aktörün scale'i bellekte 1.0→10.0
+  okunuyor, `save_map` **False** dönüyor, `save_dirty_packages` hata vermiyor ve
+  dosyanın zaman damgası hiç kıpırdamıyor — yeniden yüklenince 13 aktörün
+  **0'ı** ölçekli. `EditorAssetLibrary.save_loaded_asset(world, False)` yazıyor.
+  Kaydettim deme, geri yükleyip oku
+- ❌ Başka bir dünya açıkken `save_directory("/Game", ...)` ile toplu kaydetme;
+  açık olmayan level'ı da yeniden yazıyor ve **streaming level referansı**
+  hayatta kalmıyor. Ölçüldü: environment açıkken yapılan toplu kaydetme
+  şotun sublevel'ını düşürdü, `get_levels` 2 iken 1 oldu. Yalnız açık dünyayı,
+  adıyla kaydet
 - ❌ Unreal'de bir actor'ü yalnız `set_is_temporarily_hidden_in_editor` ile
   gizleme; adı gibi **geçici**, level yeniden açılınca actor geri geliyor.
   Kalıcı olan editör bayrağı Python'a açık değil; gizli objeleri bir **Layer**'a
