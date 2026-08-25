@@ -23,7 +23,7 @@ from .constants import (
     PIPELINE_CONTENT_PATH,
     SCENE_IMPORT_PIPELINES,
 )
-from .utils import decoded_name, fbx_style_name, safe_asset_name
+from .utils import decoded_name, fbx_style_name, safe_asset_name, scalar
 
 
 def resolve_fbx_path(package_folder, package_data):
@@ -82,8 +82,17 @@ def send_content_path(package_name):
     return base
 
 
-def keep_source_normals(warnings):
+def keep_source_normals(warnings, import_scale=1.0):
     """Copies of the scene import pipelines that keep the file's normals.
+
+    They also carry the import scale. Everything else in this package is
+    placed from the JSON and multiplied by ``position_scale``, but the meshes
+    come through Interchange and nothing here touches their transforms -- so
+    an import scale that did not reach these pipelines would move the motion,
+    the cameras and the locators while leaving the geometry where it was.
+    Interchange's own knob is a global offset transform, and the scene
+    pipeline reads it (InterchangeGenericScenesPipeline.cpp:234), so the
+    actors move with their meshes.
 
     Interchange recomputes normals by default, from the file's edge smoothing
     rather than from its normals. Maya writes both, and they disagree:
@@ -100,6 +109,8 @@ def keep_source_normals(warnings):
     the import proceeds the way it always did.
     """
     copies = []
+    scale = max(scalar(import_scale, 1.0), 1e-6)
+    scaled = 0
     for source in SCENE_IMPORT_PIPELINES:
         name = source.rsplit(".", 1)[-1]
         target = "{0}/ML_{1}".format(PIPELINE_CONTENT_PATH, name)
@@ -128,7 +139,22 @@ def keep_source_normals(warnings):
                     # refused, and the refusal is silent enough to look like
                     # it worked.
                     common.set_editor_property("recompute_normals", False)
-                unreal.EditorAssetLibrary.save_asset(target)
+            else:
+                copy = unreal.load_asset(target)
+            # Written on every send, not only when the copy is created: the
+            # copy is kept between sends, so a scale set once would be
+            # whatever the previous send asked for.
+            if copy is not None:
+                try:
+                    copy.set_editor_property(
+                        "import_offset_uniform_scale", scale)
+                    scaled += 1
+                except Exception:
+                    # Only one pipeline in the stack carries the offset; the
+                    # other refusing it is the normal case, and the warning
+                    # below covers the case where none of them took it.
+                    pass
+            unreal.EditorAssetLibrary.save_asset(target)
             copies.append("{0}.ML_{1}".format(target, name))
         except Exception as exc:
             warnings.append(
@@ -137,10 +163,17 @@ def keep_source_normals(warnings):
                 "faceted.".format(exc)
             )
             return []
+    if abs(scale - 1.0) > 1e-6 and not scaled:
+        warnings.append(
+            "An import scale of {0} was asked for, but no import pipeline "
+            "accepted it, so the meshes arrived at their file size while "
+            "everything placed from the JSON was scaled. Positions and "
+            "geometry disagree by that factor.".format(scale)
+        )
     return copies
 
 
-def import_fbx_scene(fbx_path, warnings, package_name=""):
+def import_fbx_scene(fbx_path, warnings, package_name="", import_scale=1.0):
     """Import the FBX into the open level, hierarchy and all.
 
     Uses Interchange's scene import, which was measured to spawn one
@@ -153,7 +186,7 @@ def import_fbx_scene(fbx_path, warnings, package_name=""):
     source = manager.create_source_data(fbx_path)
     parameters = unreal.ImportAssetParameters()
     parameters.is_automated = True
-    overrides = keep_source_normals(warnings)
+    overrides = keep_source_normals(warnings, import_scale)
     if overrides:
         parameters.override_pipelines = [
             unreal.SoftObjectPath(path) for path in overrides]

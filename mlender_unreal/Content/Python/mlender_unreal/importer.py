@@ -146,7 +146,8 @@ def import_scene_package(
 
     before = {id(actor) for actor in level_actors()}
     import_fbx_scene(
-        fbx_path, warnings, package_data.get("package_name") or "")
+        fbx_path, warnings, package_data.get("package_name") or "",
+        import_scale)
 
     actors = imported_mesh_actors(before)
     phases.done("fbx import ({0} mesh actors)".format(len(actors)))
