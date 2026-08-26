@@ -36,6 +36,9 @@ public class mLender : ModuleRules
 				"Slate",
 				"SlateCore",
 				"WorkspaceMenuStructure",
+				// The strip prints the plugin's own VersionName, which
+				// IPluginManager owns.
+				"Projects",
 				// The buttons run one line of Python each; the actions
 				// themselves are in actions.py so the menu can call the
 				// same ones.
