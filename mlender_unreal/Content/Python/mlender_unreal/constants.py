@@ -83,6 +83,21 @@ SCENE_IMPORT_PIPELINES = (
 # came back on the next open.
 HIDDEN_LAYER_NAME = "mLender Hidden"
 
+# What a package can be filtered down to before it is built. The names come
+# from the package itself -- Maya's groups, its selection sets and its display
+# layers -- so the receiver never invents a category the sender did not send.
+FILTER_KINDS = ("none", "groups", "sets", "layers")
+
+# The settings file, under <project>/Saved/mLender/. Kept out of the engine's
+# config ini on purpose: settings surviving a restart is certain, and whether
+# a Python-declared class reaches Project Settings is not.
+SETTINGS_FILE_NAME = "settings.json"
+
+# How many warnings a menu or a panel shows before pointing at the report.
+# Matches the Blender panel's cap; a real shot produced sixty-plus and the
+# Output Log carried every one of them on its own line.
+MENU_WARNING_LIMIT = 25
+
 # How large a geometry cache may be before keeping the whole thing resident
 # stops being a kindness. Under this the streaming window is widened to the
 # shot so playback stops jumping; past it the size is reported instead.

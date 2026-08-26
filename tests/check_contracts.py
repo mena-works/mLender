@@ -204,7 +204,7 @@ def _install_unreal_stub():
     )
     unreal.TextureCompressionSettings = _Enum("TC_NORMALMAP", "TC_MASKS")
     unreal.CameraFocusMethod = _Enum("DISABLE", "MANUAL")
-    unreal.MultiBlockType = _Enum("MENU_ENTRY")
+    unreal.MultiBlockType = _Enum("MENU_ENTRY", "HEADING")
     unreal.ToolMenuStringCommandType = _Enum("PYTHON")
 
     # Actor and component classes only need to be distinct objects: the
@@ -215,7 +215,7 @@ def _install_unreal_stub():
         "Material", "MaterialInstanceConstant", "Texture", "Texture2D",
         "MaterialFactoryNew", "MaterialInstanceConstantFactoryNew",
         "AssetImportTask", "ImportAssetParameters", "EditorActorSubsystem",
-        "StaticMeshEditorSubsystem", "ToolMenuEntry",
+        "StaticMeshEditorSubsystem", "ToolMenuEntry", "ToolMenu",
     ):
         setattr(unreal, name, type(name, (object,), {}))
 
@@ -893,6 +893,89 @@ def main():
         len(wire) < 1024,
         "{0} bytes".format(len(wire)),
     )
+
+    print("\nunreal receiver settings")
+    us = receiver.settings
+    check("every default is described",
+          set(us.SETTING_DEFAULTS) == set(us.SETTING_ORDER),
+          sorted(set(us.SETTING_DEFAULTS) ^ set(us.SETTING_ORDER)))
+    check("values() answers for every key",
+          set(us.values()) == set(us.SETTING_DEFAULTS),
+          sorted(set(us.values()) ^ set(us.SETTING_DEFAULTS)))
+    us.reset()
+    check("update round-trips a float",
+          us.update(import_scale=10.0)["import_scale"] == 10.0,
+          us.values()["import_scale"])
+    # None means "not said". A menu that sets one value at a time must not
+    # reset the rest -- the rule the exporter's presets already follow.
+    us.update(power_scale=None)
+    check("None leaves a setting alone",
+          us.values()["power_scale"] == 1.0, us.values()["power_scale"])
+    check("a string becomes the float it looks like",
+          us.update(import_scale="2.5")["import_scale"] == 2.5,
+          us.values()["import_scale"])
+    check("an unparseable number falls back to the default",
+          us.update(import_scale="abc")["import_scale"] == 1.0,
+          us.values()["import_scale"])
+    check("a filter kind outside the list is refused",
+          us.update(filter_kind="sideways")["filter_kind"] == "none",
+          us.values()["filter_kind"])
+    check("a comma separated list becomes a list",
+          us.update(filter_names="a, b ,, c")["filter_names"] == ["a", "b", "c"],
+          us.values()["filter_names"])
+    before = us.values()["import_lights"]
+    check("toggle flips and reports what it became",
+          us.toggle("import_lights") == (not before),
+          us.values()["import_lights"])
+    us.toggle("import_lights")
+    try:
+        us.toggle("import_scale")
+        check("toggling a number is refused", False, "no error raised")
+    except ValueError:
+        check("toggling a number is refused", True)
+    # The state has to be legible: a menu on this build cannot draw a tick,
+    # so the label is the only place it can say what it is set to.
+    check("a switch renders as ON or OFF",
+          us.label_for("import_lights").endswith(("ON", "OFF")),
+          us.label_for("import_lights"))
+    check("an unset camera reads as any rather than as blank",
+          us.label_for("active_camera").endswith("any"),
+          us.label_for("active_camera"))
+    check("describe covers every setting",
+          len(us.describe()) == len(us.SETTING_ORDER), len(us.describe()))
+    us.reset()
+    check("reset returns the defaults", us.values() == us.SETTING_DEFAULTS)
+    # Nowhere to write is a quiet no-op, not a crash -- the same shape as a
+    # read-only package folder refusing the export report.
+    check("no project means no settings file, and no error",
+          us.settings_path() == "", us.settings_path())
+
+    print("\nunreal receiver without a compiled module")
+    # A plugin with no Binaries is a valid installation. MLMotionPlayer is
+    # already probed with getattr for exactly this reason; the settings
+    # object has to follow the same rule or the menu dies on a machine that
+    # never built the module.
+    import unreal as _stub_unreal
+    check("no MLSettings class in this stub",
+          getattr(_stub_unreal, "MLSettings", None) is None)
+    check("settings still answer in full",
+          set(us.values()) == set(us.SETTING_DEFAULTS))
+    check("settings_object() is None rather than an error",
+          us.settings_object() is None)
+    kwargs = us.import_kwargs()
+    check("import_kwargs names only settings",
+          set(kwargs) <= set(us.SETTING_DEFAULTS),
+          sorted(set(kwargs) - set(us.SETTING_DEFAULTS)))
+    # The settings list runs a phase ahead of the importer on purpose, and a
+    # keyword the importer does not take does not fail politely: it drops the
+    # whole import, which is what a stray preset key once did to an export.
+    import inspect as _inspect
+    accepted = set(
+        _inspect.signature(receiver.import_scene_package).parameters
+    )
+    filtered = receiver.livelink.accepted_kwargs(kwargs)
+    check("livelink passes only what this importer takes",
+          set(filtered) <= accepted, sorted(set(filtered) - accepted))
 
     print("\nanimation range")
     parse = exporter.ui.parse_frame_range

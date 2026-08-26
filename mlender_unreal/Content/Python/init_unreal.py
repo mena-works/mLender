@@ -15,12 +15,17 @@ import unreal
 try:
     import mlender_unreal
 
+    # Before the menu, because the menu's labels carry the settings' values:
+    # drawing first would state the defaults and then quietly disagree with
+    # the file.
+    mlender_unreal.settings.load()
+
     # Reported from the return value rather than announced: there is no menu
     # to hang anything on in a headless commandlet, and a startup line naming
     # a menu that is not there sends the reader looking for it.
     if mlender_unreal.register():
         unreal.log(
-            "mLender {0} loaded. Tools > mLender > Start LiveLink".format(
+            "mLender {0} loaded. Tools > mLender".format(
                 mlender_unreal.BUILD_VERSION
             )
         )

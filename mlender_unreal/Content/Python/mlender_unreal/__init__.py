@@ -34,6 +34,7 @@ from .constants import (  # noqa: F401
 SUBMODULES = (
     "constants",
     "utils",
+    "settings",
     "transforms",
     "objects",
     "images",
@@ -62,6 +63,7 @@ SUBMODULES = (
 
 from . import constants  # noqa: E402,F401
 from . import utils  # noqa: E402,F401
+from . import settings  # noqa: E402,F401
 from . import transforms  # noqa: E402,F401
 from . import objects  # noqa: E402,F401
 from . import images  # noqa: E402,F401
@@ -103,6 +105,7 @@ from .ui import print_status, register, unregister  # noqa: E402
 __all__ = [
     "BUILD_VERSION",
     "configure",
+    "settings",
     "toggle_import_lights",
     "toggle_keep_existing_lights",
     "get_status",

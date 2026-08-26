@@ -10,6 +10,7 @@ The Blender receiver uses bpy.app.timers for the same job. The hook differs,
 the rule does not.
 """
 
+import inspect
 import json
 import queue
 import socket
@@ -19,6 +20,7 @@ import unreal
 
 from .constants import (
     LIVELINK_HOST,
+    MENU_WARNING_LIMIT,
     LIVELINK_PACKAGE_EVENT,
     LIVELINK_POSE_EVENT,
     LIVELINK_PORT,
@@ -27,6 +29,7 @@ from .constants import (
     MAX_MESSAGE_BYTES,
     SOCKET_POLL_SECONDS,
 )
+from . import settings
 from .importer import import_scene_package
 
 
@@ -36,14 +39,38 @@ _stop_event = None
 _tick_handle = None
 _messages = queue.Queue()
 _status = "Listener is stopped."
-_settings = {
-    "import_scale": 1.0,
-    "power_scale": 1.0,
-    # Receiving side choices, so they belong here rather than in the package:
-    # what a level already holds is not something Maya can know about.
-    "keep_existing_lights": False,
-    "import_lights": True,
-}
+_last_result = None
+# What redraws a menu whose labels carry the settings' state. livelink is
+# earlier in the dependency order than ui, so it cannot import it; ui hands
+# its refresh in instead. A direct import here would make the reload lists
+# reload in a cycle.
+_state_hook = None
+
+
+def set_state_hook(callback):
+    """Register what to call when a setting changes. ui.register installs it."""
+    global _state_hook
+    _state_hook = callback
+
+
+def _state_changed():
+    if _state_hook is None:
+        return
+    try:
+        _state_hook()
+    except Exception as exc:
+        unreal.log_warning("mLender: the menu could not redraw: {0}".format(exc))
+
+
+def last_result():
+    """The last import's result dict, or None. Read by the panel and menu."""
+    return _last_result
+
+
+def remember_result(result):
+    global _last_result
+    _last_result = result
+    return result
 
 
 def get_status():
@@ -55,44 +82,45 @@ def is_running():
     return _server is not None
 
 
-def configure(import_scale=None, power_scale=None,
-              keep_existing_lights=None, import_lights=None):
+def configure(**kwargs):
     """Set what the next package does when it lands.
 
-    Named rather than positional, and every argument optional, because these
-    are set one at a time from a menu entry.
+    Kept as the public name it has always had, and still in ``__all__`` and in
+    the README, but the values now live in :mod:`settings` so that a menu, a
+    panel and a script all read one place and so that they survive a restart.
+    Every argument is optional and named, because these are set one at a time.
     """
-    if import_scale is not None:
-        _settings["import_scale"] = float(import_scale)
-    if power_scale is not None:
-        _settings["power_scale"] = float(power_scale)
-    if keep_existing_lights is not None:
-        _settings["keep_existing_lights"] = bool(keep_existing_lights)
-    if import_lights is not None:
-        _settings["import_lights"] = bool(import_lights)
-    return dict(_settings)
+    return settings.update(**kwargs)
 
 
 def toggle_keep_existing_lights():
-    """Flip it and say which way it went, since a menu shows no state."""
-    state = not _settings["keep_existing_lights"]
-    configure(keep_existing_lights=state)
+    """Flip it and say which way it went."""
+    state = settings.toggle("keep_existing_lights")
     unreal.log(
         "mLender: existing lighting will be {0} on the next import.".format(
             "kept" if state else "cleared with everything else"
         )
     )
+    _state_changed()
     return state
 
 
 def toggle_import_lights():
-    state = not _settings["import_lights"]
-    configure(import_lights=state)
+    state = settings.toggle("import_lights")
     unreal.log(
         "mLender: the package's lights will {0} on the next import.".format(
             "be built" if state else "not be built"
         )
     )
+    _state_changed()
+    return state
+
+
+def toggle(key):
+    """Flip any switch and redraw whatever shows it."""
+    state = settings.toggle(key)
+    unreal.log("mLender: {0}".format(settings.label_for(key)))
+    _state_changed()
     return state
 
 
@@ -230,14 +258,11 @@ def process_messages():
             )
             unreal.log_warning("mLender: {0}".format(_status))
             return
-        result = import_scene_package(
+        result = remember_result(import_scene_package(
             payload.get("package_folder") or "",
             package_data=payload.get("package_json"),
-            import_scale=_settings["import_scale"],
-            keep_existing_lights=_settings["keep_existing_lights"],
-            import_lights=_settings["import_lights"],
-            power_scale=_settings["power_scale"],
-        )
+            **accepted_kwargs(settings.import_kwargs())
+        ))
         _status = (
             "Imported {0} mesh(es), {1} material(s), {2} light(s), "
             "{3} camera(s)."
@@ -248,11 +273,62 @@ def process_messages():
             result["camera_count"],
         )
         unreal.log("mLender: {0}".format(_status))
-        for warning in result.get("warnings") or []:
-            unreal.log_warning("mLender warning: {0}".format(warning))
+        report_warnings(result)
+        _state_changed()
     except Exception as exc:
         _status = "Import failed: {0}".format(exc)
         unreal.log_error("mLender: {0}".format(_status))
+
+
+def accepted_kwargs(candidates):
+    """Only the settings this build's importer actually takes.
+
+    The settings list grows a phase ahead of the importer, and a keyword the
+    receiver does not take does not raise politely -- it drops the whole
+    import. The exporter learned the same thing about preset keys.
+    """
+    try:
+        allowed = set(
+            inspect.signature(import_scene_package).parameters
+        )
+    except (TypeError, ValueError):
+        return dict(candidates)
+    dropped = sorted(key for key in candidates if key not in allowed)
+    if dropped:
+        unreal.log_warning(
+            "mLender: this build's importer does not take {0}; "
+            "those settings had no effect.".format(", ".join(dropped))
+        )
+    return dict(
+        (key, value) for key, value in candidates.items() if key in allowed
+    )
+
+
+def report_warnings(result):
+    """Say how many, show the first few, and point at the file with the rest.
+
+    One warning per log line put sixty-plus lines in the Output Log on a real
+    shot, which is how a warning stops being read. The report already holds
+    every one of them, and until now nothing ever said where it was.
+    """
+    warnings = list(result.get("warnings") or [])
+    if not warnings:
+        return 0
+    shown = warnings[:MENU_WARNING_LIMIT]
+    unreal.log_warning(
+        "mLender: {0} warning(s) from this import; the first {1} follow."
+        .format(len(warnings), len(shown))
+    )
+    for warning in shown:
+        unreal.log_warning("  {0}".format(warning))
+    report = result.get("report_path") or ""
+    if len(warnings) > len(shown):
+        unreal.log_warning(
+            "  ... and {0} more.".format(len(warnings) - len(shown))
+        )
+    if report:
+        unreal.log_warning("  All of them are in {0}".format(report))
+    return len(warnings)
 
 
 def validate_message(message):
