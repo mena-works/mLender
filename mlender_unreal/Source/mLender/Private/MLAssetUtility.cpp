@@ -20,12 +20,14 @@ int32 UMLAssetUtility::DiscardUnsavedAssets(const TArray<UObject*>& Assets)
 		// registered under; afterwards there is nothing to match.
 		FAssetRegistryModule::AssetDeleted(Asset);
 
-		// No redirector, no transaction, no loader reset: the asset was made
-		// this session and never saved, so there is nothing on disk to point
-		// at it and nothing to undo into.
+		// No redirector, no transaction: the asset was made this session and
+		// never saved, so there is nothing on disk to point at it and nothing
+		// to undo into. It never had a package linker either, which is why no
+		// loader flag is needed -- 5.8 deprecated the old no-reset flag with
+		// exactly that meaning.
 		const bool bMoved = Asset->Rename(
 			nullptr, Transient,
-			REN_DontCreateRedirectors | REN_NonTransactional | REN_ForceNoResetLoaders);
+			REN_DontCreateRedirectors | REN_NonTransactional);
 		if (!bMoved)
 		{
 			continue;
