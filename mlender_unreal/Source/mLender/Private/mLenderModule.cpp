@@ -34,7 +34,7 @@ public:
 		// phase, before the editor's tab manager exists. Registering there
 		// reports no error and produces no tab, which is the same failure
 		// mode as a menu registered against a path that is not there.
-		FCoreDelegates::OnPostEngineInit.AddRaw(
+		FCoreDelegates::GetOnPostEngineInit().AddRaw(
 			this, &FMLenderModule::RegisterPanelTab);
 #endif
 	}
@@ -42,7 +42,7 @@ public:
 	virtual void ShutdownModule() override
 	{
 #if WITH_EDITOR
-		FCoreDelegates::OnPostEngineInit.RemoveAll(this);
+		FCoreDelegates::GetOnPostEngineInit().RemoveAll(this);
 		if (FSlateApplication::IsInitialized())
 		{
 			FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(MLPanelTabName);
