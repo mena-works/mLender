@@ -8,6 +8,10 @@
 
 class UMLSettings;
 
+/** The settings tab's id, defined in mLenderModule.cpp. The strip invokes
+ *  it, and check_contracts.py reads the name so a rename is noticed. */
+extern const FName MLPanelTabName;
+
 /**
  * The receiver's panel, laid out by hand.
  *

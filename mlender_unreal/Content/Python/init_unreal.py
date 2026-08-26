@@ -19,6 +19,9 @@ try:
     # drawing first would state the defaults and then quietly disagree with
     # the file.
     mlender_unreal.settings.load()
+    # The strip may have been created from the compiled defaults
+    # before this load ran; settle it to the stored choice.
+    mlender_unreal.actions.sync_toolbar()
 
     # Reported from the return value rather than announced: there is no menu
     # to hang anything on in a headless commandlet, and a startup line naming

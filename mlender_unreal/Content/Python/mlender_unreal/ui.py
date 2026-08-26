@@ -184,6 +184,10 @@ def _link_entries(menu):
     _entry(sub, section, "mLenderStop", prefix + "Stop Listening",
            "Stop listening and free the port",
            _command("mlender_unreal.stop_listener()"))
+    _entry(sub, section, "mLenderToolbar", prefix + "Show The Toolbar",
+           "The floating strip. Needs the compiled module; this menu "
+           "carries everything it does either way.",
+           _command("mlender_unreal.actions.show_toolbar()"))
     _entry(sub, section, "mLenderPrint", prefix + "Print Status To The Log",
            "Every setting and the listener's state, in the Output Log",
            _command("mlender_unreal.print_status()"))

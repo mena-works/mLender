@@ -459,6 +459,110 @@ def select_generated_actors():
     return len(made)
 
 
+def snapshot_level():
+    """A timestamped copy of the open level's file, under Saved/mLender.
+
+    Saved first through save_loaded_asset, because the dirty-gated saves are
+    known no-ops for changes made from Python -- a snapshot of a stale file
+    would be a snapshot in name only.
+    """
+    import datetime
+    import shutil
+
+    try:
+        world = unreal.get_editor_subsystem(
+            unreal.UnrealEditorSubsystem).get_editor_world()
+    except Exception as exc:
+        unreal.log_warning("mLender: no editor world: {0}".format(exc))
+        return ""
+    package_path = world.get_path_name().split(".")[0]
+    if not package_path.startswith("/Game/"):
+        unreal.log_warning(
+            "mLender: {0} is not a saved project level; save it under "
+            "/Game first.".format(package_path)
+        )
+        return ""
+    try:
+        unreal.EditorAssetLibrary.save_loaded_asset(world, False)
+    except Exception as exc:
+        unreal.log_warning("mLender: the level could not be saved before "
+                           "the snapshot: {0}".format(exc))
+        return ""
+    paths = getattr(unreal, "Paths", None)
+    if paths is None:
+        return ""
+    source = os.path.join(
+        os.path.abspath(str(paths.project_content_dir())),
+        package_path[len("/Game/"):] + ".umap",
+    )
+    if not os.path.isfile(source):
+        unreal.log_warning(
+            "mLender: {0} is not on disk after the save.".format(source)
+        )
+        return ""
+    stamp = datetime.datetime.now().strftime("%m%d_%H%M%S")
+    target = settings.saved_file_path(os.path.join(
+        "Snapshots", "{0}_{1}.umap".format(
+            os.path.splitext(os.path.basename(source))[0], stamp)))
+    if not target:
+        return ""
+    try:
+        folder = os.path.dirname(target)
+        if not os.path.isdir(folder):
+            os.makedirs(folder)
+        shutil.copy2(source, target)
+    except Exception as exc:
+        unreal.log_warning(
+            "mLender: the snapshot could not be written: {0}".format(exc)
+        )
+        return ""
+    log("snapshot: {0}".format(target))
+    return target
+
+
+def _toolbar_library():
+    """The compiled toolbar, or None -- absence is a valid installation."""
+    return getattr(unreal, "MLToolbarLibrary", None)
+
+
+def show_toolbar():
+    library = _toolbar_library()
+    if library is None:
+        unreal.log_warning(
+            "mLender: the toolbar needs the compiled module; the Tools menu "
+            "carries everything it does."
+        )
+        return False
+    library.show_toolbar()
+    settings.update(toolbar_visible=True)
+    return True
+
+
+def hide_toolbar():
+    library = _toolbar_library()
+    if library is None:
+        return False
+    library.hide_toolbar()
+    settings.update(toolbar_visible=False)
+    return True
+
+
+def sync_toolbar():
+    """Make the strip match the stored setting, at startup.
+
+    The C++ side may create the strip from its defaults before Python has
+    loaded the settings file; this runs after the load and settles it.
+    """
+    library = _toolbar_library()
+    if library is None:
+        return False
+    if settings.get("toolbar_visible"):
+        library.show_toolbar()
+    else:
+        library.hide_toolbar()
+    return True
+
+
 def package_options(kind=""):
     """The group, set or layer names the last package carries.
 

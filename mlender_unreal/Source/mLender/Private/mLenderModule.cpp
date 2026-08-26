@@ -2,7 +2,11 @@
 #include "Modules/ModuleManager.h"
 
 #if WITH_EDITOR
+#include "MLSettings.h"
 #include "SMLPanel.h"
+#include "SMLToolbar.h"
+#include "Containers/Ticker.h"
+#include "Framework/Application/SlateApplication.h"
 #include "Framework/Docking/TabManager.h"
 #include "Misc/CoreDelegates.h"
 #include "Styling/AppStyle.h"
@@ -43,8 +47,14 @@ public:
 	{
 #if WITH_EDITOR
 		FCoreDelegates::GetOnPostEngineInit().RemoveAll(this);
+		if (ToolbarTicker.IsValid())
+		{
+			FTSTicker::GetCoreTicker().RemoveTicker(ToolbarTicker);
+			ToolbarTicker.Reset();
+		}
 		if (FSlateApplication::IsInitialized())
 		{
+			FMLToolbar::Shutdown();
 			FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(MLPanelTabName);
 		}
 #endif
@@ -52,6 +62,8 @@ public:
 
 #if WITH_EDITOR
 private:
+	FTSTicker::FDelegateHandle ToolbarTicker;
+
 	void RegisterPanelTab()
 	{
 		if (!FSlateApplication::IsInitialized())
@@ -60,6 +72,25 @@ private:
 			// beats a stack of warnings from every headless run.
 			return;
 		}
+		// The strip waits for the editor's root window, which does not exist
+		// yet at PostEngineInit. A ticker polls rather than guessing at a
+		// delegate name: registering against the wrong event reports no
+		// error and shows no strip, the failure this plugin keeps meeting.
+		ToolbarTicker = FTSTicker::GetCoreTicker().AddTicker(
+			FTickerDelegate::CreateLambda([this](float)
+			{
+				if (!FGlobalTabmanager::Get()->GetRootWindow().IsValid())
+				{
+					return true;        // not yet; keep ticking
+				}
+				const UMLSettings* Settings = GetDefault<UMLSettings>();
+				if (Settings == nullptr || Settings->bToolbarVisible)
+				{
+					FMLToolbar::Show();
+				}
+				ToolbarTicker.Reset();
+				return false;           // done, stop ticking
+			}), 0.5f);
 		FGlobalTabmanager::Get()
 			->RegisterNomadTabSpawner(
 				MLPanelTabName,

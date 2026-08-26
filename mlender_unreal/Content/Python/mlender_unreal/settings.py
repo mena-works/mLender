@@ -49,6 +49,9 @@ SETTING_SPECS = (
     ("filter_invert", False, "Invert The Filter"),
     ("last_package_folder", "", "Last Package"),
     ("open_report_when_done", False, "Open The Report After An Import"),
+    ("toolbar_visible", True, "Show The Toolbar"),
+    ("toolbar_x", -1.0, "Toolbar X"),
+    ("toolbar_y", -1.0, "Toolbar Y"),
     ("livelink_host", LIVELINK_HOST, "LiveLink Host"),
     ("livelink_port", LIVELINK_PORT, "LiveLink Port"),
 )

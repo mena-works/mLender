@@ -95,6 +95,18 @@ public:
 	UPROPERTY(EditAnywhere, Category = "LiveLink", meta = (ClampMin = "1", ClampMax = "65535"))
 	int32 LivelinkPort = 50505;
 
+	/** Whether the floating strip is up. Python persists it; the module
+	 *  reads it at startup so the strip comes back the way it was left. */
+	UPROPERTY(EditAnywhere, Category = "Window")
+	bool bToolbarVisible = true;
+
+	/** The strip's last screen position. Negative means never placed. */
+	UPROPERTY(EditAnywhere, Category = "Window")
+	float ToolbarX = -1.0f;
+
+	UPROPERTY(EditAnywhere, Category = "Window")
+	float ToolbarY = -1.0f;
+
 	/** What the last import did. Written by Python, read by the panel, and
 	 *  deliberately not saved -- a summary from a previous session describes
 	 *  a level that may no longer be open.
