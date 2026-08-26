@@ -907,6 +907,30 @@ def main():
         check("{0!r} rejected".format(text), parse(text) == (None, None, None),
               parse(text))
 
+    # The inverse, which was missing. apply_settings rebuilt the field from
+    # the start and end alone and cast both to int, so a preset saved as
+    # "1-120x2" loaded as "1-120" and exported every frame -- silently.
+    render = exporter.ui.format_frame_range
+    for start, end, step in (
+        (1.0, 120.0, None),
+        (1.0, 120.0, 2.0),
+        (1001.5, 1100.0, None),      # fractional start, truncated by int()
+        (1.0, 120.0, 0.5),           # sub-frame step
+        (-10.0, -5.0, None),         # the negative range the regex allows for
+        (1000000.0, 1000010.0, None),  # far enough out that "{:g}" would
+                                       # write 1e+06, which parses as nothing
+    ):
+        text = render(start, end, step)
+        check(
+            "{0!r} round-trips as {1!r}".format((start, end, step), text),
+            parse(text) == (start, end, step),
+            "{0} -> {1}".format(text, parse(text)),
+        )
+    check("no range renders blank, which means the playback range",
+          render(None, None, None) == "", render(None, None, None))
+    check("half a range renders blank rather than a guess",
+          render(1.0, None, 2.0) == "", render(1.0, None, 2.0))
+
     info = exporter.animation.animation_info
     single = info(False)
     check("animation off reports a single frame",

@@ -277,6 +277,32 @@ def parse_frame_range(text):
         return None, None, None
 
 
+def _frame_text(value):
+    """A frame number as text, without a trailing ".0" and without an exponent.
+
+    ``"{0:g}"`` would turn frame 1000000 into ``1e+06``, which parses back as
+    nothing at all.
+    """
+    return "{0:.4f}".format(float(value)).rstrip("0").rstrip(".") or "0"
+
+
+def format_frame_range(start, end, step):
+    """The text ``parse_frame_range`` reads back as these three numbers.
+
+    The inverse was missing, so loading a preset rebuilt the field from the
+    start and end alone and cast both to int: a range saved as ``1-120x2``
+    came back as ``1-120`` and exported every frame, and ``1001.5`` truncated.
+    Neither said anything.
+    """
+    if start is None or end is None:
+        # Blank is not a missing value here -- it means the playback range.
+        return ""
+    text = "{0}-{1}".format(_frame_text(start), _frame_text(end))
+    if step is None:
+        return text
+    return "{0}x{1}".format(text, _frame_text(step))
+
+
 def ui_settings(export_folder, host_field, port_field, bake_field,
                 bake_resolution_field, animation_field, frame_range_field,
                 collect_field, archive_field, selection_field, alembic_field):
@@ -356,12 +382,13 @@ def apply_settings(settings, export_folder, host_field, port_field, bake_field,
             alembic_field, edit=True,
             value2=bool(settings.get("cache_animated_meshes")),
         )
-    if frame_range_field is not None and settings.get("frame_start") is not None:
+    if frame_range_field is not None:
         cmds.textFieldGrp(
             frame_range_field, edit=True,
-            text="{0}-{1}".format(
-                int(settings.get("frame_start") or 0),
-                int(settings.get("frame_end") or 0),
+            text=format_frame_range(
+                settings.get("frame_start"),
+                settings.get("frame_end"),
+                settings.get("frame_step"),
             ),
         )
 
