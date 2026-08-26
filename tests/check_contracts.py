@@ -1201,7 +1201,8 @@ def main():
     # importer does not take is a control that silently does nothing -- which
     # is exactly how the first panel shipped. Loud from now on.
     wired = {"import_lights", "import_cameras", "import_animation",
-             "import_sets", "active_camera", "reveal_hidden_layer"}
+             "import_sets", "active_camera", "reveal_hidden_layer",
+             "update_materials"}
     check("the per-kind switches reach the importer",
           wired <= accepted, sorted(wired - accepted))
 

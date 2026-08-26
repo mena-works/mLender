@@ -37,6 +37,7 @@ CAPABILITIES = {}
 SCALE_CHOICES = (0.1, 1.0, 10.0, 100.0)
 
 TOGGLES = (
+    "update_materials",
     "import_lights",
     "keep_existing_lights",
     "import_cameras",

@@ -138,9 +138,36 @@ CHANNEL_TO_PROPERTY = {
 
 _master_cache = {}
 
+# Whether this import rebuilds materials that already exist. Module state
+# rather than a parameter because build_material travels as a callback --
+# through assign_materials and the alembic import -- and threading a flag
+# through every hop would change five signatures to move one bit. Reset to
+# True with the cache, so no import inherits the previous one's choice.
+_update_mode = True
+_reused = 0
+
+
+def set_update_mode(update):
+    """True rebuilds existing materials (the default); False keeps them.
+
+    Keeping means an ML_ material the user tuned in Unreal survives the next
+    send untouched. New shaders are still built either way.
+    """
+    global _update_mode, _reused
+    _update_mode = bool(update)
+    _reused = 0
+
+
+def reused_count():
+    """How many existing materials this import kept as they were."""
+    return _reused
+
 
 def reset_cache():
+    global _update_mode, _reused
     _master_cache.clear()
+    _update_mode = True
+    _reused = 0
 
 
 # --------------------------------------------------------------- surface class
@@ -434,6 +461,12 @@ def _build_master(surface_class, warnings):
         # rebuilds. The asset is kept, so the instances that point at it stay
         # pointed at it, and its graph is thrown away and built again.
         material = unreal.EditorAssetLibrary.load_asset(path)
+        if material is not None and not _update_mode:
+            # Unless the user said keep: then whatever is in the project --
+            # their own edits included -- is the point, and it stays whole.
+            global _reused
+            _reused += 1
+            return material
         if material is not None:
             try:
                 unreal.MaterialEditingLibrary.delete_all_material_expressions(
@@ -709,6 +742,14 @@ def build_material(record, package_folder, warnings):
     parent = master_material(surface_class, warnings)
 
     if unreal.EditorAssetLibrary.does_asset_exist(path):
+        if not _update_mode:
+            existing = unreal.EditorAssetLibrary.load_asset(path)
+            if existing is not None:
+                # The user asked to keep what the project has; their tuned
+                # instance survives the send untouched.
+                global _reused
+                _reused += 1
+                return existing
         unreal.EditorAssetLibrary.delete_asset(path)
     tools = unreal.AssetToolsHelpers.get_asset_tools()
     instance = tools.create_asset(

@@ -125,11 +125,15 @@ _PERMANENT_CLASSES = (
 )
 
 
-def purge_generated_content(warnings):
+def purge_generated_content(warnings, keep_materials=False):
     """Remove the assets a previous send left behind.
 
     Only under this tool's own content root, and only when nothing references
     them. A user who built something on top of a generated material keeps it.
+
+    With ``keep_materials`` the Materials and Textures folders are spared --
+    a material the user tuned must survive the next send, and a kept material
+    with deleted textures would be a kept material in name only.
 
     The answer is read. delete_directory returns False when something still
     holds the assets rather than raising, and the caller used to carry on into
@@ -146,6 +150,35 @@ def purge_generated_content(warnings):
     except Exception:
         pass
     removed = False
+    if keep_materials:
+        spared = (CONTENT_ROOT + "/Materials", CONTENT_ROOT + "/Textures")
+        removed = True
+        try:
+            entries = unreal.EditorAssetLibrary.list_assets(
+                CONTENT_ROOT, recursive=False, include_folder=True)
+        except Exception:
+            entries = []
+        for entry in entries or []:
+            path = str(entry).rstrip("/")
+            if path in spared:
+                continue
+            # A folder entry has no dot in its leaf; an asset path reads
+            # /Game/x/Name.Name.
+            is_asset = "." in path.rsplit("/", 1)[-1]
+            try:
+                if is_asset:
+                    unreal.EditorAssetLibrary.delete_asset(path)
+                else:
+                    unreal.EditorAssetLibrary.delete_directory(path)
+            except Exception as exc:
+                removed = False
+                warnings.append(
+                    "Previously generated assets under {0} could not be "
+                    "removed: {1}".format(path, exc)
+                )
+        if removed:
+            return 1
+        return 0
     try:
         removed = bool(
             unreal.EditorAssetLibrary.delete_directory(CONTENT_ROOT))

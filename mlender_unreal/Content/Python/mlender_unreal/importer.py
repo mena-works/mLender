@@ -29,7 +29,12 @@ from .empties import import_transforms
 from .images import reset_cache as reset_texture_cache
 from .instancers import import_instancers
 from .lights import import_lights as build_lights
-from .materials import build_material, reset_cache as reset_material_cache
+from .materials import (
+    build_material,
+    reset_cache as reset_material_cache,
+    reused_count as reused_material_count,
+    set_update_mode as set_material_update,
+)
 from .particles import import_particles
 from .report import write_report
 from .selection import (
@@ -151,6 +156,7 @@ def import_scene_package(
     active_camera="",
     reveal_hidden_layer=False,
     include_paths=None,
+    update_materials=True,
 ):
     package_folder = normalize_folder(package_folder)
     if package_data is None:
@@ -170,13 +176,14 @@ def import_scene_package(
     phases = _Phases()
     reset_material_cache()
     reset_texture_cache()
+    set_material_update(update_materials)
 
     # Unreal has no "save if the file has a path" equivalent that is safe to
     # call unattended, so the level is cleared without saving. The tool's
     # destructiveness is documented; silently overwriting a user's save is not
     # something to add on top of it.
     clear_level(warnings, keep_lighting=keep_existing_lights)
-    purge_generated_content(warnings)
+    purge_generated_content(warnings, keep_materials=not update_materials)
     phases.done("clearing the level and the previous send")
 
     before = {id(actor) for actor in level_actors()}
@@ -342,6 +349,14 @@ def import_scene_package(
             "maya_mesh": record.get("mesh_full_name") or record.get("mesh"),
             "materials": names,
         })
+    if not update_materials:
+        reused = reused_material_count()
+        # Asked for, so said plainly -- and with the count, so "my tweak
+        # survived" is a fact the report states rather than a hope.
+        warnings.append(
+            "Material update is off: {0} existing material(s) were kept as "
+            "they are; anything new was still built.".format(reused)
+        )
     phases.done("records, sharing and materials ({0} meshes)".format(matched))
     discarded = discard_duplicate_meshes(
         duplicate_meshes + orphan_assets, warnings)
@@ -539,6 +554,7 @@ def import_scene_package(
         "selection_active": include_paths is not None,
         "selection_dropped_count": selection_stats["total_dropped"],
         "filtered_out_count": filtered_out,
+        "materials_reused": reused_material_count(),
         "assignments": assignments,
         "warnings": warnings,
         "timings": list(phases.marks),

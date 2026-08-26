@@ -55,6 +55,12 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Import")
 	bool bImportSets = true;
 
+	/** Off keeps the ML_ materials this project already has -- your tuned
+	 *  instances survive the next send untouched. New shaders are still
+	 *  built either way. */
+	UPROPERTY(EditAnywhere, Category = "Import")
+	bool bUpdateMaterials = true;
+
 	/** Which camera to make the shot's own. Blank takes the renderable one,
 	 *  which is what the package itself says. */
 	UPROPERTY(EditAnywhere, Category = "Import")

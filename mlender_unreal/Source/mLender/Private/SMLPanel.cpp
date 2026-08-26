@@ -151,6 +151,13 @@ void SMLPanel::Construct(const FArguments& InArgs)
 			"Key the sampled motion and build the Level Sequence."),
 		&UMLSettings::bImportAnimation)];
 	Kinds->AddSlot().Padding(0.0f, 2.0f)[MakeCheck(
+		LOCTEXT("Materials", "Update materials"),
+		LOCTEXT("MaterialsTip",
+			"Off keeps the ML_ materials this project already has, so your "
+			"tuned instances survive the next send. New shaders are still "
+			"built."),
+		&UMLSettings::bUpdateMaterials)];
+	Kinds->AddSlot().Padding(0.0f, 2.0f)[MakeCheck(
 		LOCTEXT("Sets", "Sets and layers"),
 		LOCTEXT("SetsTip",
 			"Rebuild Maya's selection sets and display layers as Unreal "
