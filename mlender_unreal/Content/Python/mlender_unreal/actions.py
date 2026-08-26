@@ -17,9 +17,22 @@ import sys
 
 import unreal
 
-from .constants import GENERATED_TAG, HIDDEN_LAYER_NAME, MENU_WARNING_LIMIT
+import json
+
+from .constants import (
+    GENERATED_TAG,
+    HIDDEN_LAYER_NAME,
+    MANIFEST_FILE_NAME,
+    MENU_WARNING_LIMIT,
+    SELECTION_FILE_NAME,
+)
+from . import selection
 from . import settings
-from .importer import import_scene_package, read_package_json
+from .importer import (
+    import_scene_package,
+    read_package_json,
+    validate_schema_version,
+)
 from . import livelink
 
 
@@ -40,7 +53,7 @@ def _actor_subsystem():
     return unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
 
 
-def run_import(package_folder, package_data=None):
+def run_import(package_folder, package_data=None, include_paths=None):
     """The one door every import goes through."""
     global _importing
     if _importing:
@@ -55,10 +68,15 @@ def run_import(package_folder, package_data=None):
         return None
     _importing = True
     try:
+        kwargs = livelink.accepted_kwargs(settings.import_kwargs())
+        if include_paths is not None:
+            # Deliberately never a setting: a selection is for this import,
+            # and a stale one persisting would silently prune the next push.
+            kwargs["include_paths"] = include_paths
         result = livelink.remember_result(import_scene_package(
             folder,
             package_data=package_data,
-            **livelink.accepted_kwargs(settings.import_kwargs())
+            **kwargs
         ))
     except Exception as exc:
         unreal.log_error("mLender: import failed: {0}".format(exc))
@@ -133,14 +151,126 @@ def choose_folder(start=""):
     return ""
 
 
+def _package_json_source(folder):
+    """(name, mtime, size) of the package's JSON, the manifest's cache key."""
+    try:
+        names = [
+            name for name in sorted(os.listdir(folder))
+            if name.endswith("_scene.json") or name.endswith("_lookdev.json")
+        ]
+    except Exception:
+        return "", 0.0, 0
+    if not names:
+        return "", 0.0, 0
+    path = os.path.join(folder, names[0])
+    try:
+        info = os.stat(path)
+    except Exception:
+        return names[0], 0.0, 0
+    return names[0], float(info.st_mtime), int(info.st_size)
+
+
+def build_package_manifest(folder="", output_path=""):
+    """Write the Import window's tree food for a package.
+
+    The scene JSON is 42 MB on a real shot and the window must never parse
+    it; this reads it once, writes a compact manifest, and on the next call
+    for the same unchanged package returns the existing file without parsing
+    anything. Returns the manifest path, or "" when there is nothing to
+    write -- the window treats "" as "no tree".
+    """
+    folder = str(folder or settings.get("last_package_folder") or "").strip()
+    if not folder or not os.path.isdir(folder):
+        unreal.log_warning(
+            "mLender: no package folder to build a manifest for "
+            "({0!r}).".format(folder)
+        )
+        return ""
+    out = str(output_path or "").strip() or settings.saved_file_path(
+        MANIFEST_FILE_NAME)
+    if not out:
+        unreal.log_warning(
+            "mLender: no project to write the manifest under."
+        )
+        return ""
+
+    name, mtime, size = _package_json_source(folder)
+    if os.path.isfile(out):
+        try:
+            with open(out, "r") as handle:
+                existing = json.load(handle)
+            if (existing.get("package_folder") == folder
+                    and existing.get("source_json") == name
+                    and existing.get("source_mtime") == mtime
+                    and existing.get("source_size") == size
+                    and existing.get("manifest_version")
+                    == selection.MANIFEST_VERSION):
+                return out
+        except Exception:
+            pass
+
+    try:
+        package_data = read_package_json(folder)
+        # Validated before the tree exists: the window must never offer a
+        # tree for a package the import would refuse.
+        validate_schema_version(package_data)
+        payload = selection.manifest_payload(
+            package_data, folder, source_name=name,
+            source_mtime=mtime, source_size=size,
+        )
+    except Exception as exc:
+        unreal.log_warning(
+            "mLender: {0} could not be read for the manifest: {1}".format(
+                folder, exc
+            )
+        )
+        return ""
+    try:
+        parent = os.path.dirname(out)
+        if parent and not os.path.isdir(parent):
+            os.makedirs(parent)
+        with open(out, "w") as handle:
+            json.dump(payload, handle, separators=(",", ":"))
+    except Exception as exc:
+        unreal.log_warning(
+            "mLender: the manifest could not be written to {0}: {1}".format(
+                out, exc
+            )
+        )
+        return ""
+    log("manifest: {0} node(s) -> {1}".format(payload["node_count"], out))
+    return out
+
+
+def import_selected(selection_path=""):
+    """Import the package the selection file names, filtered to its ticks.
+
+    The Import window writes the file and calls this; the file is how 5,000
+    DAG paths reach Python without riding a command string. An empty
+    selection is refused here, before run_import, so the level is never
+    cleared for nothing.
+    """
+    path = str(selection_path or "").strip() or settings.saved_file_path(
+        SELECTION_FILE_NAME)
+    try:
+        folder, include_paths = selection.read_selection_file(path)
+    except Exception as exc:
+        unreal.log_warning("mLender: {0}".format(exc))
+        return None
+    return run_import(folder, include_paths=include_paths)
+
+
 def summary_line(result=None):
     result = result if result is not None else livelink.last_result()
     if not result:
         return "No import yet this session."
     seconds = result.get("total_seconds") or 0.0
+    filtered = ""
+    if result.get("filtered_out_count"):
+        filtered = ", {0} filtered out".format(result["filtered_out_count"])
     return (
         "{0} mesh(es) on {1} asset(s), {2} material(s), {3} mover(s), "
-        "{4} hidden, {5} warning(s), {6}".format(
+        "{4} hidden, {5} warning(s), {6}{7}".format(
             result.get("mesh_count", 0),
             result.get("mesh_asset_count", 0),
             result.get("material_count", 0),
@@ -148,6 +278,7 @@ def summary_line(result=None):
             result.get("hidden_count", 0),
             len(result.get("warnings") or []),
             _duration(seconds),
+            filtered,
         )
     )
 

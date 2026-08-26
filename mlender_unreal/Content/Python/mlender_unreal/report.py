@@ -45,6 +45,7 @@ def build_report(result, engine_version=""):
         ("static meshes", "mesh_count"),
         ("  distinct assets", "mesh_asset_count"),
         ("  sharing one", "mesh_shared_count"),
+        ("  filtered out by selection", "filtered_out_count"),
         ("skeletal meshes", "skeletal_count"),
         ("materials", "material_count"),
         ("lights", "light_count"),

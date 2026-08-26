@@ -34,6 +34,7 @@ from .constants import (  # noqa: F401
 SUBMODULES = (
     "constants",
     "utils",
+    "selection",
     "settings",
     "transforms",
     "objects",
@@ -64,6 +65,7 @@ SUBMODULES = (
 
 from . import constants  # noqa: E402,F401
 from . import utils  # noqa: E402,F401
+from . import selection  # noqa: E402,F401
 from . import settings  # noqa: E402,F401
 from . import transforms  # noqa: E402,F401
 from . import objects  # noqa: E402,F401

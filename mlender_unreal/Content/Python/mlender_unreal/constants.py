@@ -10,7 +10,7 @@ Everything under "measured" was read off a live Unreal 5.8.1 session or solved
 from a probe, never guessed. tests/docs/unreal_calibration.md records how.
 """
 
-BUILD_VERSION = "2.78.0"
+BUILD_VERSION = "2.79.0"
 
 TOOL_NAME = "mLender"
 
@@ -92,6 +92,12 @@ FILTER_KINDS = ("none", "groups", "sets", "layers")
 # config ini on purpose: settings surviving a restart is certain, and whether
 # a Python-declared class reaches Project Settings is not.
 SETTINGS_FILE_NAME = "settings.json"
+
+# The Import window's two sides of the bridge: the manifest Python
+# writes for the tree (so C++ never parses the 42 MB scene JSON), and
+# the selection the window writes back for the importer.
+MANIFEST_FILE_NAME = "manifest.json"
+SELECTION_FILE_NAME = "selection.json"
 
 # How many warnings a menu or a panel shows before pointing at the report.
 # Matches the Blender panel's cap; a real shot produced sixty-plus and the

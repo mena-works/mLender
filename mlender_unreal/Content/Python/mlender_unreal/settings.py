@@ -253,7 +253,8 @@ def describe():
     return [label_for(key) for key in SETTING_ORDER]
 
 
-def settings_path():
+def saved_file_path(name):
+    """A file of ours under <project>/Saved/mLender, or "" with no project."""
     paths = getattr(unreal, "Paths", None)
     if paths is None:
         return ""
@@ -263,9 +264,11 @@ def settings_path():
         return ""
     if not saved:
         return ""
-    return os.path.join(
-        os.path.abspath(saved), "mLender", SETTINGS_FILE_NAME
-    )
+    return os.path.join(os.path.abspath(saved), "mLender", name)
+
+
+def settings_path():
+    return saved_file_path(SETTINGS_FILE_NAME)
 
 
 def save():

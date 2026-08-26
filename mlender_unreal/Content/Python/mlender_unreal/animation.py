@@ -871,7 +871,8 @@ def _varies(channels, tolerance=ADOPTED_MOTION_TOLERANCE):
 
 
 def adopt_object_animation(sequence, ticks_per_frame, first, last, warnings,
-                           skip_labels=None, parent_labels=None):
+                           skip_labels=None, parent_labels=None,
+                           discard_unresolved=False):
     """Object motion from the FBX, retimed into the sequence we built.
 
     Meshes carry their animation inside the FBX rather than in the package,
@@ -902,11 +903,13 @@ def adopt_object_animation(sequence, ticks_per_frame, first, last, warnings,
         # what was written would leave it behind for the user to open by
         # mistake -- which is the failure it was measured causing before.
         taken = 0
+        resolved = 0
         for binding in source.get_bindings() or []:
             label = str(binding.get_display_name() or "")
             actor = actors.get(label)
             if actor is None:
                 continue
+            resolved += 1
             # Whatever the FBX happened to bake for an object the package
             # measured is not a second opinion worth having: two transform
             # tracks on one binding fight, and the sampled one is the one
@@ -951,6 +954,11 @@ def adopt_object_animation(sequence, ticks_per_frame, first, last, warnings,
                                 )
                             )
         if taken:
+            emptied.append(source)
+        elif discard_unresolved and not resolved:
+            # A selection destroyed every actor this source bound. Gated on
+            # the selection being active so a full import keeps today's
+            # behaviour to the letter.
             emptied.append(source)
     _discard(emptied, warnings)
     if over_movers:
@@ -1804,7 +1812,7 @@ def warn_unsaved_world(warnings):
 
 def import_animation(package_data, unreal_scale, metre_scale, power_scale,
                      warnings, package_folder="", actors_by_path=None,
-                     motion=None):
+                     motion=None, discard_unresolved=False):
     """Build the Level Sequence and place an actor that plays it."""
     sequence, ticks_per_frame, first, last = create_sequence(
         package_data, warnings
@@ -1879,6 +1887,7 @@ def import_animation(package_data, unreal_scale, metre_scale, power_scale,
             mover_ancestors(
                 motion if motion is not None
                 else read_motion(package_folder, package_data, warnings)),
+            discard_unresolved=discard_unresolved,
         )
         tracks += adopted
         keys += adopted_keys

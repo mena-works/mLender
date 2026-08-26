@@ -32,6 +32,11 @@ from .lights import import_lights as build_lights
 from .materials import build_material, reset_cache as reset_material_cache
 from .particles import import_particles
 from .report import write_report
+from .selection import (
+    build_include_index,
+    prune_motion,
+    prune_package_data,
+)
 from .sets import import_sets as build_sets
 from .standins import import_standins
 from .volumes import import_volumes
@@ -43,6 +48,7 @@ from .meshes import (
     find_mesh_record,
     import_fbx_scene,
     imported_mesh_actors,
+    mesh_component,
     share_static_mesh,
     skeletal_actors,
     organise_actor,
@@ -95,6 +101,21 @@ def validate_schema_version(package_data):
     return version
 
 
+def _component_asset(actor):
+    """The mesh asset an actor's component holds, or None."""
+    component = mesh_component(actor)
+    if component is None:
+        return None
+    for prop in ("static_mesh", "skeletal_mesh_asset"):
+        try:
+            asset = component.get_editor_property(prop)
+        except Exception:
+            asset = None
+        if asset is not None:
+            return asset
+    return None
+
+
 class _Phases(object):
     """Where an import's time goes, phase by phase, for the report.
 
@@ -129,12 +150,20 @@ def import_scene_package(
     import_sets=True,
     active_camera="",
     reveal_hidden_layer=False,
+    include_paths=None,
 ):
     package_folder = normalize_folder(package_folder)
     if package_data is None:
         package_data = read_package_json(package_folder)
     # First, and deliberately: an incompatible package must not cost a level.
     validate_schema_version(package_data)
+    # The selection next, for the same reason: an empty or matchless
+    # selection raises here, before anything is cleared. Everything
+    # downstream reads the pruned copy, so the builders need no guards.
+    package_data, selection_stats, dropped_meshes = prune_package_data(
+        package_data, include_paths
+    )
+    include_index = build_include_index(include_paths)
     fbx_path = resolve_fbx_path(package_folder, package_data)
 
     warnings = []
@@ -180,6 +209,10 @@ def import_scene_package(
     # an object the sequence will show later must not be parked in the hidden
     # layer, which no track can lift.
     motion = read_motion(package_folder, package_data, warnings)
+    # Pruned rather than left to fail: the motion player's "no actor
+    # matched" warning is for loss, and a deliberately filtered mover
+    # reported as loss teaches the reader to ignore that warning.
+    motion, motion_dropped = prune_motion(motion, include_index)
     blinking_paths = set()
     for path, track in (motion.get("objects") or {}).items():
         if track.get("visible"):
@@ -189,6 +222,76 @@ def import_scene_package(
             blinking_paths.add(record.get("mesh_path"))
 
     record_index = build_record_index(mesh_records)
+
+    # The FBX imports whole -- Interchange has no per-object filter -- so the
+    # selection is applied to the level: actors whose record the selection
+    # dropped are destroyed and their assets handed to the same discard pass
+    # that removes duplicate meshes. The kept index is probed first, with a
+    # throwaway set, so nothing a ticked record claims can ever be destroyed:
+    # a label collision errs toward keeping, and an extra survivor surfaces
+    # as the ordinary "no record matched" warning below.
+    filtered_out = 0
+    orphan_assets = []
+    if include_paths is not None:
+        if dropped_meshes:
+            dropped_index = build_record_index(dropped_meshes)
+            survivors = []
+            kept_probe = set()
+            dropped_probe = set()
+            subsystem = unreal.get_editor_subsystem(
+                unreal.EditorActorSubsystem)
+            for actor in actors:
+                if find_mesh_record(actor, record_index,
+                                    kept_probe) is not None:
+                    survivors.append(actor)
+                    continue
+                if find_mesh_record(actor, dropped_index,
+                                    dropped_probe) is None:
+                    survivors.append(actor)
+                    continue
+                asset = _component_asset(actor)
+                if asset is not None:
+                    orphan_assets.append(asset)
+                subsystem.destroy_actor(actor)
+                filtered_out += 1
+            keep_asset_paths = set()
+            for actor in survivors:
+                asset = _component_asset(actor)
+                if asset is not None:
+                    keep_asset_paths.add(asset.get_path_name())
+            orphan_assets = [
+                asset for asset in orphan_assets
+                if asset.get_path_name() not in keep_asset_paths
+            ]
+            actors = survivors
+        per_kind = ", ".join(
+            "{0} {1}".format(count, kind)
+            for kind, count in sorted(selection_stats["dropped"].items())
+            if count
+        )
+        movers_note = ""
+        if motion_dropped:
+            movers_note = " and {0} mover(s)".format(motion_dropped)
+        cache_note = ""
+        alembic_count = int(
+            ((package_data or {}).get("alembic") or {}).get("mesh_count") or 0
+        )
+        if alembic_count:
+            cache_note = (
+                " The Alembic cache imports whole and was not filtered "
+                "({0} cached mesh(es)).".format(alembic_count)
+            )
+        warnings.append(
+            "The selection left out {0} object(s) ({1}){2}; {3} mesh "
+            "actor(s) the FBX brought were removed.{4}".format(
+                selection_stats["total_dropped"], per_kind or "none",
+                movers_note, filtered_out, cache_note,
+            )
+        )
+        phases.done(
+            "selection filter ({0} actors removed)".format(filtered_out)
+        )
+
     used = set()
     material_cache = {}
     assignments = []
@@ -240,9 +343,10 @@ def import_scene_package(
             "materials": names,
         })
     phases.done("records, sharing and materials ({0} meshes)".format(matched))
-    discarded = discard_duplicate_meshes(duplicate_meshes, warnings)
+    discarded = discard_duplicate_meshes(
+        duplicate_meshes + orphan_assets, warnings)
     phases.done("discarding {0} duplicate mesh assets".format(
-        len(duplicate_meshes)))
+        len(duplicate_meshes) + len(orphan_assets)))
 
     if import_lights:
         light_result = build_lights(
@@ -358,7 +462,7 @@ def import_scene_package(
         animation_result = build_animation(
             package_data, unreal_scale, metre_scale, power_scale, warnings,
             package_folder=package_folder, actors_by_path=actors_by_path,
-            motion=motion,
+            motion=motion, discard_unresolved=include_paths is not None,
         )
     else:
         skipped_kinds.append("animation")
@@ -432,6 +536,9 @@ def import_scene_package(
         "set_count": set_result["set_count"],
         "layer_count": set_result["layer_count"],
         "skipped_kinds": skipped_kinds,
+        "selection_active": include_paths is not None,
+        "selection_dropped_count": selection_stats["total_dropped"],
+        "filtered_out_count": filtered_out,
         "assignments": assignments,
         "warnings": warnings,
         "timings": list(phases.marks),

@@ -913,6 +913,183 @@ def main():
         "{0} bytes".format(len(wire)),
     )
 
+    print("\nper-object selection")
+    sel = receiver.selection
+    # A package small enough to reason about and shaped like the real one:
+    # full pipe DAG paths, count mirrors, sets naming members by path.
+    def _package():
+        return {
+            "transforms": [
+                {"transform_path": "|grpA", "transform": "grpA"},
+                {"transform_path": "|grpB", "transform": "grpB"},
+            ],
+            "meshes": [
+                {"mesh_path": "|grpA|meshA1", "mesh": "meshA1"},
+                {"mesh_path": "|grpA|meshA2", "mesh": "meshA2"},
+                {"mesh_path": "|grpB|meshB1", "mesh": "meshB1"},
+                {"mesh_path": "|grpB|meshB2", "mesh": "meshB2"},
+            ],
+            "curves": [{"curve_path": "|grpA|curve1", "curve": "curve1"}],
+            "volumes": [], "standins": [], "particles": [], "instancers": [],
+            "mesh_count": 4, "transform_count": 2, "curve_count": 1,
+            "volume_count": 0, "standin_count": 0, "particle_count": 0,
+            "particle_baked_count": 0, "instancer_count": 0,
+            "selection_sets": [
+                {"name": "mixed",
+                 "members": ["|grpA|meshA1", "|grpB|meshB1"]},
+                {"name": "onlyB", "members": ["|grpB|meshB2"]},
+            ],
+            "object_sets": [],
+            "display_layers": [
+                {"name": "layer1",
+                 "members": ["|grpA|meshA2", "|grpB|meshB1"]},
+            ],
+            "lights": [{"name": "keyLight"}],
+            "cameras": [{"name": "cam1"}, {"name": "cam2"}],
+            "animation": {"enabled": True},
+            "alembic": {"mesh_count": 3},
+            "motion": {"object_count": 3},
+            "package_name": "synthetic",
+            "schema_version": 41,
+            "export_warnings": [],
+        }
+
+    # 1. The manifest's invariants.
+    manifest = sel.manifest_payload(_package(), "C:/pkg")
+    n = manifest["node_count"]
+    check("manifest arrays are parallel",
+          len(manifest["names"]) == len(manifest["parents"])
+          == len(manifest["kinds"]) == n, n)
+    check("every parent comes before its child",
+          all(manifest["parents"][i] < i for i in range(n)),
+          manifest["parents"])
+    kinds = manifest["kind_names"]
+    def _path_of(i):
+        parts = []
+        while i >= 0:
+            parts.append(manifest["names"][i])
+            i = manifest["parents"][i]
+        return "|" + "|".join(reversed(parts))
+    rebuilt = dict((_path_of(i), kinds[manifest["kinds"][i]])
+                   for i in range(n))
+    check("record paths reconstruct exactly",
+          rebuilt.get("|grpA|meshA1") == "mesh"
+          and rebuilt.get("|grpA|curve1") == "curve", sorted(rebuilt))
+    check("a record kind beats the group placeholder",
+          rebuilt.get("|grpA") == "transform", rebuilt.get("|grpA"))
+    check("globals carry what stays a switch",
+          manifest["globals"]["light_count"] == 1
+          and manifest["globals"]["camera_count"] == 2
+          and manifest["globals"]["alembic_mesh_count"] == 3,
+          manifest["globals"])
+
+    # 2. Prune keeps and drops per kind, and rewrites the mirrors.
+    original = _package()
+    pruned, stats, dropped = sel.prune_package_data(original, ["|grpA"])
+    check("grpA keeps its two meshes and the curve",
+          len(pruned["meshes"]) == 2 and len(pruned["curves"]) == 1,
+          (len(pruned["meshes"]), len(pruned["curves"])))
+    check("grpB's meshes are the dropped list",
+          sorted(r["mesh_path"] for r in dropped)
+          == ["|grpB|meshB1", "|grpB|meshB2"],
+          [r["mesh_path"] for r in dropped])
+    check("count mirrors are rewritten",
+          pruned["mesh_count"] == 2 and pruned["curve_count"] == 1
+          and pruned["transform_count"] == 1,
+          (pruned["mesh_count"], pruned["curve_count"],
+           pruned["transform_count"]))
+    check("the caller's dict is not mutated",
+          len(original["meshes"]) == 4 and original["mesh_count"] == 4)
+    # Two grpB meshes and the grpB transform leave; the curve and grpA stay.
+    check("stats add up",
+          stats["total_dropped"] == 3 and stats["dropped"]["meshes"] == 2
+          and stats["dropped"]["transforms"] == 1,
+          stats)
+
+    # 3. The ancestor rule: the parent transform rides, the sibling does not.
+    pruned, _stats, _d = sel.prune_package_data(
+        _package(), ["|grpA|meshA1"])
+    check("a ticked mesh keeps its ancestor transform",
+          [r["transform_path"] for r in pruned["transforms"]] == ["|grpA"],
+          pruned["transforms"])
+    check("the sibling mesh is dropped",
+          [r["mesh_path"] for r in pruned["meshes"]] == ["|grpA|meshA1"],
+          pruned["meshes"])
+
+    # 4. Sets and layers follow the exporter's own membership rule.
+    pruned, _stats, _d = sel.prune_package_data(_package(), ["|grpA"])
+    check("a mixed set keeps only the surviving member",
+          [r["members"] for r in pruned["selection_sets"]]
+          == [["|grpA|meshA1"]], pruned["selection_sets"])
+    check("a set whose members all left is gone",
+          [r["name"] for r in pruned["selection_sets"]] == ["mixed"],
+          pruned["selection_sets"])
+    check("display layers are pruned the same way",
+          [r["members"] for r in pruned["display_layers"]]
+          == [["|grpA|meshA2"]], pruned["display_layers"])
+
+    # 5. Motion is pruned, not left to fail as a missing actor.
+    motion = {"objects": {
+        "|grpA|meshA1": {"visible": True},
+        "|grpB|meshB1": {"visible": True},
+        "|grpA": {"visible": True},
+    }, "object_count": 3}
+    index = sel.build_include_index(["|grpA|meshA1"])
+    kept_motion, dropped_movers = sel.prune_motion(motion, index)
+    check("movers under and above the tick survive, the rest leave",
+          sorted(kept_motion["objects"]) == ["|grpA", "|grpA|meshA1"]
+          and dropped_movers == 1, kept_motion["objects"])
+    check("motion object_count is rewritten",
+          kept_motion["object_count"] == 2, kept_motion["object_count"])
+    check("no selection leaves motion untouched, by identity",
+          sel.prune_motion(motion, None)[0] is motion)
+
+    # 6. Refusals happen before anything destructive could.
+    same = _package()
+    result = sel.prune_package_data(same, None)
+    check("None returns the package by identity", result[0] is same)
+    for bad in ([], ["|nothing|here"]):
+        try:
+            sel.prune_package_data(_package(), bad)
+            check("{0!r} refused".format(bad), False, "no error")
+        except ValueError:
+            check("{0!r} refused".format(bad), True)
+
+    # 7. Path normalisation.
+    check("paths normalise to the exporter's spelling",
+          sel.normalize_include_paths(["grpA|", " |grpB ", "|grpA", ""])
+          == ["|grpA", "|grpB"],
+          sel.normalize_include_paths(["grpA|", " |grpB ", "|grpA", ""]))
+
+    # 8. Plumbing pins: per-import, never persistent.
+    import inspect as _sel_inspect
+    sel_params = set(
+        _sel_inspect.signature(receiver.import_scene_package).parameters
+    )
+    check("the importer takes include_paths",
+          "include_paths" in sel_params)
+    check("include_paths is not a persistent setting",
+          "include_paths" not in receiver.settings.import_kwargs())
+    check("selection.py never imports unreal",
+          "import unreal" not in io.open(
+              os.path.join(unreal_root, "mlender_unreal", "selection.py"),
+              encoding="utf-8").read())
+
+    # 9. Linearity smoke at the real shot's scale.
+    big = _package()
+    big["meshes"] = [
+        {"mesh_path": "|grp{0}|m{1}".format(i % 30, i), "mesh": "m{0}".format(i)}
+        for i in range(11000)
+    ]
+    big["mesh_count"] = len(big["meshes"])
+    import time as _sel_time
+    started = _sel_time.time()
+    pruned, stats, _d = sel.prune_package_data(big, ["|grp7"])
+    taken = _sel_time.time() - started
+    check("11k records prune in well under a second",
+          taken < 1.0 and pruned["mesh_count"] == stats["kept"]["meshes"],
+          "{0:.3f}s".format(taken))
+
     print("\nunreal receiver settings")
     us = receiver.settings
     check("every default is described",
