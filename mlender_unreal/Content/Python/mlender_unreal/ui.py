@@ -20,6 +20,7 @@ reported once rather than at every click.
 import unreal
 
 from .constants import BUILD_VERSION, TOOL_NAME
+from . import actions
 from . import livelink
 from . import settings
 
@@ -155,6 +156,7 @@ def register():
 
     _link_entries(menu)
     _import_entries(menu)
+    _after_entries(menu)
 
     livelink.set_state_hook(refresh)
     menus.refresh_all_widgets()
@@ -237,6 +239,67 @@ def _import_entries(menu):
            "Every setting to what it ships as",
            _command("mlender_unreal.settings.reset(); "
                     "mlender_unreal.ui.refresh()"))
+
+
+def _after_entries(menu):
+    """What to do with what arrived. Every one of these was a script.
+
+    The same functions the panel's buttons call, so a build with no compiled
+    module -- which is a valid installation -- still has all of them.
+    """
+    sub, section, prefix = _submenu(
+        menu, "mLenderAfter", "Import And After",
+        "Bring a package in, and work with what came",
+    )
+    for name, label, tooltip, call in (
+        ("Folder", "Import a Package Folder...",
+         "Pick a package written by Maya and build it here",
+         "actions.import_package_folder()"),
+        ("Again", "Import the Last One Again",
+         "Build the last package again with the settings as they are now",
+         "actions.reimport_last()"),
+        ("Summary", "Summary To The Log",
+         "The counts, the phase timings and the first warnings",
+         "actions.show_last_summary()"),
+        ("Report", "Open The Import Report",
+         "The file written beside every package; it holds every warning",
+         "actions.open_report()"),
+        ("Folder2", "Open The Package Folder",
+         "The folder the last import read",
+         "actions.open_package_folder()"),
+        ("Hidden", "Show / Hide The Hidden Objects",
+         "Objects Maya had hidden live in a layer, because a layer is the "
+         "only hiding the editor keeps across reopening the level",
+         "actions.toggle_hidden_layer()"),
+        ("Made", "Select What mLender Made",
+         "Everything tagged by this tool, in this level",
+         "actions.select_generated_actors()"),
+    ):
+        _entry(sub, section, "mLenderAfter" + name, prefix + label, tooltip,
+               _command("mlender_unreal." + call))
+
+    cameras = []
+    try:
+        cameras = actions.level_cameras()
+    except Exception:
+        cameras = []
+    if cameras:
+        look, look_section, look_prefix = _submenu(
+            sub, "mLenderLook", "Look Through",
+            "Pilot a camera in this level",
+        )
+        for index, label in enumerate(cameras[:12]):
+            _entry(
+                look, look_section, "mLenderLook_{0}".format(index),
+                look_prefix + label,
+                "Look through {0}".format(label),
+                _command(
+                    "mlender_unreal.actions.pilot_camera({0!r})".format(label)
+                ),
+            )
+        _entry(look, look_section, "mLenderLookOff", look_prefix + "Stop",
+               "Back to the free camera",
+               _command("mlender_unreal.actions.pilot_camera()"))
 
 
 def unregister():

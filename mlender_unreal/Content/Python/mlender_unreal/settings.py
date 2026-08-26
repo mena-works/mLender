@@ -47,6 +47,7 @@ SETTING_SPECS = (
     ("filter_names", [], "Filter Names"),
     ("filter_invert", False, "Invert The Filter"),
     ("last_package_folder", "", "Last Package"),
+    ("open_report_when_done", False, "Open The Report After An Import"),
     ("livelink_host", LIVELINK_HOST, "LiveLink Host"),
     ("livelink_port", LIVELINK_PORT, "LiveLink Port"),
 )
@@ -90,6 +91,10 @@ def _coerce(key, value):
             return [str(item).strip() for item in value if str(item).strip()]
         except TypeError:
             return list(default)
+    # A panel's folder picker hands back an FDirectoryPath, not a string.
+    inner = getattr(value, "path", None)
+    if inner is not None and not isinstance(value, str):
+        value = inner
     text = "" if value is None else str(value)
     if key == "filter_kind" and text not in FILTER_KINDS:
         return default
@@ -174,9 +179,42 @@ def _mirror():
         return
     for key, value in _values.items():
         try:
-            obj.set_editor_property(key, value)
+            obj.set_editor_property(key, _for_object(key, value))
         except Exception:
             pass
+
+
+def _for_object(key, value):
+    """A value shaped the way the panel's property expects it.
+
+    The package folder is an FDirectoryPath so the panel gets a browse
+    button, and a struct property refuses a plain string without saying why.
+    """
+    if key != "last_package_folder":
+        return value
+    wrapper = getattr(unreal, "DirectoryPath", None)
+    if wrapper is None:
+        return value
+    try:
+        return wrapper(path=value)
+    except Exception:
+        return value
+
+
+def set_summary(text):
+    """What the last import did, for the panel to draw.
+
+    Deliberately not one of the stored settings: a summary read back from a
+    previous session describes a level that may no longer be open.
+    """
+    obj = settings_object()
+    if obj is None:
+        return ""
+    try:
+        obj.set_editor_property("last_summary", str(text or ""))
+    except Exception:
+        return ""
+    return str(text or "")
 
 
 def render(key, value):

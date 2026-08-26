@@ -58,6 +58,7 @@ SUBMODULES = (
     "report",
     "importer",
     "livelink",
+    "actions",
     "ui",
 )
 
@@ -87,6 +88,7 @@ from . import scene  # noqa: E402,F401
 from . import report  # noqa: E402,F401
 from . import importer  # noqa: E402,F401
 from . import livelink  # noqa: E402,F401
+from . import actions  # noqa: E402,F401
 from . import ui  # noqa: E402,F401
 
 from .importer import import_scene_package  # noqa: E402
@@ -104,6 +106,7 @@ from .ui import print_status, register, unregister  # noqa: E402
 
 __all__ = [
     "BUILD_VERSION",
+    "actions",
     "configure",
     "settings",
     "toggle_import_lights",
