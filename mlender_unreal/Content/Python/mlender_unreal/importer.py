@@ -20,9 +20,10 @@ from .constants import (
 )
 from .alembic import import_alembic
 from .asrig import apply_as_rigs
-from .animation import import_animation, read_motion
+from .animation import import_animation as build_animation
+from .animation import read_motion
 from .aovs import build_render_config
-from .cameras import import_cameras
+from .cameras import import_cameras as build_cameras
 from .curves import import_curves
 from .empties import import_transforms
 from .images import reset_cache as reset_texture_cache
@@ -31,7 +32,7 @@ from .lights import import_lights as build_lights
 from .materials import build_material, reset_cache as reset_material_cache
 from .particles import import_particles
 from .report import write_report
-from .sets import import_sets
+from .sets import import_sets as build_sets
 from .standins import import_standins
 from .volumes import import_volumes
 from .meshes import (
@@ -123,6 +124,11 @@ def import_scene_package(
     power_scale=None,
     keep_existing_lights=False,
     import_lights=True,
+    import_cameras=True,
+    import_animation=True,
+    import_sets=True,
+    active_camera="",
+    reveal_hidden_layer=False,
 ):
     package_folder = normalize_folder(package_folder)
     if package_data is None:
@@ -253,7 +259,22 @@ def import_scene_package(
                 "had.".format(wanted)
             )
         light_result = {"light_count": 0, "object_count": 0, "dome_count": 0}
-    camera_result = import_cameras(package_data, unreal_scale, warnings)
+    # What was switched off is counted and said. A kind disabled in silence
+    # looks identical to a kind that failed to arrive.
+    skipped_kinds = []
+    if import_cameras:
+        camera_result = build_cameras(
+            package_data, unreal_scale, warnings, wanted=active_camera
+        )
+    else:
+        skipped_kinds.append("cameras")
+        wanted_cameras = len((package_data or {}).get("cameras") or [])
+        if wanted_cameras:
+            warnings.append(
+                "Camera transfer is off, so the package's {0} camera(s) "
+                "were not built.".format(wanted_cameras)
+            )
+        camera_result = {"camera_count": 0, "active": ""}
     phases.done("lights and cameras")
 
     # Everything the JSON rebuilds rather than the FBX. Order is dependency
@@ -298,8 +319,10 @@ def import_scene_package(
     # the skeletal actors the FBX brought.
     as_result = apply_as_rigs(package_data, actors, warnings)
 
-    # The layer holding what Maya hid, switched off once everything is in it.
-    if hidden_actors:
+    # The layer holding what Maya hid, switched off once everything is in
+    # it -- unless the user asked to see those objects, in which case
+    # switching it off would undo the one thing they set.
+    if hidden_actors and not reveal_hidden_layer:
         try:
             unreal.get_editor_subsystem(
                 unreal.LayersSubsystem).set_layer_visibility(
@@ -312,16 +335,43 @@ def import_scene_package(
             )
 
     # Sets name actors, so this runs after everything that creates them.
-    set_result = import_sets(package_data, warnings)
+    if import_sets:
+        set_result = build_sets(package_data, warnings)
+    else:
+        skipped_kinds.append("sets")
+        wanted_sets = (
+            len((package_data or {}).get("selection_sets") or [])
+            + len((package_data or {}).get("object_sets") or [])
+            + len((package_data or {}).get("display_layers") or [])
+        )
+        if wanted_sets:
+            warnings.append(
+                "Sets and layers are off, so {0} of them were not rebuilt "
+                "as Unreal layers.".format(wanted_sets)
+            )
+        set_result = {"set_count": 0, "layer_count": 0}
     phases.done("caches, locators, curves, volumes, particles, sets")
 
     # Last, and it has to be: every track binds an actor by its label, so
     # nothing that spawns one may run after this.
-    animation_result = import_animation(
-        package_data, unreal_scale, metre_scale, power_scale, warnings,
-        package_folder=package_folder, actors_by_path=actors_by_path,
-        motion=motion,
-    )
+    if import_animation:
+        animation_result = build_animation(
+            package_data, unreal_scale, metre_scale, power_scale, warnings,
+            package_folder=package_folder, actors_by_path=actors_by_path,
+            motion=motion,
+        )
+    else:
+        skipped_kinds.append("animation")
+        if ((package_data or {}).get("animation") or {}).get("enabled"):
+            warnings.append(
+                "Animation is off, so nothing was keyed and no sequence was "
+                "built; everything stands at the pose the FBX placed it in."
+            )
+        animation_result = {
+            "sequence_path": "", "track_count": 0, "key_count": 0,
+            "skeletal_animated": 0, "motion_objects": 0, "motion_keys": 0,
+            "motion_player": "", "motion_asset": "",
+        }
     phases.done("animation ({0} movers on the player)".format(
         animation_result.get("motion_objects", 0)))
 
@@ -381,6 +431,7 @@ def import_scene_package(
         "aov_reported": aov_result["aov_reported"],
         "set_count": set_result["set_count"],
         "layer_count": set_result["layer_count"],
+        "skipped_kinds": skipped_kinds,
         "assignments": assignments,
         "warnings": warnings,
         "timings": list(phases.marks),

@@ -293,7 +293,11 @@ def accepted_kwargs(candidates):
         )
     except (TypeError, ValueError):
         return dict(candidates)
-    dropped = sorted(key for key in candidates if key not in allowed)
+    dropped = sorted(
+        key for key in candidates
+        if key not in allowed
+        and candidates[key] != settings.SETTING_DEFAULTS.get(key)
+    )
     if dropped:
         unreal.log_warning(
             "mLender: this build's importer does not take {0}; "

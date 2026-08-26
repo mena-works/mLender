@@ -35,9 +35,6 @@ public class mLender : ModuleRules
 			{
 				"Slate",
 				"SlateCore",
-				"InputCore",
-				"UnrealEd",
-				"PropertyEditor",
 				"WorkspaceMenuStructure",
 				// The buttons run one line of Python each; the actions
 				// themselves are in actions.py so the menu can call the

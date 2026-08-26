@@ -1020,6 +1020,13 @@ def main():
     filtered = receiver.livelink.accepted_kwargs(kwargs)
     check("livelink passes only what this importer takes",
           set(filtered) <= accepted, sorted(set(filtered) - accepted))
+    # The panel draws a checkbox per kind, and a checkbox whose keyword the
+    # importer does not take is a control that silently does nothing -- which
+    # is exactly how the first panel shipped. Loud from now on.
+    wired = {"import_lights", "import_cameras", "import_animation",
+             "import_sets", "active_camera", "reveal_hidden_layer"}
+    check("the per-kind switches reach the importer",
+          wired <= accepted, sorted(wired - accepted))
 
     print("\nanimation range")
     parse = exporter.ui.parse_frame_range

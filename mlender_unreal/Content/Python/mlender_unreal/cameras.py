@@ -206,7 +206,7 @@ def create_camera_actor(record, unreal_scale, warnings, aspect=0.0):
     return actor
 
 
-def import_cameras(package_data, unreal_scale, warnings):
+def import_cameras(package_data, unreal_scale, warnings, wanted=""):
     # One aspect for every camera in the scene: Maya's film fit is
     # resolved against the render resolution, and Unreal's cine camera
     # has no fit of its own to do it with.
@@ -214,6 +214,8 @@ def import_cameras(package_data, unreal_scale, warnings):
     records = list((package_data or {}).get("cameras") or [])
     created = 0
     active = ""
+    preferred = ""
+    wanted = str(wanted or "").strip()
     renderable = []
     for record in records:
         try:
@@ -221,6 +223,10 @@ def import_cameras(package_data, unreal_scale, warnings):
                 record, unreal_scale, warnings, aspect
             )
             created += 1
+            names = (str(record.get("name") or ""),
+                     str(record.get("full_name") or ""))
+            if wanted and wanted in names:
+                preferred = actor.get_actor_label()
             if record.get("renderable"):
                 renderable.append(actor.get_actor_label())
         except Exception as exc:
@@ -230,9 +236,16 @@ def import_cameras(package_data, unreal_scale, warnings):
                     exc,
                 )
             )
-    if renderable:
+    if preferred:
+        active = preferred
+    elif renderable:
         active = renderable[0]
-        if len(renderable) > 1:
+        if wanted:
+            warnings.append(
+                'No camera in the package is named "{0}"; the renderable '
+                '"{1}" was taken instead.'.format(wanted, active)
+            )
+        elif len(renderable) > 1:
             warnings.append(
                 "Several cameras are marked renderable in Maya; "
                 '"{0}" was taken as the main one.'.format(active)
