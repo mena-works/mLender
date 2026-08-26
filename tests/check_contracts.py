@@ -11,6 +11,7 @@ channel keys the importer cannot map.
 It does NOT verify that the Maya or Blender APIs are used correctly. For that
 see maya_export_test.py and blender_import_test.py.
 """
+import io
 import json
 import math
 import os
@@ -48,6 +49,24 @@ def package_modules(folder):
         name[:-3] for name in os.listdir(folder)
         if name.endswith(".py") and name != "__init__.py"
     )
+
+
+def unreal_snake(name):
+    """Unreal's own C++ to Python name conversion, as far as it matters here.
+
+    A leading "b" on a bool is dropped and every capital starts a new word:
+    ImportScale -> import_scale, bImportLights -> import_lights, and
+    LiveLinkHost -> live_link_host, which is how the panel's host and port
+    silently stopped mirroring.
+    """
+    if len(name) > 1 and name[0] == "b" and name[1].isupper():
+        name = name[1:]
+    out = []
+    for index, char in enumerate(name):
+        if char.isupper() and index:
+            out.append("_")
+        out.append(char.lower())
+    return "".join(out)
 
 
 def close(label, got, want, tolerance=1e-9):
@@ -949,6 +968,31 @@ def main():
     # read-only package folder refusing the export report.
     check("no project means no settings file, and no error",
           us.settings_path() == "", us.settings_path())
+
+    print("\nunreal settings header against settings.py")
+    # The property names in MLSettings.h are a contract with SETTING_SPECS
+    # that nothing checks at compile time: Unreal maps ImportScale to
+    # "import_scale" and bImportLights to "import_lights", so a name that
+    # does not convert simply stops mirroring, in silence. Measured on the
+    # real build: LiveLinkHost became "live_link_host" and the panel's host
+    # and port were never mirrored at all.
+    header_path = os.path.join(
+        TOOL_ROOT, "mlender_unreal", "Source", "mLender", "Public",
+        "MLSettings.h",
+    )
+    header = io.open(header_path, encoding="utf-8").read()
+    declared = set()
+    for match in re.finditer(
+        r"UPROPERTY[^)]*\)[^;]*?" + chr(92) + "b(?:bool|float|int32|FString|"
+        r"FDirectoryPath|TArray<FString>)" + chr(92) + "s+(" + chr(92) +
+        "w+)", header, re.S
+    ):
+        declared.add(unreal_snake(match.group(1)))
+    check("the header declares at least one property", bool(declared),
+          sorted(declared))
+    unmirrored = sorted(set(us.SETTING_ORDER) - declared - {"last_summary"})
+    check("every setting has a property the panel can draw",
+          not unmirrored, unmirrored)
 
     print("\nunreal receiver without a compiled module")
     # A plugin with no Binaries is a valid installation. MLMotionPlayer is

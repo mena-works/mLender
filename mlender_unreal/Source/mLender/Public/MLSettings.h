@@ -84,14 +84,18 @@ public:
 	FDirectoryPath LastPackageFolder;
 
 	UPROPERTY(EditAnywhere, Category = "LiveLink")
-	FString LiveLinkHost = TEXT("127.0.0.1");
+	FString LivelinkHost = TEXT("127.0.0.1");
 
 	UPROPERTY(EditAnywhere, Category = "LiveLink", meta = (ClampMin = "1", ClampMax = "65535"))
-	int32 LiveLinkPort = 50505;
+	int32 LivelinkPort = 50505;
 
-	/** What the last import did. Written by Python, read by the panel; not
-	 *  editable, and deliberately not saved -- a summary from a previous
-	 *  session describes a level that may no longer be open. */
-	UPROPERTY(VisibleAnywhere, Transient, Category = "Last Import")
+	/** What the last import did. Written by Python, read by the panel, and
+	 *  deliberately not saved -- a summary from a previous session describes
+	 *  a level that may no longer be open.
+	 *
+	 *  EditAnywhere rather than VisibleAnywhere because VisibleAnywhere is
+	 *  read-only to Python: set_editor_property throws, and the first version
+	 *  of this swallowed that and drew an empty panel. */
+	UPROPERTY(EditAnywhere, Transient, Category = "Last Import")
 	FString LastSummary;
 };

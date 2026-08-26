@@ -65,7 +65,7 @@ FText SMLPanel::StatusText() const
 		return FText::GetEmpty();
 	}
 	return FText::FromString(FString::Printf(
-		TEXT("LiveLink %s:%d"), *Settings->LiveLinkHost, Settings->LiveLinkPort));
+		TEXT("LiveLink %s:%d"), *Settings->LivelinkHost, Settings->LivelinkPort));
 }
 
 TSharedRef<SWidget> SMLPanel::MakeButton(

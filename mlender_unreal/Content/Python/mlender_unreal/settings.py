@@ -212,7 +212,13 @@ def set_summary(text):
         return ""
     try:
         obj.set_editor_property("last_summary", str(text or ""))
-    except Exception:
+    except Exception as exc:
+        # Not swallowed: a VisibleAnywhere property is read-only to Python and
+        # throws, and the first version of this caught that and drew a panel
+        # that said nothing had been imported.
+        unreal.log_warning(
+            "mLender: the panel's summary could not be written: {0}".format(exc)
+        )
         return ""
     return str(text or "")
 
