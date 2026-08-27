@@ -36,6 +36,9 @@ public class mLender : ModuleRules
 				"Slate",
 				"SlateCore",
 				"WorkspaceMenuStructure",
+				// The Import window reads the manifest Python writes and
+				// writes the selection back.
+				"Json",
 				// The strip prints the plugin's own VersionName, which
 				// IPluginManager owns.
 				"Projects",

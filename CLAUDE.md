@@ -830,6 +830,14 @@ Kullanıcının elle doğrulaması gereken adımlar:
 - ❌ Mesh'i olmayan bir mesh actor'ünde materyal atamasını sessizce atlama;
   daha önce gönderi barındıran content root'a yeniden import bunu üretiyor ve
   "2 mesh, 0 materyal, 0 uyarı" diye görünüyordu
+- ❌ `id(actor)`'ı bir UObject kimliği sanma; her editor çağrısı **yeni
+  Python sarmalayıcısı** üretiyor, sarmalayıcı liste kapsam dışına çıkınca
+  serbest kalıyor ve bir sonrakiler aynı adreslere düşüyor. Ölçüldü: on iki
+  bin aktörü olan bir level'a ekleme yapılırken Interchange'in başarıyla
+  yerleştirdiği **11.014 aktörün hepsi** bayat id'lerle eşleşti ve import "hiç
+  aktör üretmedi" diye raporlandı — oysa log "import completed" diyordu.
+  Kimlik `get_path_name()`; `actor_identities()` onu veriyor. Normal import'ta
+  gizleniyor çünkü ölçüm level temizlendikten sonra alınıyor
 - ❌ Unattended bir commandlet'te Python'dan yazılan transform'un paketi
   **dirty** işaretlediğini sanma; işaretlemiyor, ve dirty'ye bağlı her kaydetme
   sessizce hiçbir şey yapmıyor. Ölçüldü: on aktörün scale'i bellekte 1.0→10.0

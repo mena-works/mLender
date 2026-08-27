@@ -4,6 +4,7 @@
 #if WITH_EDITOR
 
 #include "MLSettings.h"
+#include "SMLImportWindow.h"
 #include "SMLPanel.h"
 
 #include "Framework/Application/SlateApplication.h"
@@ -171,11 +172,20 @@ namespace
 
 		Row->AddSlot().AutoWidth().VAlign(VAlign_Center)
 		[
-			StripButton(LOCTEXT("Import", "Import"),
-				LOCTEXT("ImportTip",
-					"Pick a package written by Maya and build it here."),
-				TEXT("import mlender_unreal; "
-					 "mlender_unreal.actions.import_package_folder()"))
+			SNew(SButton)
+			.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+			.ToolTipText(LOCTEXT("ImportTip",
+				"Pick a package written by Maya, tick what comes in, and "
+				"build it."))
+			.ContentPadding(FMargin(8.0f, 4.0f))
+			.OnClicked_Lambda([]()
+			{
+				FGlobalTabmanager::Get()->TryInvokeTab(MLImportTabName);
+				return FReply::Handled();
+			})
+			[
+				SNew(STextBlock).Text(LOCTEXT("Import", "Import"))
+			]
 		];
 		Row->AddSlot().AutoWidth().VAlign(VAlign_Center)
 		[

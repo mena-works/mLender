@@ -3,6 +3,7 @@
 
 #if WITH_EDITOR
 #include "MLSettings.h"
+#include "SMLImportWindow.h"
 #include "SMLPanel.h"
 #include "SMLToolbar.h"
 #include "Containers/Ticker.h"
@@ -21,6 +22,7 @@
 /** The panel's tab id. A name Python does not need, but the header list in
  *  check_contracts.py reads it so a rename is noticed on both sides. */
 const FName MLPanelTabName(TEXT("mLenderPanel"));
+const FName MLImportTabName(TEXT("mLenderImport"));
 
 /**
  * The module exists to carry the UCLASSes the receiver needs and, in the
@@ -56,6 +58,7 @@ public:
 		{
 			FMLToolbar::Shutdown();
 			FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(MLPanelTabName);
+			FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(MLImportTabName);
 		}
 #endif
 	}
@@ -101,6 +104,26 @@ private:
 			.SetGroup(WorkspaceMenu::GetMenuStructure().GetLevelEditorCategory())
 			.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(),
 				"LevelEditor.Tabs.Details"));
+
+		FGlobalTabmanager::Get()
+			->RegisterNomadTabSpawner(
+				MLImportTabName,
+				FOnSpawnTab::CreateRaw(this, &FMLenderModule::SpawnImportTab))
+			.SetDisplayName(LOCTEXT("ImportTitle", "mLender Import"))
+			.SetTooltipText(LOCTEXT("ImportTooltip",
+				"Pick a package, tick what comes in, and build it"))
+			.SetGroup(WorkspaceMenu::GetMenuStructure().GetLevelEditorCategory())
+			.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(),
+				"LevelEditor.Tabs.Outliner"));
+	}
+
+	TSharedRef<SDockTab> SpawnImportTab(const FSpawnTabArgs& Args)
+	{
+		return SNew(SDockTab)
+			.TabRole(ETabRole::NomadTab)
+			[
+				SNew(SMLImportWindow)
+			];
 	}
 
 	TSharedRef<SDockTab> SpawnPanelTab(const FSpawnTabArgs& Args)

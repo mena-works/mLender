@@ -51,6 +51,7 @@ from .meshes import (
     build_record_index,
     discard_duplicate_meshes,
     find_mesh_record,
+    actor_identities,
     import_fbx_scene,
     imported_mesh_actors,
     mesh_component,
@@ -186,7 +187,7 @@ def import_scene_package(
     purge_generated_content(warnings, keep_materials=not update_materials)
     phases.done("clearing the level and the previous send")
 
-    before = {id(actor) for actor in level_actors()}
+    before = actor_identities()
     import_fbx_scene(
         fbx_path, warnings, package_data.get("package_name") or "",
         import_scale)

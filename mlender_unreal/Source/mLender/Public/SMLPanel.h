@@ -12,6 +12,9 @@ class UMLSettings;
  *  it, and check_contracts.py reads the name so a rename is noticed. */
 extern const FName MLPanelTabName;
 
+/** The Import window's tab id, defined in mLenderModule.cpp. */
+extern const FName MLImportTabName;
+
 /**
  * The receiver's panel, laid out by hand.
  *
