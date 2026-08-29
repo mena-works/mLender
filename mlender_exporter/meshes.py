@@ -426,6 +426,69 @@ def split_hidden_meshes(mesh_shapes):
     return kept, hidden
 
 
+def smooth_subdivided_meshes(mesh_shapes, warnings=None):
+    """Subdivide, in the scene, every mesh whose record asks to be subdivided.
+
+    A subdivision record travels fine and the Blender receiver builds a
+    modifier from it. Unreal has no equivalent, so a character that Maya and
+    Arnold render as Catmull-Clark arrives there as its base cage -- measured
+    on one: 55 of 134 meshes ask for it, the body among them, and the result
+    is visibly faceted.
+
+    The choice can only be made where the geometry still is, so this bakes it
+    into the mesh that the FBX will carry. It is scene surgery and is undone
+    by :func:`restore_smoothing`, in the same shape as the NURBS stand-ins:
+    nothing is saved, and the nodes go away again.
+
+    Returns a context to hand back, and the set of shapes it touched so their
+    records can say the subdivision was already applied -- otherwise Blender
+    would build a modifier on top and smooth the mesh twice.
+    """
+    if warnings is None:
+        warnings = []
+    context = {"nodes": [], "shapes": set()}
+    for shape in mesh_shapes or []:
+        record = subdivision_info(shape)
+        if not record.get("enabled"):
+            continue
+        iterations = record.get("render_iterations")
+        try:
+            divisions = max(1, min(3, int(iterations)))
+        except (TypeError, ValueError):
+            divisions = 1
+        try:
+            made = cmds.polySmooth(
+                shape,
+                divisions=divisions,
+                method=0,               # Catmull-Clark, what the record names
+                constructionHistory=True,
+            ) or []
+        except Exception as exc:
+            warnings.append(
+                'Could not subdivide "{0}" for export: {1}'.format(
+                    node_label(shape), exc))
+            continue
+        context["nodes"].extend(made)
+        context["shapes"].add(shape)
+    if context["shapes"]:
+        warnings.append(
+            "Subdivided {0} mesh(es) into the export at their own scheme and "
+            "iteration count; receivers are told not to subdivide them "
+            "again.".format(len(context["shapes"]))
+        )
+    return context
+
+
+def restore_smoothing(context):
+    """Remove the temporary polySmooth nodes again."""
+    for node in (context or {}).get("nodes") or []:
+        try:
+            if cmds.objExists(node):
+                cmds.delete(node)
+        except Exception:
+            pass
+
+
 def subdivision_info(mesh_shape):
     """Report whether this mesh actually asks to be subdivided, and how.
 

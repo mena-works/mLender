@@ -106,7 +106,9 @@ from .mayautils import (
 from .meshes import (
     mesh_records as mesh_records_for,
     mesh_transforms,
+    restore_smoothing,
     scene_mesh_shapes,
+    smooth_subdivided_meshes,
     split_hidden_meshes,
     selected_light_count,
     visibility_animated,
@@ -168,6 +170,7 @@ def export_scene(
     collect_textures_into_package=False,
     export_animation=False,
     export_hidden_meshes=True,
+    apply_subdivision=False,
     frame_start=None,
     frame_end=None,
     frame_step=None,
@@ -213,6 +216,8 @@ def export_scene(
     # anything looks, so materials, groups, sets and coverage all treat them
     # as the surfaces they stand in for.
     tessellation = tessellate_scene(warnings)
+    # Named before the try so the finally can always hand it back.
+    smoothing = {"nodes": [], "shapes": set()}
     try:
         mesh_shapes = scene_mesh_shapes(selected_only)
         if not export_hidden_meshes:
@@ -240,6 +245,11 @@ def export_scene(
                         lights_in_selection
                     )
                 )
+        # Before the records are read, so they describe the geometry the FBX
+        # will actually carry.
+        if apply_subdivision:
+            smoothing = smooth_subdivided_meshes(mesh_shapes, warnings)
+
         # One material usually covers many meshes, so its channels are read
         # once and shared. A shader that baked is deliberately not cached:
         # a bake belongs to the mesh whose UVs it was made against.
@@ -252,6 +262,19 @@ def export_scene(
             for record in mesh_records_for(shape, bake_context,
                                            export_cache)
         ]
+        if apply_subdivision and smoothing.get("shapes"):
+            # Say it was done, or a receiver that understands subdivision --
+            # Blender does -- would build a modifier on top and smooth twice.
+            for record in mesh_records:
+                if record.get("shape_path") in smoothing["shapes"]:
+                    previous = dict(record.get("subdivision") or {})
+                    record["subdivision"] = {
+                        "enabled": False,
+                        "source": "applied_at_export",
+                        "applied_scheme": previous.get("scheme"),
+                        "applied_iterations": previous.get("render_iterations"),
+                    }
+
         # Locators and empty nulls ride the JSON: the FBX only carries
         # what sits above an exported mesh, so on their own they were
         # dropped entirely.
@@ -695,6 +718,7 @@ def export_scene(
         raise
     finally:
         # The scene gets its surfaces and its names back whatever happened.
+        restore_smoothing(smoothing)
         restore_tessellation(tessellation)
 
     # Last, and never allowed to fail the export: the report is a

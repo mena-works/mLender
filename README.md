@@ -924,6 +924,33 @@ because the slot does not say which. Renaming one of them in Maya resolves it.
 Picking one would be a guess, and this project has already shipped one name
 collision that drew the wrong shape.
 
+**Subdivision travels but only one receiver can act on it.** A mesh record
+carries the scheme and the iteration count, and the Blender add-on turns that
+into a modifier. Unreal has no equivalent for a skeletal mesh, so a character
+Maya and Arnold render as Catmull-Clark arrives there as its base cage.
+Measured on one: 55 of 134 exported meshes ask to be subdivided, the body
+among them, and the result is visibly faceted.
+
+The only place the decision can still be made is where the geometry is, so the
+export can bake it in:
+
+```bash
+mayapy -m mlender_exporter.batch --scene shot.ma --out packages --smooth
+```
+
+`apply_subdivision` defaults to **False**. When it is on, each mesh that asks
+for subdivision is smoothed at its own scheme and iteration count -- never
+blanket, for the same reason `subdivision_info` is picky: rounding off hard
+surface geometry that was never modelled smooth is worse than leaving it. The
+scene is not changed; the `polySmooth` nodes go away again in a `finally`,
+beside the NURBS stand-ins. Measured: 140 726 faces became 592 955, a ratio of
+4.21, and came back to 140 726 afterwards.
+
+Records for smoothed meshes then say `subdivision.enabled = false` with
+`source = "applied_at_export"`. Without that the Blender receiver would build
+a modifier on top of geometry that had already been subdivided and smooth it
+twice.
+
 **A hidden mesh cannot be hidden once it has been welded into another.** The
 tool carries hidden meshes and hides them on the receiver, which is deliberate
 and stays the default: a shot measured 4843 of its 7106 meshes hidden, and

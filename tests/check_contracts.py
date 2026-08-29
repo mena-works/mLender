@@ -619,6 +619,31 @@ def main():
     )
 
 
+    print(chr(10) + "subdivision at export")
+    import inspect as _inspect
+
+    from mlender_exporter import presets as _presets
+    from mlender_exporter import package as _package
+
+    check(
+        "apply_subdivision is a preset key defaulting to off",
+        _presets.DEFAULT_SETTINGS.get("apply_subdivision") is False,
+        _presets.DEFAULT_SETTINGS.get("apply_subdivision"),
+    )
+    check(
+        "export_scene accepts it, so the preset is not dropped",
+        "apply_subdivision" in _inspect.signature(
+            _package.export_scene).parameters,
+        "",
+    )
+    check(
+        "export_kwargs carries it",
+        "apply_subdivision" in _presets.export_kwargs(
+            dict(_presets.DEFAULT_SETTINGS)),
+        "",
+    )
+
+
     print("\nunreal compiled module")
     # The movers play from a C++ actor, and the Python addresses it by class
     # and property name across a reflection boundary nothing type-checks.
