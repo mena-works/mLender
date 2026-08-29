@@ -485,8 +485,32 @@ def _build_master(surface_class, warnings):
             unreal.MaterialFactoryNew()
         )
     if material is None:
+        # does_asset_exist said no and create_asset says it already exists,
+        # which is not a contradiction: a purge can drop an asset from the
+        # registry and leave the .uasset on disk. Unattended, AssetTools then
+        # refuses because it cannot ask -- "CanCreateAsset cannot ask the user
+        # as the application is running unattended" -- and the whole import
+        # died on it. Measured on a second send into a project whose previous
+        # send had been saved, which is every real project after the first.
+        #
+        # Loading is the same answer the branch above wants: keep the asset so
+        # existing instances stay pointed at it, and rebuild its graph.
+        material = unreal.EditorAssetLibrary.load_asset(path)
+        if material is not None:
+            try:
+                unreal.MaterialEditingLibrary.delete_all_material_expressions(
+                    material)
+            except Exception:
+                pass
+            warnings.append(
+                'The master material "{0}" was left on disk by an earlier '
+                "send and could not be recreated, so it was reused and its "
+                "graph rebuilt.".format(name)
+            )
+    if material is None:
         raise RuntimeError(
-            "Unreal refused to create the master material {0}".format(name)
+            "Unreal refused to create the master material {0}, and it could "
+            "not be loaded either".format(name)
         )
 
     if base_surface(surface_class) == SURFACE_UNLIT:
