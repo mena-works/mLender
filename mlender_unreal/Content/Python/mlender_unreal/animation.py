@@ -11,11 +11,18 @@ Every number below was measured in this engine rather than read off a doc,
 because a frame space is the sort of thing that accepts a wrong value in
 silence:
 
-* **Sequencer's Python surface is entirely in ticks.** ``add_key``,
-  ``set_range``, ``set_playback_start``/``end`` and the player's playback
-  position all take tick numbers; the display rate only labels the ruler.
-  Measured: a sequence keyed 100 -> 900 over 24 frames reads 500 at tick 12000
-  and 100.40 at "frame 12", because 12 ticks is half a thousandth of the span.
+* **Sequencer's Python surface is mostly, but not entirely, in ticks.**
+  ``add_key``, ``set_range`` and the player's playback position take tick
+  numbers; the display rate only labels the ruler. Measured: a sequence keyed
+  100 -> 900 over 24 frames reads 500 at tick 12000 and 100.40 at "frame 12",
+  because 12 ticks is half a thousandth of the span.
+* **``set_playback_start``/``end`` are the exception: they take frames.**
+  Measured: ``set_playback_end(33000)`` reads back as 1375 seconds while
+  ``set_playback_end(33)`` reads back as 1.375. This mixture is why the tick
+  base was once pinned to the display rate -- with the two equal the mistake
+  cannot show, and it hid rather than fixed it. The base is now the engine's
+  own 24000 so a sub-frame render has ticks to sample; see
+  ``SEQUENCE_TICK_RESOLUTION``.
 * **The playback position has to be inside the range.** Landing exactly on the
   end finishes the sequence and restores the pre-animated values, so a probe
   that scrubs to the last frame reads the actor's spawn state and concludes
@@ -47,6 +54,7 @@ from .constants import (
     MOTION_PLAYER_NAME,
     GENERATED_TAG,
     SEQUENCE_CONTENT_PATH,
+    SEQUENCE_TICK_RESOLUTION,
 )
 from .lights import (
     light_colour,
@@ -71,30 +79,58 @@ def _linear():
         return None
 
 
-def _add_key(channel, tick, value):
-    """One key, linear where the channel allows it."""
+def _display_rate_unit():
+    """EMovieSceneTimeUnit.DISPLAY_RATE, or nothing on a build without it."""
+    try:
+        return unreal.MovieSceneTimeUnit.DISPLAY_RATE
+    except Exception:
+        return None
+
+
+def _tick_unit():
+    try:
+        return unreal.MovieSceneTimeUnit.TICK_RESOLUTION
+    except Exception:
+        return None
+
+
+def _add_key(channel, frame, value):
+    """One key at a display frame, linear where the channel allows it.
+
+    The unit is passed rather than left to the default. AddKey's default is
+    DisplayRate today, which is what this wants -- but a default is a thing
+    that can change under a tool, and every key in the shot rides on it.
+    Naming it costs one argument and removes the class of failure that made
+    this function worth a comment.
+    """
+    unit = _display_rate_unit()
     interpolation = _linear()
-    if interpolation is not None:
+    for kwargs in (
+        {"interpolation": interpolation} if interpolation is not None else {},
+        {},
+    ):
+        call = dict(kwargs)
+        if unit is not None:
+            call["time_unit"] = unit
         try:
-            channel.add_key(
-                unreal.FrameNumber(int(tick)), value,
-                interpolation=interpolation,
-            )
+            channel.add_key(unreal.FrameNumber(int(frame)), value, **call)
             return True
         except Exception:
             pass
-    # A bool channel takes no interpolation, and says so by raising.
-    try:
-        channel.add_key(unreal.FrameNumber(int(tick)), value)
-        return True
-    except Exception:
-        return False
+        # A bool channel takes no interpolation, and says so by raising; a
+        # build that spells the unit argument differently does the same.
+        try:
+            channel.add_key(unreal.FrameNumber(int(frame)), value, **kwargs)
+            return True
+        except Exception:
+            continue
+    return False
 
 
 def create_sequence(package_data, warnings):
     """An empty Level Sequence covering the package's frame range.
 
-    Returns ``(sequence, ticks_per_frame, first_tick, last_tick)``, or Nones
+    Returns ``(sequence, frame_scale, first_tick, last_tick)``, or Nones
     when the package carries no animation.
     """
     animation = (package_data or {}).get("animation") or {}
@@ -162,34 +198,46 @@ def create_sequence(package_data, warnings):
         sequence.set_display_rate(unreal.FrameRate(int(round(fps)), 1))
     except Exception:
         pass
-    # One tick per frame. The engine's default is 24000 ticks to a second
-    # against a display rate of 24, and at that ratio its own halves disagree:
-    # evaluation treats a section range as ticks, while the editor's ruler and
-    # get_end_frame_seconds treat the same numbers as frames. Measured with
-    # the resolutions equal: a section of 0..25 reads back as 0..25 frames and
-    # 0..1.042 seconds, and keys at 0 and 24 evaluate to 0, 50 and 100 at
-    # frames 0, 12 and 24. Everything agrees, and a per-frame sample has no
-    # use for sub-frame ticks.
+    # The engine's own tick base, not the display rate. The two are not
+    # interchangeable and the difference is not cosmetic: at one tick per
+    # frame a sub-frame render has nowhere to put its samples, and the Movie
+    # Render Queue's eight temporal samples over a 180 degree shutter land on
+    # a single instant. See SEQUENCE_TICK_RESOLUTION.
+    #
+    # This is only safe because the units are separated below -- ticks for
+    # every section range and key, frames for set_playback_start/end. An
+    # earlier build fed the same number to both and opened a 600 frame shot
+    # on a 600000 frame ruler; the fix then was to make the bases equal,
+    # which hid the mixing rather than correcting it.
     try:
-        sequence.set_tick_resolution(unreal.FrameRate(int(round(fps)), 1))
+        sequence.set_tick_resolution(
+            unreal.FrameRate(int(SEQUENCE_TICK_RESOLUTION), 1))
     except Exception:
         pass
-    resolution = sequence.get_tick_resolution()
-    ticks_per_frame = float(resolution.numerator) / (
-        float(resolution.denominator or 1) * float(fps)
-    )
-    first = int(round(start * ticks_per_frame))
-    last = int(round(end * ticks_per_frame))
+    # Sequencer's scripting surface speaks **display frames**, not ticks, and
+    # measured rather than read off the header:
+    #
+    #   set_range(0, 24)     -> 1.0000 s        set_range(0, 24000) -> 1000 s
+    #   add_key(24)          -> tick 24000      add_key(24000)      -> tick 24e6
+    #   get_time()           -> display frames
+    #
+    # AddKey and GetTime take an EMovieSceneTimeUnit whose default is
+    # DisplayRate; SetRange has no tick form at all and converts what it is
+    # given from the display rate. This repo believed the opposite for a long
+    # time, and could not have found out: every measurement that seemed to
+    # confirm "everything is ticks" was taken on a sequence whose tick
+    # resolution equalled its display rate, where the two units are the same
+    # number. Raising the base is what made them differ.
+    #
+    # So the scale is one, and stays one. It is kept as a value rather than
+    # dropped because the FBX adopt pass really does rescale, between two
+    # sequences that need not share a base.
+    frame_scale = 1.0
+    first = int(round(start))
+    last = int(round(end))
     try:
-        # The playback range is the one part of this API that is **not** in
-        # ticks. Measured: set_playback_end(33000) reads back as 1375 seconds,
-        # while set_playback_end(33) reads back as 1.375 -- which is 33 frames
-        # at 24fps. Handing it ticks made the ruler a thousand times too long,
-        # so a 0-33 shot opened as 0-33000 with every key inside the first
-        # thirty-three frames, and scrubbing anywhere showed the last pose.
-        # That reads as "nothing is animated", which is how it was reported.
-        sequence.set_playback_start(int(round(start)))
-        sequence.set_playback_end(int(round(end)))
+        sequence.set_playback_start(first)
+        sequence.set_playback_end(last)
     except Exception:
         pass
 
@@ -210,7 +258,7 @@ def create_sequence(package_data, warnings):
             sequence, end / fps + margin)
     except Exception:
         pass
-    return sequence, ticks_per_frame, first, last
+    return sequence, frame_scale, first, last
 
 
 def _section(binding, track_class, first, last):
@@ -231,11 +279,11 @@ def _section(binding, track_class, first, last):
     return track, section
 
 
-def _tick_of(sample, ticks_per_frame):
-    return int(round(scalar(sample.get("frame"), 0.0) * ticks_per_frame))
+def _time_of(sample, frame_scale):
+    return int(round(scalar(sample.get("frame"), 0.0) * frame_scale))
 
 
-def _key_transform(section, samples, unreal_scale, ticks_per_frame):
+def _key_transform(section, samples, unreal_scale, frame_scale):
     """Nine channels from a run of sampled Maya world matrices.
 
     The channel order was read back rather than assumed: Location X/Y/Z,
@@ -249,7 +297,7 @@ def _key_transform(section, samples, unreal_scale, ticks_per_frame):
         matrix = sample.get("matrix")
         if not matrix:
             continue
-        tick = _tick_of(sample, ticks_per_frame)
+        tick = _time_of(sample, frame_scale)
         location, rotation = unreal_transform(
             {"world_matrix": matrix}, unreal_scale
         )
@@ -263,7 +311,7 @@ def _key_transform(section, samples, unreal_scale, ticks_per_frame):
     return keys
 
 
-def _key_float(binding, property_name, samples, ticks_per_frame, value_of,
+def _key_float(binding, property_name, samples, frame_scale, value_of,
                first, last):
     """One float property track, keyed from a sample run."""
     pairs = []
@@ -274,7 +322,7 @@ def _key_float(binding, property_name, samples, ticks_per_frame, value_of,
             value = None
         if value is None:
             continue
-        pairs.append((_tick_of(sample, ticks_per_frame), float(value)))
+        pairs.append((_time_of(sample, frame_scale), float(value)))
     if not pairs:
         return 0
     track, section = _section(
@@ -291,7 +339,7 @@ def _key_float(binding, property_name, samples, ticks_per_frame, value_of,
     return keys
 
 
-def _key_colour(binding, property_name, samples, ticks_per_frame, colour_of,
+def _key_colour(binding, property_name, samples, frame_scale, colour_of,
                 first, last):
     """A colour property track: four channels, R G B A, in that order."""
     pairs = []
@@ -302,7 +350,7 @@ def _key_colour(binding, property_name, samples, ticks_per_frame, colour_of,
             rgb = None
         if rgb is None:
             continue
-        pairs.append((_tick_of(sample, ticks_per_frame), rgb))
+        pairs.append((_time_of(sample, frame_scale), rgb))
     if not pairs:
         return 0
     track, section = _section(
@@ -346,7 +394,7 @@ def _component(actor, name):
 
 
 def animate_lights(sequence, package_data, actors, unreal_scale, metre_scale,
-                   power_scale, ticks_per_frame, first, last, warnings):
+                   power_scale, frame_scale, first, last, warnings):
     """Transform, intensity and colour for every light that was sampled."""
     tracks = 0
     keys = 0
@@ -368,7 +416,7 @@ def animate_lights(sequence, package_data, actors, unreal_scale, metre_scale,
             binding, unreal.MovieScene3DTransformTrack, first, last
         )
         moved = _key_transform(
-            section, samples, unreal_scale, ticks_per_frame
+            section, samples, unreal_scale, frame_scale
         )
         if moved:
             tracks += 1
@@ -412,7 +460,7 @@ def animate_lights(sequence, package_data, actors, unreal_scale, metre_scale,
             return value
 
         keyed = _key_float(
-            component_binding, "Intensity", samples, ticks_per_frame,
+            component_binding, "Intensity", samples, frame_scale,
             intensity_of, first, last,
         )
         if keyed:
@@ -437,7 +485,7 @@ def animate_lights(sequence, package_data, actors, unreal_scale, metre_scale,
             return (value.r, value.g, value.b, value.a)
 
         keyed = _key_colour(
-            component_binding, "LightColor", samples, ticks_per_frame,
+            component_binding, "LightColor", samples, frame_scale,
             colour_of, first, last,
         )
         if keyed:
@@ -446,8 +494,91 @@ def animate_lights(sequence, package_data, actors, unreal_scale, metre_scale,
     return tracks, keys
 
 
+def set_camera_cut(sequence, camera_label, actors, first, last, warnings):
+    """Point a camera cut at the shot's camera, so something renders.
+
+    Without a cut a Level Sequence has no camera of its own: the Movie Render
+    Queue renders whatever the level's player view happens to be, and the
+    Sequencer viewport never locks to the camera. The tool built cameras and
+    keyed them for a long time and never said which one the shot is through.
+
+    The section range is in **ticks** like every other section here, not in
+    frames. A hand-written version of this passed frames and was right only
+    because the sequence then had one tick to a frame.
+
+    The camera's binding already exists -- animate_cameras made it -- and is
+    reused rather than added again: add_possessable on an actor that is
+    already possessed is a second row bound to one object, and the two draw
+    on top of each other in Sequencer.
+    """
+    label = str(camera_label or "").strip()
+    if not label:
+        # Two things reach here and the difference is not visible from
+        # inside: no camera was named as the shot's, or camera transfer was
+        # off for this send. Both are said rather than one of them guessed.
+        warnings.append(
+            "The sequence has no camera cut, so a render through it uses the "
+            "level's own view. Either no camera was named as the shot's -- "
+            "Maya marks one renderable, or the Active Camera setting names "
+            "one -- or camera transfer was off for this send."
+        )
+        return ""
+
+    binding = None
+    for candidate in (sequence.get_bindings() or []):
+        if str(candidate.get_display_name()) == label:
+            binding = candidate
+            break
+    if binding is None:
+        actor = (actors or {}).get(label)
+        if actor is None:
+            warnings.append(
+                'The camera cut was not built: no actor named "{0}" is in '
+                "the level.".format(label)
+            )
+            return ""
+        try:
+            binding = sequence.add_possessable(actor)
+        except Exception as exc:
+            warnings.append(
+                "The camera cut was not built: {0}".format(exc)
+            )
+            return ""
+
+    try:
+        track = None
+        for existing in (sequence.get_tracks() or []):
+            if isinstance(existing, unreal.MovieSceneCameraCutTrack):
+                track = existing
+                break
+        if track is None:
+            track = sequence.add_track(unreal.MovieSceneCameraCutTrack)
+        for section in (track.get_sections() or []):
+            track.remove_section(section)
+        section = track.add_section()
+        section.set_range(first, last)
+        # The engine's own maker, not a hand-filled struct. Setting `guid` on
+        # a default MovieSceneObjectBindingID leaves the rest of it -- the
+        # sequence id and the parent index that say *where* the guid lives --
+        # at whatever the default was, and the section then points at
+        # nothing. Measured: the cut existed, drew normally, and resolved to
+        # no binding at all. GetBindingID builds it against the sequence the
+        # binding belongs to.
+        binding_id = unreal.MovieSceneSequenceExtensions.get_binding_id(
+            sequence, binding)
+        section.set_camera_binding_id(binding_id)
+    except Exception as exc:
+        warnings.append(
+            'The camera cut for "{0}" could not be built: {1}'.format(
+                label, exc
+            )
+        )
+        return ""
+    return label
+
+
 def animate_cameras(sequence, package_data, actors, unreal_scale,
-                    ticks_per_frame, first, last, warnings):
+                    frame_scale, first, last, warnings):
     """Transform, focal length and aperture for every camera that moved."""
     tracks = 0
     keys = 0
@@ -469,7 +600,7 @@ def animate_cameras(sequence, package_data, actors, unreal_scale,
             binding, unreal.MovieScene3DTransformTrack, first, last
         )
         moved = _key_transform(
-            section, samples, unreal_scale, ticks_per_frame
+            section, samples, unreal_scale, frame_scale
         )
         if moved:
             tracks += 1
@@ -482,7 +613,7 @@ def animate_cameras(sequence, package_data, actors, unreal_scale,
         for property_name, key in (("CurrentFocalLength", "focal_length_mm"),
                                    ("CurrentAperture", "f_stop")):
             keyed = _key_float(
-                component_binding, property_name, samples, ticks_per_frame,
+                component_binding, property_name, samples, frame_scale,
                 lambda sample, key=key: sample.get(key),
                 first, last,
             )
@@ -492,7 +623,7 @@ def animate_cameras(sequence, package_data, actors, unreal_scale,
     return tracks, keys
 
 
-def animate_visibility(sequence, package_data, actors, ticks_per_frame,
+def animate_visibility(sequence, package_data, actors, frame_scale,
                        first, last, warnings):
     """A visibility track per mesh whose Maya visibility was keyed."""
     tracks = 0
@@ -527,7 +658,7 @@ def animate_visibility(sequence, package_data, actors, ticks_per_frame,
         for sample in samples:
             # True is visible here; the engine's own flag is hidden, and
             # passing that value straight through inverts every blink.
-            if _add_key(channels[0], _tick_of(sample, ticks_per_frame),
+            if _add_key(channels[0], _time_of(sample, frame_scale),
                         bool(sample.get("visible"))):
                 counted += 1
         if counted:
@@ -563,20 +694,28 @@ def _material_slot(component, material_name):
     return None
 
 
-def animate_materials(sequence, package_data, actors, ticks_per_frame, first,
+def animate_materials(sequence, package_data, actors, frame_scale, first,
                       last, warnings):
     """Keyed material parameters, as component material tracks.
 
-    The time argument here is not the one every other channel takes. Measured
-    on the same sequence: a transform channel handed 1000 stores 1000, but
-    add_scalar_parameter_key handed 1000 stores 1 -- it divides by
-    ticks-per-frame. Keys therefore go in multiplied back up, and the first
-    version, which passed plain ticks, put twenty five keys inside the first
-    twenty five ticks of the sequence. It looked like nothing was animated at
-    all, because every scrub landed past the last key and read its value.
+    **The time here is a tick, and it is the only one in this module.**
+    Everywhere else Sequencer's scripting surface takes a display frame --
+    add_key and set_range both do -- but AddScalarParameterKey has no
+    EMovieSceneTimeUnit at all and hands its FFrameNumber straight to
+    AddKeyToChannel, which writes in the channel's own space. Measured on one
+    sequence: a transform channel handed 1000 stores 1000, while
+    add_scalar_parameter_key handed 1000 stores what reads back as 1.
+
+    So the frame is multiplied up by the sequence's real ticks-per-frame
+    here, and nowhere else. Get it wrong in either direction and every key
+    lands in the first thousandth of the shot, which reads as "nothing is
+    animated" because every scrub is past the last key.
     """
     tracks = 0
     keys = 0
+    # Named for the one call that wants it. Nothing else in this
+    # module may multiply a frame by the tick base.
+    material_ticks_per_frame = _ticks_per_frame(sequence, 1.0)
     for mesh_record in (package_data or {}).get("meshes") or []:
         label = safe_asset_name(
             mesh_record.get("mesh") or mesh_record.get("mesh_full_name")
@@ -628,9 +767,9 @@ def animate_materials(sequence, package_data, actors, ticks_per_frame, first,
                     else MASTER_SCALAR_PARAMETERS[channel],
                 )
                 for sample in record["samples"]:
-                    tick = _tick_of(sample, ticks_per_frame)
+                    frame = _time_of(sample, frame_scale)
                     stamp = unreal.FrameNumber(
-                        int(round(tick * ticks_per_frame))
+                        int(round(frame * material_ticks_per_frame))
                     )
                     value = channel_value(channel, sample)
                     try:
@@ -767,8 +906,30 @@ def _interchange_sequences():
     return found
 
 
+def _ticks_per_frame(sequence, default=1.0):
+    """A sequence's own ticks to a display frame, or the default."""
+    try:
+        tick = sequence.get_tick_resolution()
+        display = sequence.get_display_rate()
+        rate = float(tick.numerator) / float(tick.denominator or 1)
+        frames = float(display.numerator) / float(display.denominator or 1)
+        if rate > 0.0 and frames > 0.0:
+            return rate / frames
+    except Exception:
+        pass
+    return default
+
+
 def _channel_keys(section):
-    """Every channel of a section as (name, [(tick, value)]), keys only."""
+    """Every channel of a section as (name, [(tick, value)]), keys only.
+
+    Read in **ticks**, named explicitly. GetTime's default is DisplayRate,
+    which rounds to a whole frame -- and the whole reason this function
+    exists is a source whose keys sit at tick numbers far below one frame.
+    Read in the default unit they all round to zero and the animation looks
+    like it was never there.
+    """
+    unit = _tick_unit()
     read = []
     for channel in section.get_all_channels() or []:
         try:
@@ -778,8 +939,9 @@ def _channel_keys(section):
         pairs = []
         for key in keys:
             try:
-                pairs.append((key.get_time().frame_number.value,
-                              key.get_value()))
+                time = (key.get_time(unit) if unit is not None
+                        else key.get_time())
+                pairs.append((time.frame_number.value, key.get_value()))
             except Exception:
                 continue
         if pairs:
@@ -870,7 +1032,7 @@ def _varies(channels, tolerance=ADOPTED_MOTION_TOLERANCE):
     return False
 
 
-def adopt_object_animation(sequence, ticks_per_frame, first, last, warnings,
+def adopt_object_animation(sequence, frame_scale, first, last, warnings,
                            skip_labels=None, parent_labels=None,
                            discard_unresolved=False):
     """Object motion from the FBX, retimed into the sequence we built.
@@ -888,7 +1050,7 @@ def adopt_object_animation(sequence, ticks_per_frame, first, last, warnings,
     they are taken as they are, so an engine build that fixes this does not
     get its animation stretched by a thousand.
     """
-    if ticks_per_frame <= 0:
+    if frame_scale <= 0:
         return 0, 0
 
     actors = actors_by_label()
@@ -933,7 +1095,30 @@ def adopt_object_animation(sequence, ticks_per_frame, first, last, warnings,
                     span = max(
                         (pairs[-1][0] - pairs[0][0]) for _n, pairs in channels
                     )
-                    scale = ticks_per_frame if span < ticks_per_frame else 1.0
+                    # Measured in the source's own units, not ours. The bug
+                    # is that Interchange writes a key's frame number into
+                    # the tick field, so a compressed animation spans fewer
+                    # ticks than one frame of the sequence it sits in -- a
+                    # statement about the source, true whatever base we
+                    # happen to be building on. Comparing against our own
+                    # frame_scale instead reads as "shorter than 1000
+                    # frames", which is right for this shot by accident and
+                    # wrong for a longer one.
+                    # The keys arrive in the source's ticks and leave in our
+                    # display frames, so the scale carries both the unit and
+                    # the rebase. Interchange's bug is that it writes a key's
+                    # frame number into the tick field, which shows up as an
+                    # animation spanning fewer ticks than one frame of the
+                    # sequence it sits in -- a statement about the source,
+                    # true whatever base we happen to build on.
+                    source_per_frame = _ticks_per_frame(source, 1.0)
+                    compressed = span < source_per_frame
+                    if compressed:
+                        # The raw number already is the frame number.
+                        scale = frame_scale
+                    else:
+                        scale = (frame_scale / source_per_frame
+                                 if source_per_frame > 0.0 else frame_scale)
                     make_movable(actor)
                     target = sequence.add_possessable(actor)
                     _track, destination = _section(
@@ -944,7 +1129,7 @@ def adopt_object_animation(sequence, ticks_per_frame, first, last, warnings,
                         adopted += 1
                         taken += 1
                         keys_written += written
-                        if scale != 1.0:
+                        if compressed:
                             warnings.append(
                                 'Object "{0}" was animated in the FBX at one '
                                 "tick per frame, which plays entirely inside "
@@ -1064,7 +1249,7 @@ def _copy_channels(section, channels, scale):
     return written
 
 
-def animate_geometry_caches(sequence, ticks_per_frame, first, last,
+def animate_geometry_caches(sequence, frame_scale, first, last,
                             warnings):
     """Put every geometry cache on the sequence, so scrubbing plays it.
 
@@ -1449,7 +1634,7 @@ def _motion_asset(label, warnings):
 
 
 def animate_motion_player(sequence, motion, actors_by_path, unreal_scale,
-                          ticks_per_frame, first, last, warnings,
+                          frame_scale, first, last, warnings,
                           keyed_labels=None, package_label="Scene",
                           result=None):
     """Every rigid mover on one actor, and one float track on the sequence.
@@ -1562,9 +1747,11 @@ def animate_motion_player(sequence, motion, actors_by_path, unreal_scale,
     except Exception:
         pass
 
-    # One binding, one track, two keys: the frame number itself, linear
-    # from the first tick to the last, so scrubbing the ruler reads the
-    # frame straight off it.
+    # One binding, one track, two keys: the frame number itself, linear from
+    # the first frame to the last, so scrubbing the ruler reads the frame
+    # straight off it. Key time and key value are the same number here, and
+    # that is not a coincidence to tidy away -- the property the player reads
+    # is a Maya frame number, and the ruler is in Maya frames.
     counted = 0
     try:
         binding = sequence.add_possessable(player)
@@ -1575,10 +1762,9 @@ def animate_motion_player(sequence, motion, actors_by_path, unreal_scale,
         section.set_range(first, last)
         channels = section.get_all_channels()
         if channels:
-            per_frame = float(ticks_per_frame) or 1.0
-            if _add_key(channels[0], first, float(first) / per_frame):
+            if _add_key(channels[0], first, float(first)):
                 counted += 1
-            if _add_key(channels[0], last, float(last) / per_frame):
+            if _add_key(channels[0], last, float(last)):
                 counted += 1
     except Exception as exc:
         warnings.append(
@@ -1602,12 +1788,12 @@ def animate_motion_player(sequence, motion, actors_by_path, unreal_scale,
 
 
 def animate_motion(sequence, motion, actors_by_path, unreal_scale,
-                   ticks_per_frame, first, last, warnings,
+                   frame_scale, first, last, warnings,
                    keyed_labels=None, package_label="Scene", result=None):
     """The movers, on the player when the module is there and as rows if not."""
     if motion_player_available():
         return animate_motion_player(
-            sequence, motion, actors_by_path, unreal_scale, ticks_per_frame,
+            sequence, motion, actors_by_path, unreal_scale, frame_scale,
             first, last, warnings, keyed_labels, package_label, result)
     count = len((motion or {}).get("objects") or {})
     if count:
@@ -1621,12 +1807,12 @@ def animate_motion(sequence, motion, actors_by_path, unreal_scale,
                 else "")
         )
     return animate_sampled_motion(
-        sequence, motion, actors_by_path, unreal_scale, ticks_per_frame,
+        sequence, motion, actors_by_path, unreal_scale, frame_scale,
         first, last, warnings, keyed_labels, package_label)
 
 
 def animate_sampled_motion(sequence, motion, actors_by_path, unreal_scale,
-                           ticks_per_frame, first, last, warnings,
+                           frame_scale, first, last, warnings,
                            keyed_labels=None, package_label="Scene"):
     """Transform and visibility keys for the movers that only move.
 
@@ -1728,7 +1914,7 @@ def animate_sampled_motion(sequence, motion, actors_by_path, unreal_scale,
                 scale.x, scale.y, scale.z,
             )):
                 lane.append(float(value))
-        ticks = [int(round(float(frame) * ticks_per_frame))
+        ticks = [int(round(float(frame) * frame_scale))
                  for frame in frames]
         for channel, lane in zip(channels, lanes):
             for index in _keyable(lane):
@@ -1745,7 +1931,7 @@ def animate_sampled_motion(sequence, motion, actors_by_path, unreal_scale,
                     # True is visible here; the engine's own flag is hidden,
                     # and passing that value through inverts every blink.
                     if _add_key(vis_channels[0],
-                                int(round(float(frame) * ticks_per_frame)),
+                                int(round(float(frame) * frame_scale)),
                                 bool(visible[index])):
                         counted += 1
         if counted:
@@ -1812,9 +1998,10 @@ def warn_unsaved_world(warnings):
 
 def import_animation(package_data, unreal_scale, metre_scale, power_scale,
                      warnings, package_folder="", actors_by_path=None,
-                     motion=None, discard_unresolved=False):
+                     motion=None, discard_unresolved=False,
+                     active_camera=""):
     """Build the Level Sequence and place an actor that plays it."""
-    sequence, ticks_per_frame, first, last = create_sequence(
+    sequence, frame_scale, first, last = create_sequence(
         package_data, warnings
     )
     # Before a single binding is written, and whether or not there is a
@@ -1828,7 +2015,7 @@ def import_animation(package_data, unreal_scale, metre_scale, power_scale,
         except Exception:
             pass
         return {"sequence_path": "", "track_count": 0, "key_count": 0,
-                "skeletal_animated": skeletal}
+                "skeletal_animated": skeletal, "cut_camera": ""}
 
     actors = actors_by_label()
     tracks = 0
@@ -1847,23 +2034,23 @@ def import_animation(package_data, unreal_scale, metre_scale, power_scale,
     builders = (
         lambda: animate_lights(
             sequence, package_data, actors, unreal_scale, metre_scale,
-            power_scale, ticks_per_frame, first, last, warnings),
+            power_scale, frame_scale, first, last, warnings),
         lambda: animate_cameras(
-            sequence, package_data, actors, unreal_scale, ticks_per_frame,
+            sequence, package_data, actors, unreal_scale, frame_scale,
             first, last, warnings),
         lambda: animate_visibility(
-            sequence, package_data, actors, ticks_per_frame, first, last,
+            sequence, package_data, actors, frame_scale, first, last,
             warnings),
         lambda: animate_materials(
-            sequence, package_data, actors, ticks_per_frame, first, last,
+            sequence, package_data, actors, frame_scale, first, last,
             warnings),
         lambda: animate_geometry_caches(
-            sequence, ticks_per_frame, first, last, warnings),
+            sequence, frame_scale, first, last, warnings),
         lambda: animate_motion(
             sequence,
             motion if motion is not None
             else read_motion(package_folder, package_data, warnings),
-            actors_by_path or {}, unreal_scale, ticks_per_frame, first, last,
+            actors_by_path or {}, unreal_scale, frame_scale, first, last,
             warnings, sampled_labels, sequence_label(package_data),
             motion_result),
     )
@@ -1883,7 +2070,7 @@ def import_animation(package_data, unreal_scale, metre_scale, power_scale,
     # else on one timeline.
     try:
         adopted, adopted_keys = adopt_object_animation(
-            sequence, ticks_per_frame, first, last, warnings, sampled_labels,
+            sequence, frame_scale, first, last, warnings, sampled_labels,
             mover_ancestors(
                 motion if motion is not None
                 else read_motion(package_folder, package_data, warnings)),
@@ -1897,6 +2084,13 @@ def import_animation(package_data, unreal_scale, metre_scale, power_scale,
                 exc
             )
         )
+
+    # Which camera the shot is through. After the builders, because it
+    # reuses the binding animate_cameras made rather than adding a second
+    # one, and before the save.
+    cut_camera = set_camera_cut(
+        sequence, active_camera, actors, first, last, warnings
+    )
 
     path = ""
     try:
@@ -1953,4 +2147,5 @@ def import_animation(package_data, unreal_scale, metre_scale, power_scale,
         "motion_keys": motion_result.get("motion_keys", 0),
         "motion_player": motion_result.get("motion_player", ""),
         "motion_asset": motion_result.get("motion_asset", ""),
+        "cut_camera": cut_camera,
     }

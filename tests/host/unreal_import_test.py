@@ -1028,6 +1028,54 @@ def main():
                   "{0} unresolved, first: {1}".format(
                       len(unresolved), unresolved[:3]))
 
+            # The shot has to say which camera it is through. Without a
+            # camera cut the Movie Render Queue renders the level's own view
+            # and the Sequencer viewport never locks to the camera -- and
+            # nothing about the sequence looks wrong until a render comes
+            # back framed from somewhere else. The binding is asserted to
+            # resolve, not merely to exist: a cut pointing at a stale guid
+            # draws exactly like one that works.
+            cut_track = None
+            for track in sequence.get_tracks() or []:
+                if isinstance(track, unreal.MovieSceneCameraCutTrack):
+                    cut_track = track
+                    break
+            check("the sequence carries a camera cut",
+                  cut_track is not None
+                  and bool(cut_track.get_sections()),
+                  result.get("cut_camera"))
+            if cut_track is not None and cut_track.get_sections():
+                section = cut_track.get_sections()[0]
+                # Resolved through the engine rather than by comparing guids:
+                # a binding id carries where the guid lives as well as the
+                # guid, and a hand-filled one points at nothing while looking
+                # entirely normal.
+                target = None
+                try:
+                    target = unreal.MovieSceneSequenceExtensions                         .resolve_binding_id(
+                            sequence, section.get_camera_binding_id())
+                except Exception as exc:
+                    check("the cut's binding id could be resolved", False, exc)
+                check("the cut points at a binding on this sequence",
+                      target is not None,
+                      section.get_camera_binding_id())
+                if target is not None:
+                    bound = []
+                    try:
+                        bound = (unreal.MovieSceneSequenceExtensions
+                                 .locate_bound_objects(
+                                     sequence, target, world) or [])
+                    except Exception as exc:
+                        check("the cut's camera could be located", False, exc)
+                    check("the cut's camera resolves to an actor", bool(bound),
+                          str(target.get_display_name()))
+                    check("and it is the camera the import reported",
+                          str(target.get_display_name())
+                          == str(result.get("cut_camera") or ""),
+                          "{0} vs {1}".format(
+                              target.get_display_name(),
+                              result.get("cut_camera")))
+
             # And no row that carries nothing. Interchange keys every object
             # it imported, moving or not; on a real shot that put 71 sections
             # of two identical keys on the sequence, and since the movers ride
@@ -1038,8 +1086,26 @@ def main():
             # the first attempt used 1e-6 and caught none of them, because
             # the bake leaves noise at 4.554e-05 and "flat" is not zero.
             from mlender_unreal.constants import ADOPTED_MOTION_TOLERANCE
+            # Lights and cameras are exempt, and deliberately. This is about
+            # *object* rows -- a mesh whose transform track keys one value is
+            # a row that carries nothing. A light that holds still while its
+            # intensity ramps is not: the intensity rides its component
+            # binding, which is a different row, and the flat transform is
+            # the parent it hangs under. Measured on the fixture: six such
+            # rows, every one of them a light or a camera with a live
+            # component track, and they fail this check at HEAD too.
+            component_owners = set()
+            for record in ((package_data.get("lights") or [])
+                           + (package_data.get("cameras") or [])):
+                for key in ("name", "full_name"):
+                    value = str(record.get(key) or "")
+                    if value:
+                        component_owners.add(value)
+                        component_owners.add(value.rsplit("|", 1)[-1])
             flat = []
             for binding in sequence.get_bindings() or []:
+                if str(binding.get_display_name()) in component_owners:
+                    continue
                 for track in binding.get_tracks() or []:
                     if not isinstance(
                             track, unreal.MovieScene3DTransformTrack):
@@ -1059,7 +1125,6 @@ def main():
                   "{0} flat, first: {1}".format(len(flat), flat[:3]))
 
             fps = float(animation.get("fps") or 24.0)
-            per_frame = sequence.get_tick_resolution().numerator / fps
             player_actor = unreal.EditorLevelLibrary.spawn_actor_from_class(
                 unreal.LevelSequenceActor, unreal.Vector(0.0, 0.0, 0.0)
             )
@@ -1075,9 +1140,16 @@ def main():
                     continue
 
             def scrub(frame):
+                # A display frame, not a tick. The player's play position
+                # runs at the sequence's display rate --
+                # PlayPosition.SetTimeBase(DisplayRate, TickResolution, ...)
+                # -- so multiplying by ticks-per-frame walks a thousand times
+                # past the end, where the sequence clamps and every probe
+                # reads the same value. That reads as "nothing is keyed",
+                # which is what it looked like the first time.
                 params = unreal.MovieSceneSequencePlaybackParams()
                 params.set_editor_property("frame", unreal.FrameTime(
-                    unreal.FrameNumber(int(round(frame * per_frame)))))
+                    unreal.FrameNumber(int(round(frame)))))
                 params.set_editor_property(
                     "position_type", unreal.MovieScenePositionType.FRAME)
                 params.set_editor_property(

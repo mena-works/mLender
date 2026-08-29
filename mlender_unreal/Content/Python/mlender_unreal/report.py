@@ -50,6 +50,10 @@ def build_report(result, engine_version=""):
         ("materials", "material_count"),
         ("lights", "light_count"),
         ("cameras", "camera_count"),
+        # A name rather than a count, and the row that answers "what
+        # will the render look through": a sequence with no camera cut
+        # renders the level's own view and says nothing about it.
+        ("  the shot is cut to", "cut_camera"),
         ("locators", "transform_count"),
         ("curves", "curve_count"),
         ("  as splines", "curve_splines"),

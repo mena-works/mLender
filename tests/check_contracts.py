@@ -546,6 +546,57 @@ def main():
     check("the player exposes what the Python calls",
           all("{0}(".format(name) in header for name in player_calls),
           player_calls)
+
+    # Sequencer's scripting surface speaks display frames, and the tick base
+    # is only there so the engine has room *between* frames for a sub-frame
+    # render. Measured in this build:
+    #
+    #   set_range(0, 24) -> 1.0 s, set_range(0, 24000) -> 1000 s
+    #   add_key(24) -> tick 24000, add_key(24000) -> tick 24,000,000
+    #   get_time() with no unit reads display frames
+    #
+    # So nothing here may multiply a frame by the tick base. That mistake is
+    # caught by no read-back -- every call accepts the wrong number in
+    # silence -- and it is invisible while the tick base equals the display
+    # rate, which is how this repo held the opposite belief for so long.
+    animation_source = ""
+    animation_path = os.path.join(
+        unreal_root, "mlender_unreal", "animation.py")
+    if os.path.isfile(animation_path):
+        with open(animation_path, encoding="utf-8") as handle:
+            animation_source = handle.read()
+    check("the sequence is built on the engine's tick base, not the fps",
+          "set_tick_resolution(" in animation_source
+          and "SEQUENCE_TICK_RESOLUTION" in animation_source
+          and not re.search(
+              r"set_tick_resolution\(\s*unreal\.FrameRate\(int\(round\(fps",
+              animation_source),
+          receiver.constants.SEQUENCE_TICK_RESOLUTION)
+    check("and that base leaves room under a frame",
+          receiver.constants.SEQUENCE_TICK_RESOLUTION >= 1000,
+          receiver.constants.SEQUENCE_TICK_RESOLUTION)
+    # Every range and key is handed a display frame, so the scale from a
+    # package frame to a sequence time is one and the base never multiplies.
+    check("the sequence's frame scale is one, not the tick base",
+          "frame_scale = 1.0" in animation_source
+          and not re.search(r"frame_scale\s*=\s*float\(resolution",
+                            animation_source),
+          animation_path)
+    # The bare name is gone. It may survive only where a call really does
+    # take ticks -- the material parameter API, which has no time unit at all
+    # -- and there it is spelled so nobody mistakes it for the general scale.
+    check("and nothing is left calling that scale ticks",
+          "ticks_per_frame" not in animation_source
+          .replace("_ticks_per_frame", "")
+          .replace("material_ticks_per_frame", ""),
+          animation_path)
+    # The unit is named at the calls that have one, so a changed default
+    # cannot move every key in a shot without a word.
+    check("key reads and writes name their time unit",
+          "time_unit" in animation_source
+          and "TICK_RESOLUTION" in animation_source
+          and "DISPLAY_RATE" in animation_source,
+          animation_path)
     data_header = ""
     data_path = os.path.join(source, "Public", "MLMotionData.h")
     if os.path.isfile(data_path):

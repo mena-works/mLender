@@ -10,7 +10,7 @@ Everything under "measured" was read off a live Unreal 5.8.1 session or solved
 from a probe, never guessed. tests/docs/unreal_calibration.md records how.
 """
 
-BUILD_VERSION = "2.83.0"
+BUILD_VERSION = "2.84.0"
 
 TOOL_NAME = "mLender"
 
@@ -135,6 +135,31 @@ CAMERA_FOLDER = ACTOR_FOLDER_ROOT + "/mLender Cameras"
 
 # The Level Sequence that carries light, camera and visibility keys.
 ANIMATION_SEQUENCE_NAME = "ML_Sequence"
+
+# Ticks to a second in the sequences this tool builds. The engine's own
+# default, and deliberately not the display rate: a sequence whose tick
+# resolution equals its frame rate has one tick per frame, and a sub-frame
+# render then has nowhere to put its samples. Measured against this shot's
+# own sequence -- at one tick per frame the Movie Render Queue's eight
+# temporal samples over a 180 degree shutter are 0.0625 of a tick apart and
+# all land on the same instant, so accumulated motion blur accumulates
+# eight copies of one pose. At 24000 the same eight sit 62.5 ticks apart.
+#
+# This is the engine's business, not the script's. Sequencer's Python surface
+# takes **display frames** everywhere -- measured on a sequence at 24000/24:
+# set_range(0, 24) is one second while set_range(0, 24000) is a thousand;
+# add_key(FrameNumber(24)) lands on tick 24000 while add_key(24000) lands on
+# tick 24,000,000; get_time() with no unit reads display frames; and the
+# player's position runs at the display rate
+# (PlayPosition.SetTimeBase(DisplayRate, TickResolution, ...)). So the tool
+# hands Maya frame numbers through unchanged and never multiplies by this
+# number.
+#
+# The repo believed the opposite for a long time and could not have found
+# out: while the tick base equalled the display rate the two units were the
+# same number, so no measurement could tell them apart. Raising the base is
+# what separated them.
+SEQUENCE_TICK_RESOLUTION = 24000
 
 # How many objects one Level Sequence carries before the shot is split into
 # sub-sequences. Measured: a shot of 7562 bindings in one sequence -- 14383

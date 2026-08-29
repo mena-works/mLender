@@ -489,6 +489,10 @@ def import_scene_package(
             package_data, unreal_scale, metre_scale, power_scale, warnings,
             package_folder=package_folder, actors_by_path=actors_by_path,
             motion=motion, discard_unresolved=include_paths is not None,
+            # Which camera the cut points at. The cameras pass already chose
+            # it -- the one Maya marks renderable, or the one asked for -- and
+            # a second choice here would be a second opinion nobody asked for.
+            active_camera=camera_result.get("active", ""),
         )
     else:
         skipped_kinds.append("animation")
@@ -532,6 +536,9 @@ def import_scene_package(
         "dome_count": light_result["dome_count"],
         "camera_count": camera_result["camera_count"],
         "active_camera": camera_result["active"],
+        # Which camera the sequence is cut to, which is not the same
+        # question: a shot can hold a camera the cut never names.
+        "cut_camera": animation_result.get("cut_camera", ""),
         "skeletal_count": len(skeletal_actors(actors)),
         "as_rig_count": as_result["as_rig_count"],
         "as_skeletal_actors": as_result["as_skeletal_actors"],

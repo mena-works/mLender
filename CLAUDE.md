@@ -1014,17 +1014,39 @@ Kullanıcının elle doğrulaması gereken adımlar:
 - ❌ Sequencer testini track ve key sayarak yazma; ikisi de bu hatada
   **doğruydu** (73 track, 1.5 M anahtar) ve hiçbiri objesini bulamıyordu.
   `locate_bound_objects` ile her binding'in objesini bulduğunu assert et
-- ❌ Sekansı motorun varsayılan tick çözünürlüğüyle bırakma; 24000'e karşı 24
-  fps'te motorun iki yarısı **birbiriyle çelişiyor**: değerlendirme section
-  aralığını tick okuyor, editörün cetveli ve `get_end_frame_seconds` aynı
-  sayıyı kare okuyor. Ölçüldü: `set_range(0, 24000)` → 0..1000 saniye,
-  `set_range_seconds(0, 1)` → 0..24. Sonuç, 520 karelik çekimin 520000'lik
-  cetvelle açılması. `set_tick_resolution(fps)` ile bire bir yapınca ikisi de
-  aynı sayıyı okuyor (0..25 → 0..1.042 sn, anahtar 0/24 → 0/50/100)
-- ❌ Sequencer'da display frame ile tick'i karıştırma; `add_key`,
-  `set_range` ve oynatma konumu **tick**. Ölçüldü: 24 karede 100→900
-  anahtarlanan sekans tick 12000'de 500, "kare 12"de 100.40 okuyor.
-  Display rate yalnız cetveli adlandırır
+- ❌ Sekansın tick tabanını fps'e sabitleyerek birim karışımını "çözme";
+  gizliyor. Gerçek sorun şu: section aralığı ve anahtarlar **tick**,
+  `set_playback_start/end` ise **kare** alıyor. Taban fps'e eşitlenince iki
+  birim aynı sayı olur ve hata görünmez — ama kareye **tek tick** düşer, yani
+  MRQ'nun 8 zamansal örneği 0.0625 tick arayla **aynı ana** düşer ve
+  biriktirilen motion blur aynı pozun sekiz kopyasını biriktirir.
+  Çözüm birimleri ayırmak: `SEQUENCE_TICK_RESOLUTION = 24000`, `first/last`
+  tick, `set_playback_*` kare. Ölçüldü (600 karelik gerçek şot): tick 24000/1,
+  display 24/1 → 1000 tick/kare, cetvel 0.042..25.000 sn, 13 binding’in hepsi
+  çözülüyor, 8 örnek 62.5 tick arayla ayrı anlarda
+- ❌ `set_tick_resolution`'ın **var olan** anahtarları taşıdığını sanma;
+  `MigrateFrameTimes` çağrılmasına rağmen bu build'de taşımadı. Ölçüldü:
+  taban 24→24000 oldu, ham tick'ler `[1, 2, 3]`'te kaldı, yani her anahtar
+  saniyenin binde birine çöktü. Var olan bir sekansın tabanını yükseltme;
+  sekansı **yeniden kur**
+- ❌ Interchange'in sıkışmış anahtarlarını kendi tabanınla tespit etme;
+  `span < ticks_per_frame` taban 24000'de "1000 kareden kısa mı" demeye
+  başlıyor — 600 karelik şotta tesadüfen doğru, daha uzununda sessizce
+  yanlış. Kaynak sekansın **kendi** tick/kare oranına bak
+- ❌ Sequencer'ın Python yüzeyini tick sanma; **kare** alıyor. Bu depo uzun
+  süre tersini yazdı ve **ölçerek doğrulayamazdı**: bütün ölçümler tick
+  tabanı = display rate olan bir sekansta alınmıştı, orada iki birim aynı
+  sayı. Taban 24000'e çıkınca ayrıştılar; ölçüldü (24000/24):
+  `set_range(0, 24)` → **1.0000 sn**, `set_range(0, 24000)` → 1000 sn;
+  `add_key(FrameNumber(24))` → **tick 24000**, `add_key(FrameNumber(24000))`
+  → tick 24.000.000. Kaynak da böyle diyor: `AddKey`/`GetTime`'ın
+  `EMovieSceneTimeUnit` varsayılanı `DisplayRate`, `SetRange`'in tick sürümü
+  **hiç yok**. Kareyi tick tabanıyla çarpma; hiçbir geri okuma yakalamaz
+- ❌ Anahtar zamanını birim belirtmeden okuyup tick sanma; `get_time()`
+  **display kare** döndürüyor. Tick sanıp tick/kare'ye bölmek, anahtarları
+  kare 600000'de olan bir sekansı "kare 1..600" diye okutur — bu oldu, ve
+  "17 kontrolün 17'si geçti" diyen bir doğrulama bozuk sekansı onayladı.
+  Okurken de yazarken de birimi **adıyla** ver
 - ❌ `LevelSequenceEditorBlueprintLibrary.set_current_time`'i tick sanma; o da
   **kare** alıyor. Ölçüldü: 260 verince cache 10.833 sn (21.7 sn'lik çekimin
   tam ortası) okuyor. Tick'e çevirmek için 1000 ile çarpmak playhead'i kare

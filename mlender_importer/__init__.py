@@ -13,7 +13,7 @@ shows BUILD_VERSION and it is how a user confirms which build is loaded.
 bl_info = {
     "name": "mLender",
     "author": "mena-works",
-    "version": (2, 83, 0),
+    "version": (2, 84, 0),
     # 4.1 is the oldest build this is actually tested on, and the code
     # relies on APIs that arrived in 4.0. Claiming 3.6 was untrue.
     "blender": (4, 1, 0),

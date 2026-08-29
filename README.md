@@ -809,13 +809,46 @@ same package starts on the same frame in Blender and in Unreal.
 | mesh visibility | visibility track, keyed `True` for visible |
 | keyed material parameters | a component material track on the mesh slot, scalar and colour |
 
+The sequence is built on the engine's own tick base — **24000 ticks to a
+second**, against a display rate of 24 — rather than one tick per frame. That
+matters for rendering: the Movie Render Queue splits an open shutter into
+`TemporalSampleCount` steps, so with one tick to a frame eight samples over a
+180° shutter are 0.0625 of a tick apart and land on the same instant —
+accumulated motion blur accumulating eight copies of one pose. At 24000 the
+same eight sit 62.5 ticks apart.
+
+The base is the engine's business, not the script's. **Every call in
+Sequencer's Python surface takes display frames**, and the tool hands it Maya
+frame numbers unchanged. Measured in this build on a sequence at 24000/24:
+
+| call | given 24 | given 24000 |
+|---|---|---|
+| `section.set_range(0, n)` | end **1.0000 s** | end 1000.0000 s |
+| `channel.add_key(FrameNumber(n), …)` | tick **24000** | tick 24,000,000 |
+| `key.get_time()` with no unit | reads display frames | — |
+
+`AddKey` and `GetTime` take an `EMovieSceneTimeUnit` that defaults to
+`DisplayRate`; `SetRange` has no tick form at all. The tool names the unit at
+every call rather than leaning on that default. Read the times back in the
+default unit and divide by ticks-per-frame and a sequence whose keys sit at
+frame 600000 reads back as "frames 1–600" — which is how a broken one passed
+a check once.
+
+Raising an **existing** sequence's tick base does not move its keys.
+`set_tick_resolution` calls the engine's own `MigrateFrameTimes`, but measured
+here it moved the playback range and left the channel keys on their raw tick
+numbers — base 24 → 24000 with keys still at `[1, 2, 3]`. Send again instead;
+the sequence is rebuilt.
+
 Four things about Sequencer were measured rather than assumed, and each of them
 accepts a wrong value without complaining:
 
-- **The Python surface is entirely in ticks.** `add_key`, `set_range`,
-  `set_playback_start`/`end` and the playback position all take tick numbers;
-  the display rate only labels the ruler. A sequence keyed 100 → 900 over 24
-  frames reads 500 at tick 12000 and **100.40** at "frame 12".
+- **The Python surface takes display frames**, per the table above, and the
+  underlying tick resolution only decides how much room there is between two
+  frames. `set_playback_end(33)` reads back as 1.375 s at 24 fps;
+  `set_playback_end(33000)` as 1375 s. Nothing here may multiply a frame by
+  the tick base — no read-back catches it, because every call accepts the
+  wrong number in silence.
 - **A component property is keyed on the component's own binding**, not the
   actor's.
 - **Visibility is keyed `True` for visible**; the engine's own flag is `hidden`,
