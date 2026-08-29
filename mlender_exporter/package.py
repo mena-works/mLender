@@ -279,6 +279,7 @@ def export_scene(
             for record in mesh_records:
                 if record.get("shape_path") in smoothing["shapes"]:
                     previous = dict(record.get("subdivision") or {})
+                    smoothing.setdefault("claimed", {})[id(record)] = previous
                     record["subdivision"] = {
                         "enabled": False,
                         "source": "applied_at_export",
@@ -596,6 +597,31 @@ def export_scene(
         for record in particle_list:
             if under_roots(record.get("particle_path"), cached):
                 record["alembic"] = True
+        # A mesh is only smoothed usefully if it ends up in the cache. The set
+        # aimed at earlier is everything that deforms; what the cache actually
+        # took is what moves, and the difference rides the FBX -- where the
+        # smoothing does not reach. Measured on an animated test: 55 smoothed,
+        # 37 cached. Leaving the other 18 marked "applied_at_export" would tell
+        # every receiver not to subdivide a mesh that arrived at its base cage,
+        # which is the same kind of false claim this option already had to have
+        # taken back once.
+        reclaimed = 0
+        for record in mesh_records:
+            if record.get("alembic"):
+                continue
+            previous = (smoothing.get("claimed") or {}).get(id(record))
+            if previous is None:
+                continue
+            record["subdivision"] = previous
+            reclaimed += 1
+        if reclaimed:
+            warnings.append(
+                "{0} mesh(es) were smoothed for a cache they did not end up "
+                "in -- they do not move, so they ride the FBX and arrive at "
+                "their base cage. Their records ask the receiver to subdivide "
+                "them after all.".format(reclaimed)
+            )
+
         fbx_shapes = [
             shape for shape in mesh_shapes
             if not under_roots(parent_of(shape), cached)
