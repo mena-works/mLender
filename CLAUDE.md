@@ -1033,6 +1033,25 @@ Kullanıcının elle doğrulaması gereken adımlar:
   `span < ticks_per_frame` taban 24000'de "1000 kareden kısa mı" demeye
   başlıyor — 600 karelik şotta tesadüfen doğru, daha uzununda sessizce
   yanlış. Kaynak sekansın **kendi** tick/kare oranına bak
+- ❌ Bir klasördeki asset'leri "eski" diye toplu silme; yalnız **o koşunun
+  yeniden kuracağını** sil. `create_asset` yüklü bir asset'in üzerine
+  yazmadığı için aynı adlının gitmesi gerekir; gerisi başkasının işi olabilir.
+  Yaşandı: bir tazeleme betigi `/Game/mLender/Sequences` altındaki üç
+  sekansı birden sildi ve kullanıcının **elle kurduğu** satırları (sayacın
+  altı rakamı, skeletal animasyon + görünürlük anahtarları) götürdü.
+  Dokunmadığını ayrıca **assert et**
+- ❌ `delete_asset`'i level kaydına bağlı sanma; **anında diske yazıyor.**
+  "Koşu kontrolden düştü, kaydetmedi" silinen asset'i geri getirmez
+- ❌ Headless'ta `CopyBindings`/`PasteBindings` bekleme;
+  `ULevelSequenceEditorSubsystem`'in ikisi de `GetActiveSequencer()` ile
+  başlıyor ve açık bir Sequencer penceresi yoksa sessizce dönüyor. Satırı
+  alan alan yeniden kur; skeletal bölümün `params`'ını **bütün olarak**
+  kopyala, yoksa animasyon asset'i boş kalır ve sayılar yine tutar
+- ❌ İki sekans arasında anahtar taşırken ham tick kopyalama; taban farklı
+  olabilir (ölçüldü: 1'e karşı 1000 tick/kare). `get_time(DISPLAY_RATE)` ve
+  `set_range` **kare** konuşur, yani kare olarak kopyalamak taban-bağımsızdır.
+  Ve anahtar **sayısını** değil, hangi **karede** durduğunu assert et; yanlış
+  birimle taşınan bir satır sayıca kusursuz görünür
 - ❌ Sequencer'ın Python yüzeyini tick sanma; **kare** alıyor. Bu depo uzun
   süre tersini yazdı ve **ölçerek doğrulayamazdı**: bütün ölçümler tick
   tabanı = display rate olan bir sekansta alınmıştı, orada iki birim aynı
