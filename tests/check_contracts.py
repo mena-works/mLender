@@ -586,6 +586,39 @@ def main():
             dict(exporter_presets.DEFAULT_SETTINGS))),
     )
 
+    # A dome light that emitted nothing, in three parts. Each is checked
+    # because each on its own was enough to leave the scene black.
+    print(chr(10) + "unreal dome light")
+    from mlender_unreal import lights as receiver_lights
+
+    check(
+        "only .hdr is treated as cubemap-capable",
+        receiver_lights._is_cubemap_format("env.hdr")
+        and not receiver_lights._is_cubemap_format("env.exr"),
+        "",
+    )
+    # _is_black reads r/g/b and nothing else, so a stand-in is enough and
+    # does not tie the check to whatever the stub happens to define.
+    class _Colour(object):
+        def __init__(self, r, g, b):
+            self.r, self.g, self.b = r, g, b
+
+    black = _Colour(0, 0, 0)
+    lit = _Colour(10, 0, 0)
+    check(
+        "a black colour is recognised as one that would erase a cubemap",
+        receiver_lights._is_black(black) and not receiver_lights._is_black(lit),
+        "",
+    )
+    # The sibling lookup only answers for a file that is actually there.
+    check(
+        "no cubemap sibling is invented when none is on disk",
+        receiver_lights._cubemap_sibling(
+            "Z:/nowhere/does_not_exist.exr") == "",
+        "",
+    )
+
+
     print("\nunreal compiled module")
     # The movers play from a C++ actor, and the Python addresses it by class
     # and property name across a reflection boundary nothing type-checks.

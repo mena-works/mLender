@@ -412,6 +412,35 @@ def apply_ies_profile(component, record, label, warnings):
     return True
 
 
+# Formats Unreal turns into a TextureCube when the image is lat-long.
+CUBEMAP_FORMATS = (".hdr",)
+
+
+def _is_cubemap_format(path):
+    return os.path.splitext(str(path or ""))[1].lower() in CUBEMAP_FORMATS
+
+
+def _cubemap_sibling(path):
+    """A file beside this one that Unreal can read as a cubemap."""
+    base = os.path.splitext(str(path or ""))[0]
+    for extension in CUBEMAP_FORMATS:
+        candidate = base + extension
+        if os.path.isfile(candidate):
+            return candidate
+    return ""
+
+
+def _is_black(colour):
+    """Whether a colour would multiply a cubemap down to nothing."""
+    for name in ("r", "g", "b"):
+        try:
+            if float(getattr(colour, name)) > 0.0:
+                return False
+        except Exception:
+            return False
+    return True
+
+
 def apply_dome_texture(component, record, warnings):
     """The dome HDR as the sky light cubemap.
 
@@ -426,6 +455,21 @@ def apply_dome_texture(component, record, warnings):
     label = record.get("name") or "Dome"
     if not path:
         return False
+    # Only a lat-long .hdr becomes a TextureCube; an .exr of the same
+    # environment lands as a Texture2D and cannot drive a sky light. Rather
+    # than fail on a scene that is not wrong -- Arnold reads either -- a
+    # sibling in a cubemap-capable format is used when one is sitting there,
+    # and the substitution is reported.
+    if not _is_cubemap_format(path):
+        sibling = _cubemap_sibling(path)
+        if sibling:
+            warnings.append(
+                'Dome light "{0}" references "{1}", which Unreal imports as a '
+                "flat texture; the matching \"{2}\" beside it was used "
+                "instead.".format(label, os.path.basename(path),
+                                  os.path.basename(sibling))
+            )
+            path = sibling
     if not os.path.isfile(path):
         warnings.append(
             'Dome light "{0}" references "{1}", which is not on disk, so the '
@@ -433,13 +477,23 @@ def apply_dome_texture(component, record, warnings):
         )
         return False
 
+    # "_cube", and reused only when it really is one. The environment often
+    # arrives twice -- once as the .exr a material sampled, once as the .hdr
+    # this needs -- and both reduce to the same asset name. Loading whatever
+    # sits at that name gave back the flat Texture2D from the other import,
+    # so the dome kept its captured scene and emitted nothing while the file
+    # it wanted was on disk and importable. A name is not a type.
     name = safe_asset_name(
         os.path.splitext(os.path.basename(path))[0], "Dome"
-    )
+    ) + "_cube"
     destination = "{0}/{1}".format(TEXTURE_CONTENT_PATH, name)
     asset = None
     if unreal.EditorAssetLibrary.does_asset_exist(destination):
-        asset = unreal.EditorAssetLibrary.load_asset(destination)
+        existing = unreal.EditorAssetLibrary.load_asset(destination)
+        if isinstance(existing, unreal.TextureCube):
+            asset = existing
+        else:
+            unreal.EditorAssetLibrary.delete_asset(destination)
     if asset is None:
         task = unreal.AssetImportTask()
         task.filename = path
@@ -510,9 +564,28 @@ def create_sky_light(dome_records, unreal_scale, warnings):
     _set_if_present(component, "intensity", max(0.0, scalar(
         record.get("effective_intensity"), scalar(record.get("intensity"), 1.0)
     )))
-    _set_if_present(component, "light_color", light_colour(record))
-
-    apply_dome_texture(component, record, warnings)
+    # The colour is written *after* the texture, and only when no texture
+    # took: an Arnold dome whose colour is driven by a file keeps [0, 0, 0] in
+    # the attribute itself -- that is the unconnected fallback, not the
+    # colour -- and on a sky light the colour multiplies the cubemap, so
+    # copying it literally turns a working HDRI black. Measured on a
+    # character: a studio HDRI dome that emitted nothing at all.
+    textured = apply_dome_texture(component, record, warnings)
+    if textured:
+        colour = light_colour(record)
+        if _is_black(colour):
+            _set_if_present(component, "light_color",
+                            unreal.Color(r=255, g=255, b=255, a=255))
+            warnings.append(
+                'Dome light "{0}" stored a black colour behind its texture, '
+                "which is Arnold's unconnected fallback rather than a colour; "
+                "white was used so the HDRI is not multiplied away.".format(
+                    record.get("name") or "Dome")
+            )
+        else:
+            _set_if_present(component, "light_color", colour)
+    else:
+        _set_if_present(component, "light_color", light_colour(record))
     for extra in dome_records[1:]:
         warnings.append(
             'Dome light "{0}" was not applied: Unreal has one sky light per '
