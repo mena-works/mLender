@@ -426,7 +426,7 @@ def split_hidden_meshes(mesh_shapes):
     return kept, hidden
 
 
-def smooth_subdivided_meshes(mesh_shapes, warnings=None):
+def smooth_subdivided_meshes(mesh_shapes, warnings=None, cached_shapes=None):
     """Subdivide, in the scene, every mesh whose record asks to be subdivided.
 
     A subdivision record travels fine and the Blender receiver builds a
@@ -452,17 +452,18 @@ def smooth_subdivided_meshes(mesh_shapes, warnings=None):
         record = subdivision_info(shape)
         if not record.get("enabled"):
             continue
-        # A skinned mesh cannot be helped here, and saying otherwise was worse
-        # than doing nothing: FBX carries a skinned mesh as its base geometry
-        # plus weights, so a polySmooth sitting downstream of the skinCluster
-        # is simply not exported. Measured on a character: the scene really did
-        # go from 140726 faces to 592955, and the FBX grew 3.8% -- 61 of the 64
-        # meshes asking for subdivision are skinned and none of them travelled.
-        # Making it work means subdividing the bind mesh and transferring
-        # weights, which is a rigging decision and not an exporter's to take.
+        # Which route the mesh takes decides whether smoothing it is worth
+        # anything. FBX carries a skinned mesh as its base geometry plus
+        # weights, so a polySmooth downstream of the skinCluster never reaches
+        # the file -- measured: the scene went 140726 -> 592955 faces and the
+        # FBX grew 3.8%, because only the unskinned meshes travelled. Alembic
+        # sampels the evaluated shape instead, and the same mesh went 7203 ->
+        # 28578 points in the cache. So a skinned mesh is smoothed exactly
+        # when it is going into the cache.
         if cmds.ls(cmds.listHistory(shape) or [], type="skinCluster"):
-            skipped_skinned.append(shape)
-            continue
+            if shape not in (cached_shapes or ()):
+                skipped_skinned.append(shape)
+                continue
         iterations = record.get("render_iterations")
         try:
             divisions = max(1, min(3, int(iterations)))
@@ -490,12 +491,14 @@ def smooth_subdivided_meshes(mesh_shapes, warnings=None):
         )
     if skipped_skinned:
         warnings.append(
-            "{0} skinned mesh(es) ask to be subdivided and were left alone: "
-            "FBX carries a skinned mesh as its base geometry plus weights, so "
-            "subdividing it here would not reach the file. They arrive at "
-            "their base cage. Subdividing the bind mesh and re-transferring "
-            "weights is the way, and it is a rigging change rather than an "
-            "export one.".format(len(skipped_skinned))
+            "{0} skinned mesh(es) ask to be subdivided and were left alone "
+            "because they ride the FBX, which carries a skinned mesh as its "
+            "base geometry plus weights -- subdividing here would not reach "
+            "the file, so they arrive at their base cage. An Alembic cache "
+            "does carry it (measured, 7203 points became 28578), so exporting "
+            "them through the cache is the way to have both the subdivision "
+            "and the deformation; the cost is that a cached mesh is frozen "
+            "and arrives without its rig.".format(len(skipped_skinned))
         )
     return context
 

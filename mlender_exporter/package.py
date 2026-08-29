@@ -248,7 +248,18 @@ def export_scene(
         # Before the records are read, so they describe the geometry the FBX
         # will actually carry.
         if apply_subdivision:
-            smoothing = smooth_subdivided_meshes(mesh_shapes, warnings)
+            # Which shapes the cache will take, worked out here so smoothing
+            # can tell the two routes apart. cache_animated_meshes widens it
+            # to everything that deforms; otherwise only the shapes the cache
+            # is the sole route for.
+            if cache_animated_meshes:
+                destined_for_cache = set(deformed_shapes(mesh_shapes))
+            elif export_alembic_cache:
+                destined_for_cache = set(cache_only_shapes(mesh_shapes))
+            else:
+                destined_for_cache = set()
+            smoothing = smooth_subdivided_meshes(
+                mesh_shapes, warnings, cached_shapes=destined_for_cache)
 
         # One material usually covers many meshes, so its channels are read
         # once and shared. A shader that baked is deliberately not cached:

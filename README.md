@@ -955,9 +955,27 @@ travelled. The scene measurement was real and proved nothing about the export;
 the number that mattered was the two FBXs side by side, 340 310 vertices
 against 353 096.
 
-Skinned meshes are now left alone and counted in a warning. Getting them
-subdivided means subdividing the bind mesh and transferring weights, which is
-a rigging change rather than an export one.
+**An Alembic cache does carry it.** The cache samples the evaluated shape, so
+a `polySmooth` sitting downstream of the `skinCluster` lands in the file --
+measured on the same mesh, 7203 points became 28578 in the `.abc` while the
+FBX did not move. So the choice is not between subdivision and animation, it
+is between subdivision and the **rig**:
+
+| | FBX | Alembic cache |
+|---|---|---|
+| animation | through the skeleton | per frame, exact |
+| subdivision | does not travel | travels |
+| in Unreal | SkeletalMesh, posable | GeometryCache, frozen |
+
+`apply_subdivision` therefore follows the route each mesh takes: a skinned
+mesh is smoothed when it is going into the cache and left alone when it rides
+the FBX, and the warning says which and what the alternative costs. The route
+itself is not a second rule invented here -- it is read from the same
+`cache_only_shapes` / `deformed_shapes` split the cache already uses.
+
+A mesh cannot take both routes in one package: a cached mesh leaves the FBX
+entirely, or it would arrive twice and be frozen once. Wanting both in Unreal
+means exporting the shot twice, once with the cache flags and once without.
 
 Records for smoothed meshes then say `subdivision.enabled = false` with
 `source = "applied_at_export"`. Without that the Blender receiver would build
