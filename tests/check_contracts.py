@@ -553,6 +553,39 @@ def main():
             .get("pars_body_mat") or []),
     )
 
+    # A preset key that export_scene does not accept is dropped on the way
+    # through, which this project has been bitten by before -- the setting
+    # then looks configurable and does nothing.
+    print(chr(10) + "hidden mesh exclusion")
+    import inspect
+
+    from mlender_exporter import presets as exporter_presets
+    from mlender_exporter import package as exporter_package
+
+    check(
+        "export_hidden_meshes is a preset key",
+        "export_hidden_meshes" in exporter_presets.DEFAULT_SETTINGS,
+        sorted(exporter_presets.DEFAULT_SETTINGS),
+    )
+    check(
+        "and it defaults to carrying them, as it always did",
+        exporter_presets.DEFAULT_SETTINGS.get("export_hidden_meshes") is True,
+        exporter_presets.DEFAULT_SETTINGS.get("export_hidden_meshes"),
+    )
+    signature = inspect.signature(exporter_package.export_scene)
+    check(
+        "export_scene accepts it, so the preset is not dropped",
+        "export_hidden_meshes" in signature.parameters,
+        sorted(signature.parameters),
+    )
+    check(
+        "export_kwargs passes it through",
+        "export_hidden_meshes" in exporter_presets.export_kwargs(
+            dict(exporter_presets.DEFAULT_SETTINGS)),
+        sorted(exporter_presets.export_kwargs(
+            dict(exporter_presets.DEFAULT_SETTINGS))),
+    )
+
     print("\nunreal compiled module")
     # The movers play from a C++ actor, and the Python addresses it by class
     # and property name across a reflection boundary nothing type-checks.

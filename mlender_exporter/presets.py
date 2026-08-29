@@ -30,6 +30,7 @@ DEFAULT_PRESET_NAME = "default"
 DEFAULT_SETTINGS = {
     "selected_only": False,
     "bake_procedurals": True,
+    "export_hidden_meshes": True,
     "bake_resolution": 1024,
     "collect_textures_into_package": False,
     "archive_package": False,
@@ -48,6 +49,7 @@ DEFAULT_SETTINGS = {
 EXPORT_KEYS = (
     "selected_only",
     "bake_procedurals",
+    "export_hidden_meshes",
     "bake_resolution",
     "collect_textures_into_package",
     "archive_package",

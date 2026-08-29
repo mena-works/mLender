@@ -120,6 +120,7 @@ def main(argv=None):
     overrides = {
         "selected_only": True if _has(argv, "--selected") else None,
         "bake_procedurals": False if _has(argv, "--no-bake") else None,
+        "export_hidden_meshes": False if _has(argv, "--no-hidden") else None,
         "collect_textures_into_package": True if _has(argv, "--collect")
         else None,
         "archive_package": True if _has(argv, "--archive") else None,

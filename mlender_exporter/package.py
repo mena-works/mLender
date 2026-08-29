@@ -100,12 +100,14 @@ from .mayautils import (
     maya_linear_unit,
     maya_path,
     meters_per_maya_unit,
+    node_label,
     parent_of,
 )
 from .meshes import (
     mesh_records as mesh_records_for,
     mesh_transforms,
     scene_mesh_shapes,
+    split_hidden_meshes,
     selected_light_count,
     visibility_animated,
     visibility_sample,
@@ -165,6 +167,7 @@ def export_scene(
     bake_resolution=DEFAULT_BAKE_RESOLUTION,
     collect_textures_into_package=False,
     export_animation=False,
+    export_hidden_meshes=True,
     frame_start=None,
     frame_end=None,
     frame_step=None,
@@ -212,6 +215,16 @@ def export_scene(
     tessellation = tessellate_scene(warnings)
     try:
         mesh_shapes = scene_mesh_shapes(selected_only)
+        if not export_hidden_meshes:
+            mesh_shapes, hidden_shapes = split_hidden_meshes(mesh_shapes)
+            if hidden_shapes:
+                names = [node_label(shape) for shape in hidden_shapes[:4]]
+                warnings.append(
+                    "Left out {0} hidden mesh(es) because export_hidden_meshes "
+                    "is off: {1}{2}.".format(
+                        len(hidden_shapes), ", ".join(names),
+                        ", ..." if len(hidden_shapes) > 4 else "")
+                )
         if not mesh_shapes:
             raise RuntimeError(
                 "Nothing selected contains an exportable mesh."

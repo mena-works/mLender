@@ -397,6 +397,35 @@ def visibility_info(mesh_shape, transform):
     return result
 
 
+def split_hidden_meshes(mesh_shapes):
+    """Separate the shapes whose transform Maya has hidden.
+
+    Carrying a hidden mesh and hiding it again on the receiver is the normal
+    behaviour and stays the default: a shot measured 4843 of 7106 meshes
+    hidden, and dropping them would have lost the colliders a later pass
+    wanted.
+
+    It only works while each mesh is its own actor. Interchange merges a
+    skinned character's meshes into **one** skeletal mesh, and then there is
+    no actor left to hide -- measured on a character: fifteen hidden meshes,
+    among them a Body_geoBase carrying the same material as the visible body,
+    arrived welded into the same asset and drew a second, T-posed body through
+    it. Hiding the section cannot help either, because the section is shared
+    with the real body.
+
+    So the caller may ask for them to be left out instead.
+    """
+    kept, hidden = [], []
+    for shape in mesh_shapes or []:
+        transform = parent_of(shape)
+        info = visibility_info(shape, transform) if transform else {}
+        if info.get("visible") is False:
+            hidden.append(shape)
+        else:
+            kept.append(shape)
+    return kept, hidden
+
+
 def subdivision_info(mesh_shape):
     """Report whether this mesh actually asks to be subdivided, and how.
 

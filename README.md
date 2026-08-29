@@ -924,6 +924,28 @@ because the slot does not say which. Renaming one of them in Maya resolves it.
 Picking one would be a guess, and this project has already shipped one name
 collision that drew the wrong shape.
 
+**A hidden mesh cannot be hidden once it has been welded into another.** The
+tool carries hidden meshes and hides them on the receiver, which is deliberate
+and stays the default: a shot measured 4843 of its 7106 meshes hidden, and
+dropping them would have lost colliders a later pass wanted. That only works
+while each mesh is its own actor. Interchange merges a skinned character's
+meshes into one skeletal mesh, and then there is no actor left to hide.
+
+Measured on a character: fifteen hidden meshes arrived welded into the same
+asset, among them a `Body_geoBase` — no skin cluster, so it does not deform,
+and the *same* material as the visible body — which drew a second, T-posed
+body through the posed one. Hiding the section cannot help, because that
+section is shared with the real body.
+
+So the choice is made at export instead, and only when asked:
+
+```bash
+mayapy -m mlender_exporter.batch --scene shot.ma --out packages --no-hidden
+```
+
+`export_hidden_meshes` defaults to **True**, so nothing changes for anyone who
+does not ask. What is left out is counted and named in the export warnings.
+
 Two routes that look right and are not, both tried:
 
 - `FbxImportUI.import_as_skeletal` turns *every* static cube into its own
