@@ -447,9 +447,21 @@ def smooth_subdivided_meshes(mesh_shapes, warnings=None):
     if warnings is None:
         warnings = []
     context = {"nodes": [], "shapes": set()}
+    skipped_skinned = []
     for shape in mesh_shapes or []:
         record = subdivision_info(shape)
         if not record.get("enabled"):
+            continue
+        # A skinned mesh cannot be helped here, and saying otherwise was worse
+        # than doing nothing: FBX carries a skinned mesh as its base geometry
+        # plus weights, so a polySmooth sitting downstream of the skinCluster
+        # is simply not exported. Measured on a character: the scene really did
+        # go from 140726 faces to 592955, and the FBX grew 3.8% -- 61 of the 64
+        # meshes asking for subdivision are skinned and none of them travelled.
+        # Making it work means subdividing the bind mesh and transferring
+        # weights, which is a rigging decision and not an exporter's to take.
+        if cmds.ls(cmds.listHistory(shape) or [], type="skinCluster"):
+            skipped_skinned.append(shape)
             continue
         iterations = record.get("render_iterations")
         try:
@@ -475,6 +487,15 @@ def smooth_subdivided_meshes(mesh_shapes, warnings=None):
             "Subdivided {0} mesh(es) into the export at their own scheme and "
             "iteration count; receivers are told not to subdivide them "
             "again.".format(len(context["shapes"]))
+        )
+    if skipped_skinned:
+        warnings.append(
+            "{0} skinned mesh(es) ask to be subdivided and were left alone: "
+            "FBX carries a skinned mesh as its base geometry plus weights, so "
+            "subdividing it here would not reach the file. They arrive at "
+            "their base cage. Subdividing the bind mesh and re-transferring "
+            "weights is the way, and it is a rigging change rather than an "
+            "export one.".format(len(skipped_skinned))
         )
     return context
 

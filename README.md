@@ -938,13 +938,26 @@ export can bake it in:
 mayapy -m mlender_exporter.batch --scene shot.ma --out packages --smooth
 ```
 
-`apply_subdivision` defaults to **False**. When it is on, each mesh that asks
-for subdivision is smoothed at its own scheme and iteration count -- never
-blanket, for the same reason `subdivision_info` is picky: rounding off hard
-surface geometry that was never modelled smooth is worse than leaving it. The
-scene is not changed; the `polySmooth` nodes go away again in a `finally`,
-beside the NURBS stand-ins. Measured: 140 726 faces became 592 955, a ratio of
-4.21, and came back to 140 726 afterwards.
+`apply_subdivision` defaults to **False**. When it is on, each **unskinned**
+mesh that asks for subdivision is smoothed at its own scheme and iteration
+count -- never blanket, for the same reason `subdivision_info` is picky:
+rounding off hard surface geometry that was never modelled smooth is worse
+than leaving it. The scene is not changed; the `polySmooth` nodes go away
+again in a `finally`, beside the NURBS stand-ins.
+
+**A skinned mesh cannot be helped this way, and the first version of this
+claimed otherwise.** FBX carries a skinned mesh as its base geometry plus
+weights, so a `polySmooth` downstream of the `skinCluster` never reaches the
+file. Measured on a character: the scene did go from 140 726 faces to
+592 955 -- a ratio of 4.21 -- and the FBX grew by **3.8%**, because 61 of the
+64 meshes asking for subdivision are skinned and only the three unskinned ones
+travelled. The scene measurement was real and proved nothing about the export;
+the number that mattered was the two FBXs side by side, 340 310 vertices
+against 353 096.
+
+Skinned meshes are now left alone and counted in a warning. Getting them
+subdivided means subdividing the bind mesh and transferring weights, which is
+a rigging change rather than an export one.
 
 Records for smoothed meshes then say `subdivision.enabled = false` with
 `source = "applied_at_export"`. Without that the Blender receiver would build
