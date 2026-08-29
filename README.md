@@ -893,6 +893,37 @@ on `StaticMeshActor`, so those four skeletal actors landed in the level and were
 then ignored: unmatched, unnamed, still holding the FBX's placeholder materials.
 The fix was to stop ignoring them, not to reconfigure the import.
 
+**A slot name says which material, not which object.** Interchange collapses a
+skinned character into **one** skeletal mesh carrying a slot per shading group,
+while the package still describes the many meshes Maya had. Matching each slot
+only against the record whose name the actor took then leaves the rest holding
+placeholders — measured on a character: the actor arrived with 33 slots, the
+record it matched held 1, and 3 materials were built for a scene that has 29.
+
+So a slot that its own record cannot explain is looked up across the **whole
+package**, and Interchange's uniquifying `_ncl_N` tail is stripped first. Same
+character, same package: 29 materials, and the unmatched slots fell from 33 to
+5. That lookup is tried **last**, after the positional cases — a shared mesh
+asset carries the slot names of whichever mesh brought it, so there the index
+is the evidence and the name is not.
+
+The five that remain are not a failure to match; they are a scene the name
+cannot resolve. A referenced rig brings its own copy of a shader under a
+namespace, so the package really does hold two different materials called
+`lambert20` — `lambert20` and `Character_Pars_Rigging:Model:lambert20`, on
+`scalp2` and its namespaced twin. Interchange hit the same collision and spelled
+the second slot `lambert20_ncl_1`. Nothing in the slot says which is wanted, so
+**both candidates are named in a warning and neither is assigned**:
+
+```text
+slot 0 ("lambert20") names 2 different Maya materials
+(Character_Pars_Rigging:Model:lambert20, lambert20); nothing was assigned
+because the slot does not say which. Renaming one of them in Maya resolves it.
+```
+
+Picking one would be a guess, and this project has already shipped one name
+collision that drew the wrong shape.
+
 Two routes that look right and are not, both tried:
 
 - `FbxImportUI.import_as_skeletal` turns *every* static cube into its own

@@ -52,6 +52,7 @@ from .meshes import (
     discard_duplicate_meshes,
     find_mesh_record,
     actor_identities,
+    package_material_index,
     import_fbx_scene,
     imported_mesh_actors,
     mesh_component,
@@ -313,6 +314,11 @@ def import_scene_package(
     used = set()
     material_cache = {}
     assignments = []
+    # Built once: a slot whose name is not on the mesh record it matched is
+    # looked up here. Interchange gives a skinned character one skeletal mesh
+    # with a slot per shading group, so most of those slots name materials the
+    # package filed under the other meshes Maya had.
+    material_index = package_material_index(package_data)
     # Keyed on the Maya DAG path, which is what the sampled motion names its
     # objects by. A label would have to be guessed back into a path, and two
     # meshes of one short name in different groups would be indistinguishable.
@@ -353,7 +359,7 @@ def import_scene_package(
             hidden_actors += 1
         names = assign_materials(
             actor, record, material_cache, package_folder,
-            build_material, warnings,
+            build_material, warnings, package_index=material_index,
         )
         assignments.append({
             "actor": actor.get_actor_label(),

@@ -13,6 +13,7 @@ labour the Blender receiver uses.
 """
 
 import os
+import re
 
 import unreal
 
@@ -24,6 +25,9 @@ from .constants import (
     SCENE_IMPORT_PIPELINES,
 )
 from .utils import decoded_name, fbx_style_name, safe_asset_name, scalar
+
+# What Interchange appends to a material name it had to make unique.
+_NCL_SUFFIX = re.compile(r"_ncl_\d+$")
 
 
 def resolve_fbx_path(package_folder, package_data):
@@ -441,13 +445,73 @@ def find_mesh_record(actor, record_index, used):
     return candidates[0]
 
 
+def slot_lookup_key(name):
+    """The key a slot label is looked up by.
+
+    Interchange appends ``_ncl_N`` when it has to make a material name unique,
+    so the label an actor carries is not always the name the package stored --
+    measured: three of a character's slots arrived as ``lambert18_ncl_1``,
+    ``lambert20_ncl_1`` and ``lambert22_ncl_1`` for materials the package calls
+    ``lambert18``, ``lambert20`` and ``lambert22``.
+    """
+    text = safe_asset_name(str(name or ""), fallback="")
+    return _NCL_SUFFIX.sub("", text)
+
+
+def package_material_index(package_data):
+    """Every Maya material in the package, keyed by name.
+
+    A skinned character arrives from Interchange as **one** skeletal mesh
+    carrying a slot per shading group, while the package still describes it as
+    the many meshes Maya had. Matching a slot only against the record whose
+    name the actor took then leaves every other slot on a placeholder.
+    Measured on a character: the actor had 33 slots, the record it matched
+    held 1, and 30 of the 33 slot names were materials the package did carry --
+    on other records.
+
+    A slot name says which **material** it is, not which object it belongs to,
+    so this lookup is package-wide.
+
+    Each key holds the **candidates**, not one answer. A referenced rig brings
+    its own copy of a shader under a namespace, so a scene really can hold two
+    different materials called "lambert20" -- measured on a character: five
+    such names, and Interchange hit the same collision, spelling the second
+    one "lambert20_ncl_1". Nothing here can tell which slot wants which, so
+    the caller is handed both and says so rather than guessing; this project
+    has already shipped one name collision that drew the wrong shape.
+    """
+    index = {}
+    for record in (package_data or {}).get("meshes") or []:
+        for item in record.get("materials") or []:
+            name = item.get("material")
+            if not name:
+                continue
+            identity = item.get("material_full_name") or name
+            for key in (slot_lookup_key(name), slot_lookup_key(identity)):
+                if not key:
+                    continue
+                candidates = index.setdefault(key, [])
+                known = [
+                    c.get("material_full_name") or c.get("material")
+                    for c in candidates
+                ]
+                if identity not in known:
+                    candidates.append(item)
+    return index
+
+
 def assign_materials(actor, record, material_cache, package_folder,
-                     build_material, warnings):
+                     build_material, warnings, package_index=None):
     """Replace the FBX's placeholder materials with the rebuilt ones.
 
     Slots are matched by the material's own name rather than by index: the FBX
     importer names each material asset after the Maya shader that produced it,
     and an index is only right while nothing reorders.
+
+    ``package_index`` is the whole package's materials by name, consulted only
+    after this mesh's own records and after the positional cases below -- a
+    shared asset carries the slot names of the mesh that brought it, so there
+    the index is the evidence and the name is not.
     """
     component = mesh_component(actor)
     mesh = None
@@ -522,6 +586,33 @@ def assign_materials(actor, record, material_cache, package_folder,
                 # in slot order, so the index is the match.
                 item = records[index]
             else:
+                # Last: the package's other records. Interchange collapses a
+                # skinned character into one skeletal mesh holding a slot per
+                # shading group, and the record it matched describes only one
+                # of the meshes Maya had -- so the rest of the slots name
+                # materials that are in the package, just filed elsewhere.
+                candidates = (package_index or {}).get(
+                    slot_lookup_key(slot_label)) or []
+                if len(candidates) == 1:
+                    item = candidates[0]
+                elif candidates:
+                    # Naming them is the difference between a grey slot the
+                    # user can act on and one they cannot.
+                    warnings.append(
+                        'Mesh "{0}" slot {1} ("{2}") names {3} different Maya '
+                        "materials ({4}); nothing was assigned because the "
+                        "slot does not say which. Renaming one of them in "
+                        "Maya resolves it.".format(
+                            actor.get_actor_label(), index, slot_label,
+                            len(candidates),
+                            ", ".join(sorted(
+                                str(c.get("material_full_name")
+                                    or c.get("material"))
+                                for c in candidates)),
+                        )
+                    )
+                    continue
+            if item is None:
                 warnings.append(
                     'Mesh "{0}" slot {1} ("{2}") matched no Maya material; '
                     "the placeholder was left in place.".format(

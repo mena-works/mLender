@@ -497,6 +497,62 @@ def main():
         "",
     )
 
+    # Interchange collapses a skinned character into one skeletal mesh holding
+    # a slot per shading group, while the package still describes the many
+    # meshes Maya had. Measured on a character: the actor carried 33 slots,
+    # the record it matched held 1, and 30 of the 33 names were materials the
+    # package did carry -- filed under other meshes. The remaining 3 arrived
+    # with Interchange's uniquifying "_ncl_1" tail.
+    print(chr(10) + "unreal package-wide material lookup")
+    body = {"material": "pars_body_mat", "material_full_name": "ns:pars_body_mat"}
+    lam = {"material": "lambert20", "material_full_name": "lambert20"}
+    head_record = {"mesh": "head_geo",
+                   "materials": [{"material": "lambert1",
+                                  "material_full_name": "lambert1"}]}
+    package = {"meshes": [head_record,
+                          {"mesh": "body_geo", "materials": [body]},
+                          {"mesh": "watch_geo", "materials": [lam]}]}
+    index = receiver_meshes.package_material_index(package)
+    check(
+        "a slot names a material filed on another mesh record",
+        index.get("pars_body_mat") == [body],
+        sorted(index),
+    )
+    check(
+        "Interchange's _ncl_N tail is stripped before the lookup",
+        index.get(receiver_meshes.slot_lookup_key("lambert20_ncl_1")) == [lam],
+        receiver_meshes.slot_lookup_key("lambert20_ncl_1"),
+    )
+    # A referenced rig brings its own copy of a shader under a namespace, so a
+    # scene really does hold two different materials of one short name --
+    # measured: five of them on a character, and Interchange collided on the
+    # same names. Both are kept so the caller can name them; picking one would
+    # be the guess this project has already shipped once.
+    clash = {"meshes": [
+        {"mesh": "a", "materials": [{"material": "shared",
+                                     "material_full_name": "one:shared"}]},
+        {"mesh": "b", "materials": [{"material": "shared",
+                                     "material_full_name": "two:shared"}]},
+    ]}
+    clash_index = receiver_meshes.package_material_index(clash)
+    check(
+        "a name two materials answer to keeps both candidates",
+        len(clash_index.get("shared") or []) == 2,
+        len(clash_index.get("shared") or []),
+    )
+    # The same material reached through two records is not a collision.
+    same = {"meshes": [
+        {"mesh": "a", "materials": [body]},
+        {"mesh": "b", "materials": [dict(body)]},
+    ]}
+    check(
+        "one material on two meshes stays a single candidate",
+        len(receiver_meshes.package_material_index(same)
+            .get("pars_body_mat") or []) == 1,
+        len(receiver_meshes.package_material_index(same)
+            .get("pars_body_mat") or []),
+    )
+
     print("\nunreal compiled module")
     # The movers play from a C++ actor, and the Python addresses it by class
     # and property name across a reflection boundary nothing type-checks.
