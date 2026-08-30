@@ -104,6 +104,7 @@ from .mayautils import (
     parent_of,
 )
 from .meshes import (
+    hidden_branch_roots,
     mesh_records as mesh_records_for,
     mesh_transforms,
     restore_smoothing,
@@ -220,8 +221,11 @@ def export_scene(
     smoothing = {"nodes": [], "shapes": set()}
     try:
         mesh_shapes = scene_mesh_shapes(selected_only)
+        # Read once: the answer is a property of the scene, not of a mesh.
+        hidden_roots = hidden_branch_roots()
         if not export_hidden_meshes:
-            mesh_shapes, hidden_shapes = split_hidden_meshes(mesh_shapes)
+            mesh_shapes, hidden_shapes = split_hidden_meshes(mesh_shapes,
+                                                             hidden_roots)
             if hidden_shapes:
                 names = [node_label(shape) for shape in hidden_shapes[:4]]
                 warnings.append(
@@ -271,7 +275,7 @@ def export_scene(
             record
             for shape in mesh_shapes
             for record in mesh_records_for(shape, bake_context,
-                                           export_cache)
+                                           export_cache, hidden_roots)
         ]
         if apply_subdivision and smoothing.get("shapes"):
             # Say it was done, or a receiver that understands subdivision --

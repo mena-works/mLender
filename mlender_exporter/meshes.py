@@ -183,7 +183,8 @@ def color_sets(mesh_shape):
     return {"names": [str(name) for name in names], "current": current}
 
 
-def mesh_records(mesh_shape, bake_context=None, cache=None):
+def mesh_records(mesh_shape, bake_context=None, cache=None,
+                 hidden_roots=None):
     """One record per transform the shape hangs under.
 
     Instances share a shape, so everything read off the shape — materials,
@@ -209,7 +210,8 @@ def mesh_records(mesh_shape, bake_context=None, cache=None):
             "shape_path": mesh_shape,
             "geometry_key": key,
             "groups": group_path(transform),
-            "visibility": visibility_info(mesh_shape, transform),
+            "visibility": visibility_info(mesh_shape, transform,
+                                          hidden_roots),
             "subdivision": subdivision,
             "color_sets": sets,
             "materials": materials,
@@ -373,7 +375,47 @@ def visibility_sample(transform):
     return {"visible": visible}
 
 
-def visibility_info(mesh_shape, transform):
+def hidden_branch_roots():
+    """Full paths of every transform Maya has hidden, groups included.
+
+    Maya hides a whole branch by hiding the group above it, and a rig hides
+    its scaffolding exactly that way. Measured on an AdvancedSkeleton
+    character: thirty meshes all reading visibility=1 on their own transform
+    while a group over them was off -- eighteen template copies under
+    ``TemplateLayer``, the face fitting meshes under ``FaceFitSkeleton``, and
+    the blend shape bases ``Body_geoBase`` and ``Head_geoBase``, whose arms
+    and head are still at the reference pose.
+
+    Asking only a mesh's own transform calls all of them visible, and
+    Interchange welds them into the one skeletal mesh, so they arrive as a
+    second, T-posed body drawn through the posed one. Hiding them on the
+    receiver cannot help: there is no separate actor left to hide.
+    """
+    roots = set()
+    for transform in cmds.ls(type="transform", long=True) or []:
+        for attrs in TRANSFORM_VISIBILITY_ATTRS.values():
+            for attr in attrs:
+                if not attr_exists(transform, attr):
+                    continue
+                try:
+                    if not bool(cmds.getAttr(transform + "." + attr)):
+                        roots.add(transform)
+                except Exception:
+                    continue
+    return tuple(sorted(roots))
+
+
+def under_hidden_branch(path, roots):
+    """Whether a DAG path is, or hangs under, a hidden transform."""
+    if not path:
+        return False
+    for root in roots or ():
+        if path == root or path.startswith(root + "|"):
+            return True
+    return False
+
+
+def visibility_info(mesh_shape, transform, hidden_roots=None):
     """Per-ray visibility and holdout flags, shape and transform together.
 
     Only flags that differ from Maya's default are written. Everything here
@@ -394,10 +436,14 @@ def visibility_info(mesh_shape, transform):
         value, attr, _label = first_existing_attr(transform, attrs)
         if attr and isinstance(value, bool) and not value:
             result[semantic] = False
+    # A group being off hides everything under it, and the shapes below say
+    # nothing about it themselves.
+    if under_hidden_branch(transform, hidden_roots):
+        result["visible"] = False
     return result
 
 
-def split_hidden_meshes(mesh_shapes):
+def split_hidden_meshes(mesh_shapes, hidden_roots=None):
     """Separate the shapes whose transform Maya has hidden.
 
     Carrying a hidden mesh and hiding it again on the receiver is the normal
@@ -415,10 +461,11 @@ def split_hidden_meshes(mesh_shapes):
 
     So the caller may ask for them to be left out instead.
     """
+    roots = hidden_branch_roots() if hidden_roots is None else hidden_roots
     kept, hidden = [], []
     for shape in mesh_shapes or []:
         transform = parent_of(shape)
-        info = visibility_info(shape, transform) if transform else {}
+        info = visibility_info(shape, transform, roots) if transform else {}
         if info.get("visible") is False:
             hidden.append(shape)
         else:

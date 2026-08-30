@@ -586,6 +586,49 @@ def main():
             dict(exporter_presets.DEFAULT_SETTINGS))),
     )
 
+    # Maya hides a branch by hiding the group over it, and a rig hides its
+    # scaffolding that way. Every shape below still reads visibility=1, so a
+    # check that asks only the mesh's own transform lets thirty rig meshes --
+    # a T-posed Body_geoBase among them -- into a skeletal character.
+    from mlender_exporter import meshes as exporter_meshes
+
+    under = exporter_meshes.under_hidden_branch
+    roots = ("|rig|TemplateLayer", "|rig|Model|Body_geoBase")
+    check(
+        "a mesh under a hidden group is hidden",
+        under("|rig|TemplateLayer|Head_geo|Head_geoShape", roots),
+        "",
+    )
+    check(
+        "the hidden transform itself counts",
+        under("|rig|Model|Body_geoBase", roots),
+        "",
+    )
+    check(
+        "a sibling whose name merely starts the same does not",
+        not under("|rig|TemplateLayerBackup|thing", roots),
+        "",
+    )
+    check(
+        "a mesh outside the branch is left alone",
+        not under("|rig|Model|Body_geo|Body_geoShape", roots),
+        "",
+    )
+    for name in ("split_hidden_meshes", "mesh_records", "visibility_info"):
+        check(
+            "{0} takes the branch roots".format(name),
+            "hidden_roots" in inspect.signature(
+                getattr(exporter_meshes, name)).parameters,
+            sorted(inspect.signature(
+                getattr(exporter_meshes, name)).parameters),
+        )
+    check(
+        "and export_scene reads them once for the whole scene",
+        "hidden_branch_roots()" in inspect.getsource(
+            exporter_package.export_scene),
+        "",
+    )
+
     # A dome light that emitted nothing, in three parts. Each is checked
     # because each on its own was enough to leave the scene black.
     print(chr(10) + "unreal dome light")

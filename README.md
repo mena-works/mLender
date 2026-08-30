@@ -1004,6 +1004,28 @@ mayapy -m mlender_exporter.batch --scene shot.ma --out packages --no-hidden
 `export_hidden_meshes` defaults to **True**, so nothing changes for anyone who
 does not ask. What is left out is counted and named in the export warnings.
 
+**Maya hides a branch by hiding the group over it, and a rig hides its
+scaffolding that way.** A shape under a hidden group still reads
+`visibility = 1` on its own transform, so a check that asks only the mesh
+calls every one of them visible. Measured on an AdvancedSkeleton character:
+thirty such meshes, hidden by three groups rather than by themselves —
+
+| Hidden group | What hangs under it |
+|---|---|
+| `TemplateLayer` | eighteen template copies: head, eyes, teeth, tongue, lashes |
+| `FaceFitSkeleton` | the face fitting meshes and `FitEyeSphere` |
+| `Body_geoBase`, `Head_geoBase` | the blend shape bases, arms and head still at the reference pose |
+
+— and all thirty welded into the one skeletal mesh, drawn as a white, T-posed
+second body over the posed character: arms straight out at the shoulders and a
+second head behind the first. So the visibility question is asked of the whole
+DAG path, not of one transform. Measured after the fix: 108 scene meshes, 187
+hidden branch roots, 58 dropped, and `Body_geo` and `Head_geo` both kept.
+
+The same walk fills the `visibility` record, so on a scene that is *not*
+welded — anything unskinned — those meshes now arrive hidden rather than
+drawn, whether or not `--no-hidden` was asked for.
+
 Two routes that look right and are not, both tried:
 
 - `FbxImportUI.import_as_skeletal` turns *every* static cube into its own
